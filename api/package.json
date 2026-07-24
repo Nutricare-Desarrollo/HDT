@@ -1,0 +1,13 @@
+{
+  "name": "hdt-hojas-consumo-api",
+  "version": "1.0.0",
+  "description": "API (Azure Functions, Node v4) para la app de Hojas de Consumo (HDT)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "func start"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.5.0",
+    "pg": "^8.13.1"
+  }
+}

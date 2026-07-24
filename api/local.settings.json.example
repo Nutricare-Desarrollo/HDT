@@ -1,0 +1,18 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "AzureWebJobsStorage": "",
+
+    "PGHOST": "tu-servidor.postgres.database.azure.com",
+    "PGPORT": "5432",
+    "PGDATABASE": "hdt",
+    "PGUSER": "tu_usuario",
+    "PGPASSWORD": "tu_password",
+    "PGSSLMODE": "require",
+
+    "DOCINTEL_ENDPOINT": "https://nutricare-docintel.cognitiveservices.azure.com/",
+    "DOCINTEL_KEY": "pega-aqui-tu-clave-en-el-servidor-no-en-el-codigo",
+    "DOCINTEL_MODEL": "prebuilt-layout"
+  }
+}
