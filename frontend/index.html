@@ -129,6 +129,18 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .result-box p{color:var(--muted);margin:0 0 18px}
 .err-detail{background:#fbeae8;color:#a02b1f;border-radius:8px;padding:10px 12px;font-size:13px;text-align:left;margin:0 auto 18px;max-width:520px;word-break:break-word}
 .trbox{background:#d9f2e4;color:#12724a;border-radius:8px;padding:10px 12px;font-size:13px;text-align:left;margin:0 auto 18px;max-width:520px}
+
+/* Modal de carga */
+.load-modal{background:#fff;border-radius:14px;padding:34px 40px;max-width:360px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.spinner{width:56px;height:56px;margin:0 auto 18px;border:5px solid #dfeaf1;border-top-color:var(--accent);border-radius:50%;animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.load-modal h3{margin:0 0 6px;font-size:17px;color:var(--brand-d)}
+.load-modal p{margin:0;color:var(--muted);font-size:13.5px}
+
+/* Campos requeridos / inválidos */
+label .req{color:var(--danger);margin-left:2px}
+input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-shadow:0 0 0 3px rgba(192,57,43,.15)}
+
 @media(max-width:640px){
   main{padding:14px 10px 40px}
   .kv{grid-template-columns:1fr}
@@ -240,6 +252,15 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
   </main>
 </div>
 
+<!-- MODAL cargando -->
+<div id="loadModal" class="overlay hidden">
+  <div class="load-modal">
+    <div class="spinner"></div>
+    <h3>Procesando la hoja de consumo</h3>
+    <p>Estamos leyendo la imagen y extrayendo los datos. Esto puede tardar unos segundos…</p>
+  </div>
+</div>
+
 <!-- MODAL imagen -->
 <div id="imgModal" class="overlay hidden">
   <div class="modal">
@@ -251,11 +272,11 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 <script>
 /* ===== Config de campos ===== */
 const ENC = [
-  {k:'numero_hoja',l:'N° de hoja'},{k:'numero_documento',l:'N° de documento'},{k:'regimen',l:'Régimen'},
+  {k:'numero_hoja',l:'N° de hoja',req:true},{k:'numero_documento',l:'N° de documento'},{k:'regimen',l:'Régimen',req:true},
   {k:'paciente',l:'Paciente'},{k:'identificacion',l:'Identificación'},{k:'tipo',l:'Tipo'},
-  {k:'fecha_accidente',l:'Fecha de accidente',t:'date'},{k:'fecha_cirugia',l:'Fecha de cirugía',t:'date'},{k:'fecha_hoja',l:'Fecha de la hoja',t:'date'},
-  {k:'cirujano',l:'Cirujano'},{k:'instrumentista',l:'Instrumentista'},
-  {k:'diagnostico',l:'Diagnóstico',full:true,area:true},{k:'procedimiento',l:'Procedimiento',full:true,area:true}
+  {k:'fecha_accidente',l:'Fecha de accidente',t:'date'},{k:'fecha_cirugia',l:'Fecha de cirugía',t:'date'},{k:'fecha_hoja',l:'Fecha de la hoja',t:'date',req:true},
+  {k:'cirujano',l:'Cirujano',req:true},{k:'instrumentista',l:'Instrumentista',req:true},
+  {k:'diagnostico',l:'Diagnóstico',full:true,area:true,req:true},{k:'procedimiento',l:'Procedimiento',full:true,area:true}
 ];
 const DET_COLS = [
   {k:'codigo',l:'Código'},{k:'numero_equipo',l:'N° equipo'},{k:'descripcion',l:'Descripción'},
@@ -447,6 +468,7 @@ function onFile(input){
 }
 async function analizar(){
   const btn=document.getElementById('analizarBtn'); btn.disabled=true; btn.textContent='Leyendo la hoja…';
+  showLoading();
   try{
     const out=await api('POST','/extraer',{imagenBase64:WIZ.base64,tipo:WIZ.tipo});
     fillStep2(out.encabezado||{}, out.detalle||[]);
@@ -454,15 +476,18 @@ async function analizar(){
     document.getElementById('wizStep2').classList.remove('hidden');
     setStep(2);
   }catch(e){ toast('No se pudo leer la hoja: '+e.message); }
-  finally{ btn.disabled=false; btn.textContent='Continuar →'; }
+  finally{ hideLoading(); btn.disabled=false; btn.textContent='Continuar →'; }
 }
+function showLoading(){ document.getElementById('loadModal').classList.remove('hidden'); }
+function hideLoading(){ document.getElementById('loadModal').classList.add('hidden'); }
 function fillStep2(enc, det){
   const c=document.getElementById('encFields'); c.innerHTML='';
   ENC.forEach(f=>{
     const w=document.createElement('div'); w.className='field'+(f.full?' full':'');
     const val=enc[f.k]!=null?enc[f.k]:'';
-    if(f.area) w.innerHTML=`<label>${f.l}</label><textarea id="enc_${f.k}" rows="2">${attr(val)}</textarea>`;
-    else w.innerHTML=`<label>${f.l}</label><input id="enc_${f.k}" type="${f.t||'text'}" value="${attr(val)}">`;
+    const lbl=`${f.l}${f.req?' <span class="req">*</span>':''}`;
+    if(f.area) w.innerHTML=`<label>${lbl}</label><textarea id="enc_${f.k}" rows="2">${attr(val)}</textarea>`;
+    else w.innerHTML=`<label>${lbl}</label><input id="enc_${f.k}" type="${f.t||'text'}" value="${attr(val)}">`;
     c.appendChild(w);
   });
   document.getElementById('detHead').innerHTML='<tr>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'<th></th></tr>';
@@ -486,8 +511,37 @@ function verImagenActual(){ if(WIZ.dataUrl) openImg(WIZ.dataUrl); else toast('No
 
 async function enviar(){
   const enc={}; ENC.forEach(f=>{ const el=document.getElementById('enc_'+f.k); enc[f.k]=el?el.value.trim():''; });
-  const detalle=WIZ.detalle.map(d=>({codigo:(d.codigo||'').trim(),numero_equipo:(d.numero_equipo||'').trim(),descripcion:(d.descripcion||'').trim(),und:d.und,reposicion_anaquel:d.reposicion_anaquel}))
-    .filter(d=>d.codigo||d.descripcion);
+
+  // Limpiar marcas de error previas
+  document.querySelectorAll('#encFields .invalid, #detBody .invalid').forEach(el=>el.classList.remove('invalid'));
+  const errores=[];
+
+  // 1) Campos requeridos del encabezado
+  const faltanEnc=[];
+  ENC.filter(f=>f.req).forEach(f=>{
+    if(!enc[f.k]){ faltanEnc.push(f.l); const el=document.getElementById('enc_'+f.k); if(el) el.classList.add('invalid'); }
+  });
+  if(faltanEnc.length) errores.push('Complete los campos requeridos del encabezado: '+faltanEnc.join(', ')+'.');
+
+  // 2) Detalle: cada línea con datos debe tener TODOS los campos
+  const valOf=(d,k)=> String(d[k]==null?'':d[k]).trim();
+  const isEmptyRow=(d)=> DET_COLS.every(c=> !valOf(d,c.k));
+  const detalle=[]; const lineasIncompletas=[];
+  WIZ.detalle.forEach((d,i)=>{
+    if(isEmptyRow(d)) return; // se ignoran filas totalmente vacías
+    const faltan=DET_COLS.filter(c=> !valOf(d,c.k));
+    if(faltan.length){
+      lineasIncompletas.push(i+1);
+      faltan.forEach(c=>{ const el=document.querySelector(`#detBody input[data-i="${i}"][data-k="${c.k}"]`); if(el) el.classList.add('invalid'); });
+    }else{
+      detalle.push({codigo:valOf(d,'codigo'),numero_equipo:valOf(d,'numero_equipo'),descripcion:valOf(d,'descripcion'),und:d.und,reposicion_anaquel:d.reposicion_anaquel});
+    }
+  });
+  if(lineasIncompletas.length) errores.push('Complete todos los campos (Código, N° equipo, Descripción, Und, Reposición) en la(s) línea(s) del detalle: '+lineasIncompletas.join(', ')+'.');
+  else if(!detalle.length) errores.push('Agregue al menos una línea de detalle con todos sus campos.');
+
+  if(errores.length){ toast(errores.join('  ·  ')); return; }
+
   const btn=document.getElementById('enviarBtn'); btn.disabled=true; btn.textContent='Enviando…';
   try{
     await api('POST','/hojas',{encabezado:enc,detalle,imagenBase64:WIZ.base64,imagenTipo:WIZ.tipo});
