@@ -40,6 +40,9 @@ header.topbar{position:sticky;top:0;z-index:30;background:var(--brand-d);color:#
 .topbar .brand .mk{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--brand),var(--accent));display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
 .topbar .right{display:flex;align-items:center;gap:10px;font-size:13px}
 .role-badge{background:rgba(255,255,255,.16);padding:5px 10px;border-radius:20px;font-weight:700;font-size:12px}
+.role-select{background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.45);padding:5px 28px 5px 12px;border-radius:20px;font-weight:700;font-size:12px;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='white'><path d='M7 10l5 5 5-5z'/></svg>");background-repeat:no-repeat;background-position:right 8px center}
+.role-select option{color:#111}
+.sim-note{background:#fff6e5;border:1px solid #f0c36d;color:#7a5300;padding:6px 12px;border-radius:8px;font-size:13px;margin:0 0 12px;font-weight:600}
 .topbar .logout{background:rgba(255,255,255,.15);color:#fff;padding:7px 11px}
 .topbar .logout:hover{background:rgba(255,255,255,.28)}
 .who{max-width:38vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -170,10 +173,12 @@ input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-sha
     <div class="right">
       <span class="who" id="userName">Usuario</span>
       <span class="role-badge" id="roleBadge">—</span>
+      <select class="role-select hidden" id="roleSelect" onchange="changeRole(this.value)" title="Ver la app como otro rol (simulación)"></select>
       <button class="logout" onclick="logout()">Salir</button>
     </div>
   </header>
   <nav class="tabs" id="navTabs"></nav>
+  <div id="simBanner" class="sim-note hidden" style="margin:12px 16px 0"></div>
 
   <main>
     <!-- INICIO -->
@@ -290,7 +295,8 @@ const GRID_COLS = [
 const ESTADOS = ['Enviado','En revisión','Creando TR','Finalizada','Error'];
 const ESTADO_COLOR = {'Enviado':'#0a5c8a','En revisión':'#e08e0b','Creando TR':'#7a3ea8','Finalizada':'#1e8f5a','Error':'#c0392b'};
 
-let USER=null, ROL='Hospital';
+let USER=null, ROL='Hospital', REAL_ROL='Hospital';
+const ROLES=['Administrador','Hospital','Bodega'];
 let SCOPE='hoy', ROWS=[], COLF={};
 let WIZ={dataUrl:'',base64:'',tipo:'',detalle:[]};
 
@@ -317,8 +323,10 @@ async function init(){
   try{
     USER=await api('GET','/me');
     ROL=(USER&&USER.rol)||'Hospital';
+    REAL_ROL=ROL;
     document.getElementById('userName').textContent=(USER&&USER.name)||'Usuario';
     document.getElementById('roleBadge').textContent=ROL;
+    setupRoleSwitcher();
     document.getElementById('login').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     buildNav();
@@ -327,6 +335,25 @@ async function init(){
     document.getElementById('app').classList.add('hidden');
     document.getElementById('login').classList.remove('hidden');
   }
+}
+function setupRoleSwitcher(){
+  const sel=document.getElementById('roleSelect');
+  const badge=document.getElementById('roleBadge');
+  if(REAL_ROL!=='Administrador'){ sel.classList.add('hidden'); badge.classList.remove('hidden'); return; }
+  // Admin: mostrar selector de simulación en vez de la insignia estática
+  sel.innerHTML='';
+  ROLES.forEach(r=>{ const o=document.createElement('option'); o.value=r; o.textContent=r; if(r===ROL)o.selected=true; sel.appendChild(o); });
+  sel.classList.remove('hidden');
+  badge.classList.add('hidden');
+}
+function changeRole(val){
+  if(REAL_ROL!=='Administrador') return; // solo el admin puede simular
+  ROL=val;
+  const banner=document.getElementById('simBanner');
+  if(ROL!==REAL_ROL){ banner.textContent='👁️ Estás viendo la app como “'+ROL+'” (simulación). Tu rol real sigue siendo Administrador. Volvé a “Administrador” o recargá para salir.'; banner.classList.remove('hidden'); }
+  else { banner.classList.add('hidden'); }
+  buildNav();
+  showInicio();
 }
 function buildNav(){
   const n=document.getElementById('navTabs'); n.innerHTML='';
@@ -414,7 +441,11 @@ function filtered(){
 function onFilter(k,v){ COLF[k]=v; renderGrid(); }
 function estadoBadge(e){ const v=e||'Enviado'; return `<span class="badge b-${v.replace(/\s/g,'')}">${esc(v)}</span>`; }
 
-/* ===== VER (solo lectura) ===== */
+/* ===== VER — solo lectura (Hospital) / editable (Bodega, Administrador) ===== */
+let CUR_VER=null, VER_DET=[];
+// La columna N° Lote solo existe para Bodega/Administrador.
+function detColsVer(){ return canBodega() ? DET_COLS.concat([{k:'numero_lote',l:'N° Lote'}]) : DET_COLS; }
+
 async function verHoja(id){
   showOnly('viewVer'); setTab('hojas');
   const body=document.getElementById('verBody'); body.innerHTML='Cargando…';
@@ -423,18 +454,99 @@ async function verHoja(id){
     const h=await api('GET','/hojas/'+id);
     CUR_VER=h;
     document.getElementById('verSub').textContent=`N° ${h.numero_hoja||'—'} · ${estadoTxt(h.estado)} · ${h.fecha||''} · ${h.usuario||''}`;
-    let html='<div class="section-title" style="margin-top:0">Encabezado</div><div class="kv">';
-    ENC.forEach(f=>{ html+=`<div class="k">${f.l}</div><div>${esc(h[f.k])}</div>`; });
-    html+='</div>';
-    html+='<div class="section-title">Detalle ('+(h.detalle?h.detalle.length:0)+' líneas)</div>';
-    html+='<div class="tbl-wrap"><table><thead><tr>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'<th>N° Lote</th></tr></thead><tbody>';
-    (h.detalle||[]).forEach(d=>{ html+='<tr>'+DET_COLS.map(c=>`<td>${esc(d[c.k])}</td>`).join('')+`<td>${esc(d.numero_lote)}</td></tr>`; });
-    html+='</tbody></table></div>';
-    if(h.imagen_base64){ html+=`<div class="section-title">Imagen</div><button class="btn-ghost" onclick="verImagenGuardada()">🖼️ Ver hoja de consumo</button>`; }
-    body.innerHTML=html;
+    if(canBodega()) renderVerEdit(h); else renderVerReadonly(h);
   }catch(e){ body.innerHTML=`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`; }
 }
-let CUR_VER=null;
+
+/* Vista solo lectura (Hospital): sin columna Lote. */
+function renderVerReadonly(h){
+  let html='<div class="section-title" style="margin-top:0">Encabezado</div><div class="kv">';
+  ENC.forEach(f=>{ html+=`<div class="k">${f.l}</div><div>${esc(h[f.k])}</div>`; });
+  html+='</div>';
+  html+='<div class="section-title">Detalle ('+(h.detalle?h.detalle.length:0)+' líneas)</div>';
+  html+='<div class="tbl-wrap"><table><thead><tr>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
+  (h.detalle||[]).forEach(d=>{ html+='<tr>'+DET_COLS.map(c=>`<td>${esc(d[c.k])}</td>`).join('')+'</tr>'; });
+  html+='</tbody></table></div>';
+  if(h.imagen_base64){ html+=`<div class="section-title">Imagen</div><button class="btn-ghost" onclick="verImagenGuardada()">🖼️ Ver hoja de consumo</button>`; }
+  document.getElementById('verBody').innerHTML=html;
+}
+
+/* Vista editable (Bodega/Administrador): encabezado + detalle con columna Lote. */
+function renderVerEdit(h){
+  const cols=detColsVer();
+  VER_DET = (h.detalle && h.detalle.length) ? h.detalle.map(d=>Object.assign({},d)) : [{}];
+  let html='<div class="section-title" style="margin-top:0">Encabezado</div><div class="form-grid">';
+  ENC.forEach(f=>{
+    const val=h[f.k]!=null?h[f.k]:'';
+    const cls='field'+(f.full?' full':'');
+    const lbl=`${f.l}${f.req?' <span class="req">*</span>':''}`;
+    if(f.area) html+=`<div class="${cls}"><label>${lbl}</label><textarea id="ver_${f.k}" rows="2">${attr(val)}</textarea></div>`;
+    else html+=`<div class="${cls}"><label>${lbl}</label><input id="ver_${f.k}" type="${f.t||'text'}" value="${attr(val)}"></div>`;
+  });
+  html+='</div>';
+  html+='<div class="section-title">Detalle <button class="btn-ghost" style="padding:6px 12px;margin-left:8px" onclick="addVerDet()">＋ Agregar línea</button></div>';
+  html+='<div class="tbl-wrap"><table class="det-table"><thead id="verDetHead"></thead><tbody id="verDetBody"></tbody></table></div>';
+  if(h.imagen_base64){ html+=`<div style="margin-top:12px"><button class="btn-ghost" onclick="verImagenGuardada()">🖼️ Ver hoja de consumo</button></div>`; }
+  html+=`<div style="margin-top:16px"><button class="btn-primary" id="verSaveBtn" onclick="guardarVer()">💾 Guardar cambios</button></div>`;
+  document.getElementById('verBody').innerHTML=html;
+  document.getElementById('verDetHead').innerHTML='<tr>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'<th></th></tr>';
+  renderVerDet();
+}
+function renderVerDet(){
+  const cols=detColsVer();
+  const b=document.getElementById('verDetBody'); b.innerHTML='';
+  VER_DET.forEach((d,i)=>{
+    const tds=cols.map(c=>`<td><input data-i="${i}" data-k="${c.k}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}" oninput="onVerDet(this)"></td>`).join('');
+    const tr=document.createElement('tr');
+    tr.innerHTML=tds+`<td><button class="rm-row" onclick="rmVerDet(${i})">✕</button></td>`;
+    b.appendChild(tr);
+  });
+}
+function onVerDet(el){ const i=+el.dataset.i, k=el.dataset.k; VER_DET[i]=VER_DET[i]||{}; VER_DET[i][k]=el.value; }
+function addVerDet(){ VER_DET.push({}); renderVerDet(); }
+function rmVerDet(i){ VER_DET.splice(i,1); if(!VER_DET.length)VER_DET=[{}]; renderVerDet(); }
+
+async function guardarVer(){
+  if(!canBodega()){ toast('Su rol no puede editar hojas'); return; }
+  const enc={}; ENC.forEach(f=>{ const el=document.getElementById('ver_'+f.k); enc[f.k]=el?el.value.trim():''; });
+
+  document.querySelectorAll('#verBody .invalid').forEach(el=>el.classList.remove('invalid'));
+  const errores=[];
+
+  // 1) Requeridos del encabezado
+  const faltanEnc=[];
+  ENC.filter(f=>f.req).forEach(f=>{
+    if(!enc[f.k]){ faltanEnc.push(f.l); const el=document.getElementById('ver_'+f.k); if(el) el.classList.add('invalid'); }
+  });
+  if(faltanEnc.length) errores.push('Complete los campos requeridos del encabezado: '+faltanEnc.join(', ')+'.');
+
+  // 2) Detalle: cada línea con datos debe tener los campos base (Lote es opcional)
+  const valOf=(d,k)=> String(d[k]==null?'':d[k]).trim();
+  const isEmptyRow=(d)=> DET_COLS.every(c=> !valOf(d,c.k)) && !valOf(d,'numero_lote');
+  const detalle=[]; const lineasIncompletas=[];
+  VER_DET.forEach((d,i)=>{
+    if(isEmptyRow(d)) return; // filas totalmente vacías se ignoran
+    const faltan=DET_COLS.filter(c=> !valOf(d,c.k));
+    if(faltan.length){
+      lineasIncompletas.push(i+1);
+      faltan.forEach(c=>{ const el=document.querySelector(`#verDetBody input[data-i="${i}"][data-k="${c.k}"]`); if(el) el.classList.add('invalid'); });
+    }else{
+      detalle.push({codigo:valOf(d,'codigo'),numero_equipo:valOf(d,'numero_equipo'),descripcion:valOf(d,'descripcion'),und:d.und,reposicion_anaquel:d.reposicion_anaquel,numero_lote:valOf(d,'numero_lote')});
+    }
+  });
+  if(lineasIncompletas.length) errores.push('Complete todos los campos (Código, N° equipo, Descripción, Und, Reposición) en la(s) línea(s): '+lineasIncompletas.join(', ')+'.');
+  else if(!detalle.length) errores.push('Debe quedar al menos una línea de detalle completa.');
+
+  if(errores.length){ toast(errores.join('  ·  ')); return; }
+
+  const btn=document.getElementById('verSaveBtn'); btn.disabled=true; btn.textContent='Guardando…';
+  try{
+    await api('PUT','/hojas/'+CUR_VER.id,{encabezado:enc,detalle});
+    toast('Cambios guardados');
+    verHoja(CUR_VER.id); // recarga con los datos ya persistidos
+  }catch(e){ toast('No se pudo guardar: '+e.message); }
+  finally{ btn.disabled=false; btn.textContent='💾 Guardar cambios'; }
+}
 function verImagenGuardada(){ if(CUR_VER&&CUR_VER.imagen_base64) openImg(`data:${CUR_VER.imagen_tipo||'image/jpeg'};base64,${CUR_VER.imagen_base64}`); }
 
 /* ===== WIZARD ===== */

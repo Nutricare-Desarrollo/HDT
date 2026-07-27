@@ -215,6 +215,61 @@ app.http('hoja-get', {
   }
 });
 
+/* Editar hoja (encabezado + detalle, incluye NumeroLote). Solo Bodega/Administrador. */
+app.http('hoja-update', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'hojas/{id}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar hojas' });
+
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+
+    const body = await request.json();
+    const enc = body.encabezado || {};
+    const detalle = Array.isArray(body.detalle) ? body.detalle : [];
+
+    const sets = [], vals = [];
+    let i = 0;
+    for (const [k, col] of ENC_FIELDS) {
+      i++;
+      let v = enc[k];
+      v = (v === undefined || v === null || v === '') ? null : v;
+      if (DATE_KEYS.has(k) && v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) v = null; // fecha inválida -> null
+      sets.push(`${col}=$${i}`); vals.push(v);
+    }
+    const idPh = '$' + (++i); vals.push(id);
+
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      const up = await client.query(
+        `UPDATE dbo.HojaConsumo SET ${sets.join(',')} WHERE Id=${idPh}`, vals);
+      if (!up.rowCount) { await client.query('ROLLBACK'); return json(404, { error: 'No encontrada' }); }
+      // Reemplaza el detalle completo (maneja altas, ediciones y bajas de líneas).
+      await client.query(`DELETE FROM dbo.HojaConsumoDetalle WHERE HojaConsumoId=$1`, [id]);
+      let linea = 0;
+      for (const d of detalle) {
+        linea++;
+        await client.query(
+          `INSERT INTO dbo.HojaConsumoDetalle (HojaConsumoId, Linea, Codigo, NumeroEquipo, Descripcion, Und, ReposicionAnaquel, NumeroLote)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [id, d.linea || linea, d.codigo || null, d.numero_equipo || null, d.descripcion || null,
+            toInt(d.und), toInt(d.reposicion_anaquel), (d.numero_lote === undefined || d.numero_lote === '') ? null : d.numero_lote]);
+      }
+      await client.query('COMMIT');
+      return json(200, { ok: true, id });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      context.error(e);
+      return json(500, { error: 'No se pudo actualizar la hoja de consumo', detail: e.message });
+    } finally {
+      client.release();
+    }
+  }
+});
+
 /* Resumen Hospital: cantidad de hojas subidas hoy y ayer (fecha local CR). */
 app.http('resumen-hospital', {
   methods: ['GET'], authLevel: 'anonymous', route: 'resumen/hospital',
