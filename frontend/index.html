@@ -486,7 +486,11 @@ function renderVerEdit(h){
   html+='</div>';
   html+='<div class="section-title">Detalle <button class="btn-ghost" style="padding:6px 12px;margin-left:8px" onclick="addVerDet()">＋ Agregar línea</button></div>';
   html+='<div class="tbl-wrap"><table class="det-table"><thead id="verDetHead"></thead><tbody id="verDetBody"></tbody></table></div>';
-  if(h.imagen_base64){ html+=`<div style="margin-top:12px"><button class="btn-ghost" onclick="verImagenGuardada()">🖼️ Ver hoja de consumo</button></div>`; }
+  if(h.imagen_base64){ html+=`<div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn-ghost" onclick="verImagenGuardada()">🖼️ Ver hoja de consumo</button>
+      <button class="btn-ghost" onclick="descargarImagen()">⬇️ Descargar</button>
+      <button class="btn-ghost" onclick="abrirImagenNuevaPestana()">↗️ Abrir en otra pestaña</button>
+    </div>`; }
   html+=`<div style="margin-top:16px"><button class="btn-primary" id="verSaveBtn" onclick="guardarVer()">💾 Guardar cambios</button></div>`;
   document.getElementById('verBody').innerHTML=html;
   document.getElementById('verDetHead').innerHTML='<tr>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'<th></th></tr>';
@@ -548,6 +552,27 @@ async function guardarVer(){
   finally{ btn.disabled=false; btn.textContent='💾 Guardar cambios'; }
 }
 function verImagenGuardada(){ if(CUR_VER&&CUR_VER.imagen_base64) openImg(`data:${CUR_VER.imagen_tipo||'image/jpeg'};base64,${CUR_VER.imagen_base64}`); }
+// Convierte la imagen base64 guardada en un Blob URL (más robusto que data: para descargar/abrir).
+function imagenBlobUrl(){
+  if(!(CUR_VER&&CUR_VER.imagen_base64)) return null;
+  try{
+    const bin=atob(CUR_VER.imagen_base64), len=bin.length, bytes=new Uint8Array(len);
+    for(let i=0;i<len;i++) bytes[i]=bin.charCodeAt(i);
+    return URL.createObjectURL(new Blob([bytes],{type:CUR_VER.imagen_tipo||'image/jpeg'}));
+  }catch(e){ return null; }
+}
+function descargarImagen(){
+  const url=imagenBlobUrl(); if(!url){ toast('No hay imagen para descargar'); return; }
+  const ext=((CUR_VER.imagen_tipo||'image/jpeg').split('/')[1]||'jpg').replace('jpeg','jpg');
+  const a=document.createElement('a'); a.href=url; a.download=`hoja-consumo-${CUR_VER.numero_hoja||CUR_VER.id}.${ext}`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 5000);
+}
+function abrirImagenNuevaPestana(){
+  const url=imagenBlobUrl(); if(!url){ toast('No hay imagen para abrir'); return; }
+  window.open(url,'_blank');
+  setTimeout(()=>URL.revokeObjectURL(url), 60000);
+}
 
 /* ===== WIZARD ===== */
 function openWizard(){
