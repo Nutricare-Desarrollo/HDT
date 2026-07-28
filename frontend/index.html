@@ -116,6 +116,7 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .det-table input{padding:8px}
 .det-table td{padding:5px}
 .det-table th{font-size:11.5px}
+.det-table .nutdesc{padding:8px;font-size:13px;color:var(--brand-d);white-space:normal;min-width:160px;line-height:1.3}
 .rm-row{background:#fbeae8;color:var(--danger);padding:8px 10px;border-radius:7px}
 
 .overlay{position:fixed;inset:0;background:rgba(10,40,60,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:60}
@@ -285,8 +286,19 @@ const ENC = [
 ];
 const DET_COLS = [
   {k:'codigo',l:'Código'},{k:'numero_equipo',l:'N° equipo'},{k:'descripcion',l:'Descripción'},
+  {k:'descripcion_nutricare',l:'Descripción Nutricare',derived:true},
   {k:'und',l:'Und',num:true},{k:'reposicion_anaquel',l:'Reposición',num:true}
 ];
+// Columnas que el usuario completa (excluye las derivadas del catálogo).
+const DET_REQ = DET_COLS.filter(c=>!c.derived);
+// Columnas para Bodega: muestra la Descripción Nutricare como "Descripción" (no la del OCR) + N° Lote.
+const BODEGA_DET_COLS = [
+  {k:'codigo',l:'Código'},{k:'numero_equipo',l:'N° equipo'},
+  {k:'descripcion_nutricare',l:'Descripción',derived:true},
+  {k:'und',l:'Und',num:true},{k:'reposicion_anaquel',l:'Reposición',num:true},
+  {k:'numero_lote',l:'N° Lote'}
+];
+const BODEGA_DET_REQ = [{k:'codigo'},{k:'numero_equipo'},{k:'und'},{k:'reposicion_anaquel'}];
 const GRID_COLS = [
   {k:'fecha',l:'Fecha y hora'},{k:'usuario',l:'Usuario'},{k:'numero_hoja',l:'N°',tag:true},
   {k:'regimen',l:'Régimen'},{k:'cirujano',l:'Cirujano'},{k:'instrumentista',l:'Instrumentista'},
@@ -319,6 +331,23 @@ async function api(method, path, body){
 function msLogin(){ location.href='/.auth/login/aad?post_login_redirect_uri=/'; }
 function logout(){ location.href='/.auth/logout?post_logout_redirect_uri=/'; }
 
+/* ===== Catálogo de productos Nutricare ===== */
+let CATALOGO=null; // Map(codigo -> descripcion)
+const normCod = c => String(c==null?'':c).replace(/\s+/g,'').trim();
+function catReady(){ return CATALOGO instanceof Map && CATALOGO.size>0; }
+function catDesc(cod){ return catReady() ? (CATALOGO.get(normCod(cod))||'') : ''; }
+// Fail-open: si el catálogo no cargó, no bloquea (devuelve true). Un código vacío nunca es válido.
+function catCodigoValido(cod){ const c=normCod(cod); if(!c) return false; if(!catReady()) return true; return CATALOGO.has(c); }
+async function loadCatalogo(){
+  try{
+    const arr=await api('GET','/productos');
+    const m=new Map();
+    (arr||[]).forEach(p=>{ const c=normCod(p.codigo); if(c) m.set(c, p.descripcion||''); });
+    CATALOGO=m;
+  }catch(e){ CATALOGO=null; toast('No se pudo cargar el catálogo de productos: '+e.message); }
+}
+async function ensureCatalogo(){ if(!catReady()) await loadCatalogo(); }
+
 async function init(){
   try{
     USER=await api('GET','/me');
@@ -329,6 +358,7 @@ async function init(){
     setupRoleSwitcher();
     document.getElementById('login').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+    loadCatalogo(); // catálogo de productos en segundo plano
     buildNav();
     showInicio();
   }catch(e){
@@ -443,8 +473,8 @@ function estadoBadge(e){ const v=e||'Enviado'; return `<span class="badge b-${v.
 
 /* ===== VER — solo lectura (Hospital) / editable (Bodega, Administrador) ===== */
 let CUR_VER=null, VER_DET=[];
-// La columna N° Lote solo existe para Bodega/Administrador.
-function detColsVer(){ return canBodega() ? DET_COLS.concat([{k:'numero_lote',l:'N° Lote'}]) : DET_COLS; }
+// Bodega/Administrador ven la Descripción Nutricare como "Descripción" y la columna N° Lote.
+function detColsVer(){ return canBodega() ? BODEGA_DET_COLS : DET_COLS; }
 
 async function verHoja(id){
   showOnly('viewVer'); setTab('hojas');
@@ -453,6 +483,7 @@ async function verHoja(id){
   try{
     const h=await api('GET','/hojas/'+id);
     CUR_VER=h;
+    if(canBodega()) await ensureCatalogo(); // para autocompletar/validar la descripción Nutricare
     document.getElementById('verSub').textContent=`N° ${h.numero_hoja||'—'} · ${estadoTxt(h.estado)} · ${h.fecha||''} · ${h.usuario||''}`;
     if(canBodega()) renderVerEdit(h); else renderVerReadonly(h);
   }catch(e){ body.innerHTML=`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`; }
@@ -500,13 +531,28 @@ function renderVerDet(){
   const cols=detColsVer();
   const b=document.getElementById('verDetBody'); b.innerHTML='';
   VER_DET.forEach((d,i)=>{
-    const tds=cols.map(c=>`<td><input data-i="${i}" data-k="${c.k}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}" oninput="onVerDet(this)"></td>`).join('');
+    const tds=cols.map(c=>{
+      if(c.derived){
+        const dn = (d.descripcion_nutricare!=null && d.descripcion_nutricare!=='') ? d.descripcion_nutricare : catDesc(d.codigo);
+        return `<td><div class="nutdesc" id="vnut_${i}">${esc(dn)}</div></td>`;
+      }
+      const inv = (c.k==='codigo' && normCod(d.codigo) && !catCodigoValido(d.codigo)) ? ' invalid' : '';
+      return `<td><input data-i="${i}" data-k="${c.k}" class="${inv.trim()}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}" oninput="onVerDet(this)"></td>`;
+    }).join('');
     const tr=document.createElement('tr');
     tr.innerHTML=tds+`<td><button class="rm-row" onclick="rmVerDet(${i})">✕</button></td>`;
     b.appendChild(tr);
   });
 }
-function onVerDet(el){ const i=+el.dataset.i, k=el.dataset.k; VER_DET[i]=VER_DET[i]||{}; VER_DET[i][k]=el.value; }
+function onVerDet(el){
+  const i=+el.dataset.i, k=el.dataset.k; VER_DET[i]=VER_DET[i]||{}; VER_DET[i][k]=el.value;
+  if(k==='codigo'){
+    const d=VER_DET[i];
+    d.descripcion_nutricare=catDesc(d.codigo);
+    const cell=document.getElementById('vnut_'+i); if(cell) cell.innerHTML=esc(d.descripcion_nutricare);
+    el.classList.toggle('invalid', !!normCod(d.codigo) && !catCodigoValido(d.codigo));
+  }
+}
 function addVerDet(){ VER_DET.push({}); renderVerDet(); }
 function rmVerDet(i){ VER_DET.splice(i,1); if(!VER_DET.length)VER_DET=[{}]; renderVerDet(); }
 
@@ -524,22 +570,31 @@ async function guardarVer(){
   });
   if(faltanEnc.length) errores.push('Complete los campos requeridos del encabezado: '+faltanEnc.join(', ')+'.');
 
-  // 2) Detalle: cada línea con datos debe tener los campos base (Lote es opcional)
+  // 2) Detalle: cada línea con datos debe tener los campos base (Lote es opcional).
+  //    La Descripción Nutricare se deriva del código (no se captura). Se conserva la
+  //    descripción del OCR aunque Bodega no la vea en pantalla.
   const valOf=(d,k)=> String(d[k]==null?'':d[k]).trim();
-  const isEmptyRow=(d)=> DET_COLS.every(c=> !valOf(d,c.k)) && !valOf(d,'numero_lote');
-  const detalle=[]; const lineasIncompletas=[];
+  const isEmptyRow=(d)=> BODEGA_DET_REQ.every(c=> !valOf(d,c.k)) && !valOf(d,'numero_lote');
+  const detalle=[]; const lineasIncompletas=[]; const codsInvalidos=[];
   VER_DET.forEach((d,i)=>{
     if(isEmptyRow(d)) return; // filas totalmente vacías se ignoran
-    const faltan=DET_COLS.filter(c=> !valOf(d,c.k));
+    const faltan=BODEGA_DET_REQ.filter(c=> !valOf(d,c.k));
+    const codInv=valOf(d,'codigo') && !catCodigoValido(d.codigo);
     if(faltan.length){
       lineasIncompletas.push(i+1);
       faltan.forEach(c=>{ const el=document.querySelector(`#verDetBody input[data-i="${i}"][data-k="${c.k}"]`); if(el) el.classList.add('invalid'); });
-    }else{
-      detalle.push({codigo:valOf(d,'codigo'),numero_equipo:valOf(d,'numero_equipo'),descripcion:valOf(d,'descripcion'),und:d.und,reposicion_anaquel:d.reposicion_anaquel,numero_lote:valOf(d,'numero_lote')});
+    }
+    if(codInv){
+      codsInvalidos.push(i+1);
+      const el=document.querySelector(`#verDetBody input[data-i="${i}"][data-k="codigo"]`); if(el) el.classList.add('invalid');
+    }
+    if(!faltan.length && !codInv){
+      detalle.push({codigo:valOf(d,'codigo'),numero_equipo:valOf(d,'numero_equipo'),descripcion:(d.descripcion==null?'':String(d.descripcion)),descripcion_nutricare:catDesc(d.codigo),und:d.und,reposicion_anaquel:d.reposicion_anaquel,numero_lote:valOf(d,'numero_lote')});
     }
   });
-  if(lineasIncompletas.length) errores.push('Complete todos los campos (Código, N° equipo, Descripción, Und, Reposición) en la(s) línea(s): '+lineasIncompletas.join(', ')+'.');
-  else if(!detalle.length) errores.push('Debe quedar al menos una línea de detalle completa.');
+  if(lineasIncompletas.length) errores.push('Complete todos los campos (Código, N° equipo, Und, Reposición) en la(s) línea(s): '+lineasIncompletas.join(', ')+'.');
+  if(codsInvalidos.length) errores.push('Hay código(s) que no existen en el catálogo en la(s) línea(s): '+codsInvalidos.join(', ')+'.');
+  if(!lineasIncompletas.length && !codsInvalidos.length && !detalle.length) errores.push('Debe quedar al menos una línea de detalle completa.');
 
   if(errores.length){ toast(errores.join('  ·  ')); return; }
 
@@ -607,6 +662,7 @@ async function analizar(){
   const btn=document.getElementById('analizarBtn'); btn.disabled=true; btn.textContent='Leyendo la hoja…';
   showLoading();
   try{
+    await ensureCatalogo(); // para validar códigos y autocompletar la descripción Nutricare
     const out=await api('POST','/extraer',{imagenBase64:WIZ.base64,tipo:WIZ.tipo});
     fillStep2(out.encabezado||{}, out.detalle||[]);
     document.getElementById('wizStep1').classList.add('hidden');
@@ -634,13 +690,37 @@ function fillStep2(enc, det){
 function renderDet(){
   const b=document.getElementById('detBody'); b.innerHTML='';
   WIZ.detalle.forEach((d,i)=>{
-    const tds=DET_COLS.map(c=>`<td><input data-i="${i}" data-k="${c.k}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}" oninput="onDet(this)"></td>`).join('');
+    const tds=DET_COLS.map(c=>{
+      if(c.derived){
+        const dn = (d.descripcion_nutricare!=null && d.descripcion_nutricare!=='') ? d.descripcion_nutricare : catDesc(d.codigo);
+        return `<td><div class="nutdesc" id="nut_${i}">${esc(dn)}</div></td>`;
+      }
+      const inv = (c.k==='codigo' && normCod(d.codigo) && !catCodigoValido(d.codigo)) ? ' invalid' : '';
+      return `<td><input data-i="${i}" data-k="${c.k}" class="${inv.trim()}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}" oninput="onDet(this)"></td>`;
+    }).join('');
     const tr=document.createElement('tr');
     tr.innerHTML=tds+`<td><button class="rm-row" onclick="rmDet(${i})">✕</button></td>`;
     b.appendChild(tr);
   });
+  updateEnviarState();
 }
-function onDet(el){ const i=+el.dataset.i, k=el.dataset.k; WIZ.detalle[i]=WIZ.detalle[i]||{}; WIZ.detalle[i][k]=el.value; }
+function onDet(el){
+  const i=+el.dataset.i, k=el.dataset.k; WIZ.detalle[i]=WIZ.detalle[i]||{}; WIZ.detalle[i][k]=el.value;
+  if(k==='codigo'){
+    const d=WIZ.detalle[i];
+    d.descripcion_nutricare=catDesc(d.codigo);
+    const cell=document.getElementById('nut_'+i); if(cell) cell.innerHTML=esc(d.descripcion_nutricare);
+    el.classList.toggle('invalid', !!normCod(d.codigo) && !catCodigoValido(d.codigo));
+    updateEnviarState();
+  }
+}
+// Deshabilita "Enviar" mientras haya códigos que no existen en el catálogo.
+function updateEnviarState(){
+  const btn=document.getElementById('enviarBtn'); if(!btn) return;
+  const hayInvalidos=WIZ.detalle.some(d=> normCod(d.codigo) && !catCodigoValido(d.codigo));
+  btn.disabled=hayInvalidos;
+  btn.title=hayInvalidos?'Hay códigos que no existen en el catálogo de productos':'';
+}
 function addDetRow(){ WIZ.detalle.push({}); renderDet(); }
 function rmDet(i){ WIZ.detalle.splice(i,1); if(!WIZ.detalle.length)WIZ.detalle=[{}]; renderDet(); }
 function cancelWizard(){ showHojas(); }
@@ -662,20 +742,27 @@ async function enviar(){
 
   // 2) Detalle: cada línea con datos debe tener TODOS los campos
   const valOf=(d,k)=> String(d[k]==null?'':d[k]).trim();
-  const isEmptyRow=(d)=> DET_COLS.every(c=> !valOf(d,c.k));
-  const detalle=[]; const lineasIncompletas=[];
+  const isEmptyRow=(d)=> DET_REQ.every(c=> !valOf(d,c.k));
+  const detalle=[]; const lineasIncompletas=[]; const codsInvalidos=[];
   WIZ.detalle.forEach((d,i)=>{
     if(isEmptyRow(d)) return; // se ignoran filas totalmente vacías
-    const faltan=DET_COLS.filter(c=> !valOf(d,c.k));
+    const faltan=DET_REQ.filter(c=> !valOf(d,c.k));
+    const codInv=valOf(d,'codigo') && !catCodigoValido(d.codigo);
     if(faltan.length){
       lineasIncompletas.push(i+1);
       faltan.forEach(c=>{ const el=document.querySelector(`#detBody input[data-i="${i}"][data-k="${c.k}"]`); if(el) el.classList.add('invalid'); });
-    }else{
-      detalle.push({codigo:valOf(d,'codigo'),numero_equipo:valOf(d,'numero_equipo'),descripcion:valOf(d,'descripcion'),und:d.und,reposicion_anaquel:d.reposicion_anaquel});
+    }
+    if(codInv){
+      codsInvalidos.push(i+1);
+      const el=document.querySelector(`#detBody input[data-i="${i}"][data-k="codigo"]`); if(el) el.classList.add('invalid');
+    }
+    if(!faltan.length && !codInv){
+      detalle.push({codigo:valOf(d,'codigo'),numero_equipo:valOf(d,'numero_equipo'),descripcion:valOf(d,'descripcion'),descripcion_nutricare:catDesc(d.codigo),und:d.und,reposicion_anaquel:d.reposicion_anaquel});
     }
   });
   if(lineasIncompletas.length) errores.push('Complete todos los campos (Código, N° equipo, Descripción, Und, Reposición) en la(s) línea(s) del detalle: '+lineasIncompletas.join(', ')+'.');
-  else if(!detalle.length) errores.push('Agregue al menos una línea de detalle con todos sus campos.');
+  if(codsInvalidos.length) errores.push('Hay código(s) que no existen en el catálogo en la(s) línea(s): '+codsInvalidos.join(', ')+'. Corríjalos antes de enviar.');
+  if(!lineasIncompletas.length && !codsInvalidos.length && !detalle.length) errores.push('Agregue al menos una línea de detalle con todos sus campos.');
 
   if(errores.length){ toast(errores.join('  ·  ')); return; }
 

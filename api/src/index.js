@@ -1,11 +1,29 @@
 const { app } = require('@azure/functions');
 const { query, getClient } = require('./db');
 const { analyzeLayout, parseLayout, toInt } = require('./layout');
+const { getCatalogo, getMapa, normCod } = require('./productos');
 
 /* ============================================================
    Utilidades
    ============================================================ */
 function json(status, body) { return { status, jsonBody: body }; }
+
+/* Carga el mapa del catálogo para validar códigos. Best-effort: si el API de
+   productos no responde, devuelve un Map vacío (no bloquea el guardado). */
+async function mapaCatalogo(context) {
+  try { return await getMapa(); }
+  catch (e) { context.warn('Catálogo de productos no disponible para validar: ' + e.message); return new Map(); }
+}
+// Códigos del detalle que no existen en el catálogo (Map cargado). [] si el mapa está vacío.
+function codigosInvalidos(detalle, mapa) {
+  if (!mapa || !mapa.size) return [];
+  return detalle
+    .filter(d => (d.codigo != null && String(d.codigo).trim() !== ''))
+    .filter(d => !mapa.has(normCod(d.codigo)))
+    .map(d => d.codigo);
+}
+// Descripción oficial del catálogo para un código; si no está, usa la que mandó el cliente.
+const descNutricare = (mapa, d) => (mapa.get(normCod(d.codigo)) || d.descripcion_nutricare || null);
 
 // Usuario autenticado que inyecta Static Web Apps (Entra ID / SSO).
 function getUser(request) {
@@ -93,6 +111,25 @@ app.http('extraer', {
 });
 
 /* ============================================================
+   /api/productos  -> catálogo de productos Nutricare (proxy + caché)
+   ============================================================ */
+app.http('productos-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'productos',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    try {
+      const force = (request.query.get('refresh') || '') === '1';
+      const data = await getCatalogo(force);
+      return json(200, data);
+    } catch (e) {
+      context.error(e);
+      return json(502, { error: 'No se pudo obtener el catálogo de productos', detail: e.message });
+    }
+  }
+});
+
+/* ============================================================
    Hojas de consumo — CRUD
    ============================================================ */
 const ENC_FIELDS = [
@@ -118,6 +155,12 @@ app.http('hoja-create', {
     const body = await request.json();
     const enc = body.encabezado || {};
     const detalle = Array.isArray(body.detalle) ? body.detalle : [];
+
+    // Validación de códigos contra el catálogo (no bloquea si el catálogo no responde).
+    const mapa = await mapaCatalogo(context);
+    const invalidos = codigosInvalidos(detalle, mapa);
+    if (invalidos.length) return json(400, { error: 'Hay códigos que no existen en el catálogo: ' + invalidos.join(', ') });
+
     const cols = [], vals = [], ph = [];
     let i = 0;
     for (const [k, col] of ENC_FIELDS) {
@@ -143,10 +186,10 @@ app.http('hoja-create', {
       for (const d of detalle) {
         linea++;
         await client.query(
-          `INSERT INTO dbo.HojaConsumoDetalle (HojaConsumoId, Linea, Codigo, NumeroEquipo, Descripcion, Und, ReposicionAnaquel)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          `INSERT INTO dbo.HojaConsumoDetalle (HojaConsumoId, Linea, Codigo, NumeroEquipo, Descripcion, DescripcionNutricare, Und, ReposicionAnaquel)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
           [id, d.linea || linea, d.codigo || null, d.numero_equipo || null, d.descripcion || null,
-            toInt(d.und), toInt(d.reposicion_anaquel)]);
+            descNutricare(mapa, d), toInt(d.und), toInt(d.reposicion_anaquel)]);
       }
       await client.query('COMMIT');
       return json(201, { ok: true, id });
@@ -207,8 +250,8 @@ app.http('hoja-get', {
       if (!h.rows.length) return json(404, { error: 'No encontrada' });
       const d = await query(
         `SELECT Id AS id, Linea AS linea, Codigo AS codigo, NumeroEquipo AS numero_equipo,
-                Descripcion AS descripcion, Und AS und, ReposicionAnaquel AS reposicion_anaquel,
-                NumeroLote AS numero_lote
+                Descripcion AS descripcion, DescripcionNutricare AS descripcion_nutricare,
+                Und AS und, ReposicionAnaquel AS reposicion_anaquel, NumeroLote AS numero_lote
          FROM dbo.HojaConsumoDetalle WHERE HojaConsumoId=$1 ORDER BY Linea, Id`, [id]);
       return json(200, { ...h.rows[0], detalle: d.rows });
     } catch (e) { context.error(e); return json(500, { error: 'Error al obtener', detail: e.message }); }
@@ -229,6 +272,11 @@ app.http('hoja-update', {
     const body = await request.json();
     const enc = body.encabezado || {};
     const detalle = Array.isArray(body.detalle) ? body.detalle : [];
+
+    // Validación de códigos contra el catálogo (no bloquea si el catálogo no responde).
+    const mapa = await mapaCatalogo(context);
+    const invalidos = codigosInvalidos(detalle, mapa);
+    if (invalidos.length) return json(400, { error: 'Hay códigos que no existen en el catálogo: ' + invalidos.join(', ') });
 
     const sets = [], vals = [];
     let i = 0;
@@ -253,10 +301,11 @@ app.http('hoja-update', {
       for (const d of detalle) {
         linea++;
         await client.query(
-          `INSERT INTO dbo.HojaConsumoDetalle (HojaConsumoId, Linea, Codigo, NumeroEquipo, Descripcion, Und, ReposicionAnaquel, NumeroLote)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          `INSERT INTO dbo.HojaConsumoDetalle (HojaConsumoId, Linea, Codigo, NumeroEquipo, Descripcion, DescripcionNutricare, Und, ReposicionAnaquel, NumeroLote)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
           [id, d.linea || linea, d.codigo || null, d.numero_equipo || null, d.descripcion || null,
-            toInt(d.und), toInt(d.reposicion_anaquel), (d.numero_lote === undefined || d.numero_lote === '') ? null : d.numero_lote]);
+            descNutricare(mapa, d), toInt(d.und), toInt(d.reposicion_anaquel),
+            (d.numero_lote === undefined || d.numero_lote === '') ? null : d.numero_lote]);
       }
       await client.query('COMMIT');
       return json(200, { ok: true, id });

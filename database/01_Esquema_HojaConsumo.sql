@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS dbo.HojaConsumoDetalle (
     Linea             INT NULL,               -- orden de la línea en la hoja
     Codigo            VARCHAR(60)  NULL,
     NumeroEquipo      VARCHAR(60)  NULL,
-    Descripcion       VARCHAR(400) NULL,
+    Descripcion       VARCHAR(400) NULL,       -- descripción tal cual la lee el OCR de la hoja
+    DescripcionNutricare VARCHAR(400) NULL,    -- descripción oficial del catálogo de productos (por Codigo)
     Und               INT NULL,
     ReposicionAnaquel INT NULL,
     NumeroLote        VARCHAR(80)  NULL       -- lo completa Bodega

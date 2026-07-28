@@ -13,6 +13,12 @@
 
     "DOCINTEL_ENDPOINT": "https://nutricare-docintel.cognitiveservices.azure.com/",
     "DOCINTEL_KEY": "pega-aqui-tu-clave-en-el-servidor-no-en-el-codigo",
-    "DOCINTEL_MODEL": "prebuilt-layout"
+    "DOCINTEL_MODEL": "prebuilt-layout",
+
+    "PRODUCTOS_API_URL": "https://...powerplatform.com/.../invoke?...(URL del flujo de Power Automate)",
+    "PRODUCTOS_API_METHOD": "POST",
+    "PRODUCTOS_API_BODY": "{}",
+    "PRODUCTOS_API_KEY": "",
+    "PRODUCTOS_CACHE_MS": "600000"
   }
 }
