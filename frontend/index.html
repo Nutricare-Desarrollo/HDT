@@ -713,63 +713,66 @@ function imprimirHoja(){
 <style>
 @page{size:A4 portrait;margin:9mm}
 *{box-sizing:border-box}
-body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:11px}
+body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:11px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 table{border-collapse:collapse}
-.top{width:100%;table-layout:fixed}
-.top td{border:1.5px solid #000;vertical-align:middle}
-.top .logo{width:56%;height:92px}
-.top .brand{text-align:right;padding:6px 14px}
-.top .brand .nut{font-family:Georgia,'Times New Roman',serif;font-style:italic;font-weight:bold;font-size:36px;line-height:1}
-.top .brand .htr{display:block;font-weight:bold;font-size:11px;letter-spacing:.5px;margin-top:5px}
+.sheet>*{margin-bottom:6px}
+.sheet>*:last-child{margin-bottom:0}
+.top{display:flex;align-items:center}
+.top .logo{flex:0 0 55%;height:90px;border:1.5px solid #000;border-radius:8px}
+.top .brand{flex:1;text-align:right;padding:0 10px}
+.top .brand .nut{font-family:Georgia,'Times New Roman',serif;font-style:italic;font-weight:bold;font-size:38px;line-height:1}
+.top .brand .htr{display:block;font-weight:bold;font-size:11px;letter-spacing:.5px;margin-top:4px}
+.infowrap,.nameswrap{border:1.5px solid #000;border-radius:8px;overflow:hidden}
+.detwrap{border-radius:8px;overflow:hidden}
 .info{width:100%;table-layout:fixed}
-.info td{border:1.5px solid #000;border-top:0;padding:5px 7px;font-size:11px}
+.info td{border-right:1px solid #000;padding:5px 7px;font-size:11px}
+.info td:last-child{border-right:0}
 .info .lbl{background:#cfcfcf;font-weight:bold;text-align:center}
-.info .doc{font-weight:bold;text-align:center;letter-spacing:.5px}
+.info .doc{background:#cfcfcf;font-weight:bold;text-align:center;letter-spacing:.5px}
 .info .datewrap{padding:0}
-.dt{width:100%;height:100%;table-layout:fixed}
+.dt{width:100%;table-layout:fixed}
 .dt td{border:0;border-left:1px solid #000;text-align:center;padding:2px 0;font-size:9px}
 .dt td:first-child{border-left:0}
 .dt tr:first-child td{font-weight:bold;border-bottom:1px solid #000}
 .dt tr:last-child td{height:22px;font-size:13px}
-.names{width:100%;border:1.5px solid #000;border-top:0}
+.names{width:100%}
 .names td{padding:5px 8px;border-bottom:1px solid #000;font-size:11px}
 .names tr:last-child td{border-bottom:0}
 .det{width:100%;table-layout:fixed}
-.det th{background:#000;color:#fff;font-size:9.5px;font-weight:bold;text-align:center;padding:5px 3px;border:1px solid #000;line-height:1.1;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.det th{background:#000;color:#fff;font-size:9.5px;font-weight:bold;text-align:center;padding:5px 3px;border:1px solid #000;border-left-color:#fff;border-right-color:#fff;line-height:1.1}
 .det td{border:1px solid #000;height:18px;padding:1px 4px;font-size:10px}
 .det .cod{width:13%}
 .det .eq{width:15%;text-align:center}
 .det .ds{width:47%}
 .det .un{width:9%;text-align:center}
 .det .rp{width:16%;text-align:center}
-.obs{width:100%;border:1.5px solid #000;border-top:0}
-.obs td{height:64px;vertical-align:top;padding:3px 6px;font-size:9px;font-weight:bold}
-.firmas{display:flex;gap:10px;margin-top:9px}
-.firmas .f{flex:1;border:1.5px solid #000;height:56px;padding:3px 6px;font-size:9px;font-weight:bold}
+.obs{border:1.5px solid #000;border-radius:8px;height:66px;padding:4px 8px;font-size:9px;font-weight:bold}
+.firmas{display:flex;gap:10px}
+.firmas .f{flex:1;border:1.5px solid #000;border-radius:8px;height:56px;padding:3px 8px;font-size:9px;font-weight:bold}
 </style></head><body>
 <div class="sheet">
-  <table class="top"><tr>
-    <td class="logo"></td>
-    <td class="brand"><div class="nut">Nutricare</div><div class="htr">HOSPITAL DEL TRAUMA INS</div></td>
-  </tr></table>
-  <table class="info"><tr>
+  <div class="top">
+    <div class="logo"></div>
+    <div class="brand"><div class="nut">Nutricare</div><div class="htr">HOSPITAL DEL TRAUMA INS</div></div>
+  </div>
+  <div class="infowrap"><table class="info"><tr>
     <td class="lbl" style="width:38px">N°</td>
     <td style="width:80px">${esc(enc.numero_hoja||'')}</td>
     <td class="lbl" style="width:70px">Régimen</td>
     <td style="width:110px">${esc(enc.regimen||'')}</td>
     <td class="doc">${esc(enc.numero_documento||'')}</td>
     <td class="datewrap" style="width:150px"><table class="dt"><tr><td>DÍA</td><td>MES</td><td>AÑO</td></tr><tr><td>${esc(dia)}</td><td>${esc(mes)}</td><td>${esc(anio)}</td></tr></table></td>
-  </tr></table>
-  <table class="names">
+  </tr></table></div>
+  <div class="nameswrap"><table class="names">
     <tr><td><b>Cirujano:</b> ${esc(enc.cirujano||'')}</td></tr>
     <tr><td><b>Instrumentista:</b> ${esc(enc.instrumentista||'')}</td></tr>
     <tr><td><b>Diagnóstico:</b> ${esc(enc.diagnostico||'')}</td></tr>
-  </table>
-  <table class="det">
+  </table></div>
+  <div class="detwrap"><table class="det">
     <thead><tr><th class="cod">CÓDIGO</th><th class="eq">NÚMERO DE EQUIPO</th><th class="ds">DESCRIPCIÓN</th><th class="un">UND.</th><th class="rp">REPOSICIÓN ANAQUEL</th></tr></thead>
     <tbody>${rows}</tbody>
-  </table>
-  <table class="obs"><tr><td>OBSERVACIONES</td></tr></table>
+  </table></div>
+  <div class="obs">OBSERVACIONES</div>
   <div class="firmas"><div class="f">FIRMA CIRUJANO</div><div class="f">INSTRUMENTISTA</div><div class="f">FIRMA SOPORTE QUIRÚRGICO</div></div>
 </div>
 <script>window.onload=function(){setTimeout(function(){window.print();},150);};<\/script>
