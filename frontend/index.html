@@ -641,7 +641,10 @@ function renderVerEdit(h){
       <button class="btn-ghost" onclick="descargarImagen()">⬇️ Descargar</button>
       <button class="btn-ghost" onclick="abrirImagenNuevaPestana()">↗️ Abrir en otra pestaña</button>
     </div>`; }
-  html+=`<div style="margin-top:16px"><button class="btn-primary" id="verSaveBtn" onclick="guardarVer()">💾 Guardar cambios</button></div>`;
+  html+=`<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn-primary" id="verSaveBtn" onclick="guardarVer()">💾 Guardar cambios</button>
+      <button class="btn-ghost" onclick="imprimirHoja()">🖨️ Imprimir</button>
+    </div>`;
   document.getElementById('verBody').innerHTML=html;
   document.getElementById('verDetHead').innerHTML='<tr>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'<th></th></tr>';
   renderVerDet();
@@ -677,6 +680,93 @@ function onVerDet(el){
 }
 function addVerDet(){ VER_DET.push({}); renderVerDet(); }
 function rmVerDet(i){ VER_DET.splice(i,1); if(!VER_DET.length)VER_DET=[{}]; renderVerDet(); }
+
+/* Imprime la hoja de consumo con el formato oficial de Nutricare.
+   Usa los valores en pantalla (incluye ediciones sin guardar). */
+function imprimirHoja(){
+  const enc={}; ENC.forEach(f=>{ const el=document.getElementById('ver_'+f.k); enc[f.k]=el?el.value.trim():''; });
+  const noVacia=(d)=> ['codigo','numero_equipo','und','reposicion_anaquel'].some(k=> String(d[k]==null?'':d[k]).trim()!=='');
+  const filas=(VER_DET||[]).filter(noVacia).map(d=>({
+    codigo: d.codigo||'',
+    equipo: d.numero_equipo||'',
+    // En Bodega la DESCRIPCIÓN oficial es la Descripción Nutricare (del catálogo).
+    desc: catDesc(d.codigo) || d.descripcion_nutricare || d.descripcion || '',
+    und: (d.und==null?'':d.und),
+    rep: (d.reposicion_anaquel==null?'':d.reposicion_anaquel)
+  }));
+  const fp=(enc.fecha_hoja||'').split('-'); // [YYYY, MM, DD]
+  const anio=fp[0]||'', mes=fp[1]||'', dia=fp[2]||'';
+  const MIN=18, total=Math.max(filas.length, MIN);
+  let rows='';
+  for(let i=0;i<total;i++){
+    const r=filas[i]||{};
+    rows+=`<tr><td class="cod">${esc(r.codigo||'')}</td><td class="eq">${esc(r.equipo||'')}</td><td class="ds">${esc(r.desc||'')}</td><td class="un">${esc(r.und===''?'':r.und)}</td><td class="rp">${esc(r.rep===''?'':r.rep)}</td></tr>`;
+  }
+  const doc=`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Hoja de consumo ${esc(enc.numero_hoja||'')}</title>
+<style>
+@page{size:A4 portrait;margin:10mm}
+*{box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:11px}
+.b{border:1.5px solid #000}
+.top{display:flex;min-height:78px}
+.top .lft{flex:1.3;border:1.5px solid #000;border-right:0}
+.top .rgt{flex:1;border:1.5px solid #000;display:flex;flex-direction:column;justify-content:center;align-items:flex-end;padding:6px 14px}
+.top .rgt .n{font-family:Georgia,'Times New Roman',serif;font-style:italic;font-weight:bold;font-size:32px;line-height:1}
+.top .rgt .s{font-weight:bold;font-size:10.5px;letter-spacing:.4px;margin-top:2px}
+.info{display:flex;border:1.5px solid #000;border-top:0}
+.info>div{border-right:1px solid #000;padding:5px 7px;display:flex;align-items:center}
+.info>div:last-child{border-right:0}
+.info .lbl{background:#c9c9c9;font-weight:bold}
+.info .doc{font-weight:bold;flex:1;justify-content:center;letter-spacing:.5px}
+.info .n2{min-width:70px}
+.date{padding:0!important}
+.date table{border-collapse:collapse;height:100%}
+.date td{border-left:1px solid #000;padding:2px 8px;text-align:center;font-size:9px}
+.date tr:first-child td{font-weight:bold;border-bottom:1px solid #000}
+.date tr:last-child td{height:22px;font-size:12px}
+.names{border:1.5px solid #000;border-top:0;padding:5px 8px}
+.names div{padding:2px 0;border-bottom:1px solid #000}
+.names div:last-child{border-bottom:0}
+table.det{width:100%;border-collapse:collapse;margin-top:0}
+table.det th{background:#000;color:#fff;font-size:10px;font-weight:bold;text-align:center;padding:5px 3px;border:1px solid #000}
+table.det td{border:1px solid #000;height:19px;padding:1px 4px;font-size:10.5px}
+table.det .cod{width:12%}
+table.det .eq{width:14%;text-align:center}
+table.det .ds{width:50%}
+table.det .un{width:8%;text-align:center}
+table.det .rp{width:16%;text-align:center}
+.obs{border:1.5px solid #000;border-top:0;min-height:70px;position:relative}
+.obs .t{font-weight:bold;font-size:9px;padding:3px 6px}
+.firmas{display:flex;margin-top:10px}
+.firmas .f{flex:1;border:1.5px solid #000;margin-right:10px;min-height:60px;padding:3px 6px;font-weight:bold;font-size:9px}
+.firmas .f:last-child{margin-right:0}
+</style></head><body>
+<div class="sheet">
+  <div class="top"><div class="lft"></div><div class="rgt"><div class="n">Nutricare</div><div class="s">HOSPITAL DEL TRAUMA INS</div></div></div>
+  <div class="info">
+    <div class="lbl">N°</div><div class="n2">${esc(enc.numero_hoja||'')}</div>
+    <div class="lbl">Régimen</div><div class="n2">${esc(enc.regimen||'')}</div>
+    <div class="doc">${esc(enc.numero_documento||'')}</div>
+    <div class="date"><table><tr><td>DÍA</td><td>MES</td><td>AÑO</td></tr><tr><td>${esc(dia)}</td><td>${esc(mes)}</td><td>${esc(anio)}</td></tr></table></div>
+  </div>
+  <div class="names">
+    <div><b>Cirujano:</b> ${esc(enc.cirujano||'')}</div>
+    <div><b>Instrumentista:</b> ${esc(enc.instrumentista||'')}</div>
+    <div><b>Diagnóstico:</b> ${esc(enc.diagnostico||'')}</div>
+  </div>
+  <table class="det">
+    <thead><tr><th>CÓDIGO</th><th>NÚMERO DE EQUIPO</th><th>DESCRIPCIÓN</th><th>UND.</th><th>REPOSICIÓN ANAQUEL</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="obs"><div class="t">OBSERVACIONES</div></div>
+  <div class="firmas"><div class="f">FIRMA CIRUJANO</div><div class="f">INSTRUMENTISTA</div><div class="f">FIRMA SOPORTE QUIRÚRGICO</div></div>
+</div>
+<script>window.onload=function(){setTimeout(function(){window.print();},150);};<\/script>
+</body></html>`;
+  const w=window.open('','_blank');
+  if(!w){ toast('El navegador bloqueó la ventana de impresión. Permití los pop-ups e intentá de nuevo.'); return; }
+  w.document.open(); w.document.write(doc); w.document.close();
+}
 
 async function guardarVer(){
   if(!canBodega()){ toast('Su rol no puede editar hojas'); return; }
