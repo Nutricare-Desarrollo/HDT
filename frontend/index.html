@@ -145,6 +145,14 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 label .req{color:var(--danger);margin-left:2px}
 input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-shadow:0 0 0 3px rgba(192,57,43,.15)}
 
+/* Buscador de código (autocompletado) */
+.ac-box{position:fixed;z-index:80;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);max-height:320px;overflow-y:auto;min-width:280px;padding:4px}
+.ac-item{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:7px;cursor:pointer}
+.ac-item:hover,.ac-item.active{background:#eaf6f8}
+.ac-code{font-weight:700;color:var(--brand-d);font-size:13.5px}
+.ac-desc{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ac-empty{padding:10px 12px;color:var(--muted);font-size:13px}
+
 @media(max-width:640px){
   main{padding:14px 10px 40px}
   .kv{grid-template-columns:1fr}
@@ -348,6 +356,99 @@ async function loadCatalogo(){
 }
 async function ensureCatalogo(){ if(!catReady()) await loadCatalogo(); }
 
+/* ===== Buscador de código (autocompletado) ===== */
+// Busca en el catálogo por código y por descripción. Devuelve hasta `limit`
+// resultados ordenados por relevancia (prefijo de código > contiene código > descripción).
+function catSearch(q, limit){
+  limit = limit||40;
+  if(!catReady()) return [];
+  const qc=normCod(q).toLowerCase();      // para comparar contra el código (sin espacios)
+  const qt=String(q==null?'':q).trim().toLowerCase(); // para comparar contra la descripción
+  const res=[];
+  for(const [code,desc] of CATALOGO){
+    const cl=code.toLowerCase(), dl=(desc||'').toLowerCase();
+    let score=-1;
+    if(qc && cl.indexOf(qc)===0) score=0;
+    else if(qc && cl.indexOf(qc)>0) score=1;
+    else if(qt && dl.indexOf(qt)>=0) score=2;
+    else if(!qc && !qt) score=3;          // sin texto: muestra los primeros
+    if(score>=0) res.push({code:code, desc:desc, score:score});
+  }
+  res.sort((a,b)=> a.score-b.score || a.code.localeCompare(b.code));
+  return res.slice(0,limit);
+}
+
+let AC={input:null, list:[], idx:-1, box:null};
+function acBox(){
+  if(!AC.box){
+    const d=document.createElement('div');
+    d.className='ac-box hidden'; d.id='acBox';
+    // mousedown (no click) para seleccionar antes de que el input pierda foco.
+    d.addEventListener('mousedown', function(e){
+      const it=e.target.closest('.ac-item'); if(!it) return;
+      e.preventDefault(); acPick(+it.dataset.idx);
+    });
+    document.body.appendChild(d); AC.box=d;
+  }
+  return AC.box;
+}
+function acShow(input){
+  if(!catReady()) return;               // aún no cargó el catálogo: sin sugerencias
+  AC.input=input;
+  const items=catSearch(input.value, 40);
+  AC.list=items; AC.idx=-1;
+  const box=acBox();
+  if(!items.length){
+    box.innerHTML='<div class="ac-empty">Sin coincidencias en el catálogo</div>';
+  } else {
+    box.innerHTML=items.map((it,i)=>
+      `<div class="ac-item" data-idx="${i}"><span class="ac-code">${esc(it.code)}</span><span class="ac-desc">${esc(it.desc)}</span></div>`
+    ).join('');
+  }
+  acPos(input);
+  box.classList.remove('hidden');
+}
+function acPos(input){
+  const box=AC.box; if(!box) return;
+  const r=input.getBoundingClientRect();
+  box.style.left=r.left+'px';
+  box.style.top=(r.bottom+2)+'px';
+  box.style.minWidth=Math.max(r.width, 300)+'px';
+}
+function acHide(){ if(AC.box) AC.box.classList.add('hidden'); AC.input=null; AC.list=[]; AC.idx=-1; }
+function acPick(i){
+  const it=AC.list[i], inp=AC.input; if(!it||!inp) return;
+  inp.value=it.code;
+  // Dispara el oninput existente (onDet/onVerDet) -> llena descripción y valida.
+  inp.dispatchEvent(new Event('input',{bubbles:true}));
+  acHide(); inp.focus();
+}
+function acMove(delta){
+  if(!AC.box || !AC.list.length) return;
+  AC.idx=(AC.idx+delta+AC.list.length)%AC.list.length;
+  const kids=AC.box.children;
+  for(let i=0;i<kids.length;i++) kids[i].classList.toggle('active', i===AC.idx);
+  const el=kids[AC.idx]; if(el&&el.scrollIntoView) el.scrollIntoView({block:'nearest'});
+}
+function acInit(){
+  const isCode = el => el && el.matches && el.matches('input.code-input');
+  document.addEventListener('focusin', e=>{ if(isCode(e.target)) acShow(e.target); });
+  document.addEventListener('input', e=>{ if(isCode(e.target)) acShow(e.target); });
+  document.addEventListener('keydown', e=>{
+    if(!AC.input) return;
+    if(e.key==='ArrowDown'){ e.preventDefault(); acMove(1); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); acMove(-1); }
+    else if(e.key==='Enter'){ if(AC.idx>=0){ e.preventDefault(); acPick(AC.idx); } }
+    else if(e.key==='Escape'){ acHide(); }
+  });
+  // Cerrar al hacer clic fuera del buscador.
+  document.addEventListener('mousedown', e=>{
+    if(AC.box && !AC.box.contains(e.target) && e.target!==AC.input) acHide();
+  });
+  // Reposicionar/cerrar al hacer scroll dentro de la app.
+  document.addEventListener('scroll', ()=>{ if(AC.input) acPos(AC.input); }, true);
+}
+
 async function init(){
   try{
     USER=await api('GET','/me');
@@ -359,6 +460,7 @@ async function init(){
     document.getElementById('login').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     loadCatalogo(); // catálogo de productos en segundo plano
+    acInit();       // buscador de código (autocompletado)
     buildNav();
     showInicio();
   }catch(e){
@@ -536,8 +638,11 @@ function renderVerDet(){
         const dn = (d.descripcion_nutricare!=null && d.descripcion_nutricare!=='') ? d.descripcion_nutricare : catDesc(d.codigo);
         return `<td><div class="nutdesc" id="vnut_${i}">${esc(dn)}</div></td>`;
       }
-      const inv = (c.k==='codigo' && normCod(d.codigo) && !catCodigoValido(d.codigo)) ? ' invalid' : '';
-      return `<td><input data-i="${i}" data-k="${c.k}" class="${inv.trim()}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}" oninput="onVerDet(this)"></td>`;
+      const isCode = c.k==='codigo';
+      const inv = (isCode && normCod(d.codigo) && !catCodigoValido(d.codigo)) ? 'invalid' : '';
+      const cls = (inv+(isCode?' code-input':'')).trim();
+      const extra = isCode ? ' autocomplete="off"' : '';
+      return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onVerDet(this)"></td>`;
     }).join('');
     const tr=document.createElement('tr');
     tr.innerHTML=tds+`<td><button class="rm-row" onclick="rmVerDet(${i})">✕</button></td>`;
@@ -695,8 +800,11 @@ function renderDet(){
         const dn = (d.descripcion_nutricare!=null && d.descripcion_nutricare!=='') ? d.descripcion_nutricare : catDesc(d.codigo);
         return `<td><div class="nutdesc" id="nut_${i}">${esc(dn)}</div></td>`;
       }
-      const inv = (c.k==='codigo' && normCod(d.codigo) && !catCodigoValido(d.codigo)) ? ' invalid' : '';
-      return `<td><input data-i="${i}" data-k="${c.k}" class="${inv.trim()}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}" oninput="onDet(this)"></td>`;
+      const isCode = c.k==='codigo';
+      const inv = (isCode && normCod(d.codigo) && !catCodigoValido(d.codigo)) ? 'invalid' : '';
+      const cls = (inv+(isCode?' code-input':'')).trim();
+      const extra = isCode ? ' autocomplete="off"' : '';
+      return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onDet(this)"></td>`;
     }).join('');
     const tr=document.createElement('tr');
     tr.innerHTML=tds+`<td><button class="rm-row" onclick="rmDet(${i})">✕</button></td>`;
