@@ -293,17 +293,18 @@ const ENC = [
   {k:'cirujano',l:'Cirujano',req:true},{k:'instrumentista',l:'Instrumentista',req:true},
   {k:'diagnostico',l:'Diagnóstico',full:true,area:true,req:true},{k:'procedimiento',l:'Procedimiento',full:true,area:true}
 ];
+// Columnas para Hospital: la "Descripción" es la que ingresa el usuario (del OCR/manual).
+// NO se muestra la Descripción Nutricare (derivada del catálogo) en este rol.
 const DET_COLS = [
   {k:'codigo',l:'Código'},{k:'numero_equipo',l:'N° equipo'},{k:'descripcion',l:'Descripción'},
-  {k:'descripcion_nutricare',l:'Descripción Nutricare',derived:true},
   {k:'und',l:'Und',num:true},{k:'reposicion_anaquel',l:'Reposición',num:true}
 ];
 // Columnas que el usuario completa (excluye las derivadas del catálogo).
 const DET_REQ = DET_COLS.filter(c=>!c.derived);
-// Columnas para Bodega: muestra la Descripción Nutricare como "Descripción" (no la del OCR) + N° Lote.
+// Columnas para Bodega: muestra la Descripción Nutricare (del catálogo, no la del OCR) + N° Lote.
 const BODEGA_DET_COLS = [
   {k:'codigo',l:'Código'},{k:'numero_equipo',l:'N° equipo'},
-  {k:'descripcion_nutricare',l:'Descripción',derived:true},
+  {k:'descripcion_nutricare',l:'Descripción Nutricare',derived:true},
   {k:'und',l:'Und',num:true},{k:'reposicion_anaquel',l:'Reposición',num:true},
   {k:'numero_lote',l:'N° Lote'}
 ];
