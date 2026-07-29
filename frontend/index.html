@@ -602,7 +602,7 @@ async function verHoja(id){
   try{
     const h=await api('GET','/hojas/'+id);
     CUR_VER=h;
-    if(canBodega()) await ensureCatalogo(); // para autocompletar/validar la descripción Nutricare
+    // El catálogo se carga al entrar al sitio (init). No se espera aquí para que la hoja se muestre de inmediato.
     document.getElementById('verSub').textContent=`N° ${h.numero_hoja||'—'} · ${estadoTxt(h.estado)} · ${h.fecha||''} · ${h.usuario||''}`;
     if(canBodega()) renderVerEdit(h); else renderVerReadonly(h);
   }catch(e){ body.innerHTML=`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`; }
@@ -782,7 +782,7 @@ async function openManual(){
   document.getElementById('wizResult').classList.add('hidden');
   document.getElementById('wizStep2').classList.remove('hidden');
   fillStep2({}, []);                 // render inmediato (encabezado vacío + 1 línea)
-  ensureCatalogo();                  // catálogo en segundo plano: NO bloquea el formulario
+  // El catálogo se carga al entrar al sitio (init) o con el botón "Cargar productos".
 }
 function setStep(n){
   document.getElementById('stp1').className='step '+(n>1?'done':(n===1?'active':''));
@@ -804,7 +804,7 @@ async function analizar(){
   const btn=document.getElementById('analizarBtn'); btn.disabled=true; btn.textContent='Leyendo la hoja…';
   showLoading();
   try{
-    await ensureCatalogo(); // para validar códigos y autocompletar la descripción Nutricare
+    // El catálogo ya se cargó al entrar al sitio (init); no se espera aquí.
     const out=await api('POST','/extraer',{imagenBase64:WIZ.base64,tipo:WIZ.tipo});
     fillStep2(out.encabezado||{}, out.detalle||[]);
     document.getElementById('wizStep1').classList.add('hidden');
