@@ -202,6 +202,7 @@ input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-sha
         <div><h2 id="hojasTitle">Hojas de consumo</h2><div class="sub" id="hojasSub"></div></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn-ghost" id="scopeBtn" onclick="toggleScope()">📅 Ver historial</button>
+          <button class="btn-ghost hidden" id="crearBtn" onclick="openManual()">✎ Crear hoja de consumo</button>
           <button class="btn-primary hidden" id="subirBtn" onclick="openWizard()">＋ Subir hoja de consumo</button>
         </div>
       </div>
@@ -224,9 +225,9 @@ input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-sha
     <!-- WIZARD -->
     <section id="viewWizard" class="hidden">
       <div class="page-head">
-        <div><h2>Subir hoja de consumo</h2><div class="sub" id="wizSub"></div></div>
+        <div><h2 id="wizTitle">Subir hoja de consumo</h2><div class="sub" id="wizSub"></div></div>
       </div>
-      <div class="steps">
+      <div class="steps" id="wizSteps">
         <div class="step" id="stp1">1 · Foto de la hoja</div>
         <div class="step" id="stp2">2 · Revisar y corregir</div>
       </div>
@@ -254,7 +255,7 @@ input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-sha
           <div class="tbl-wrap"><table class="det-table" id="detTable"><thead id="detHead"></thead><tbody id="detBody"></tbody></table></div>
         </div>
         <div class="foot">
-          <button class="btn-ghost" onclick="verImagenActual()">🖼️ Ver hoja de consumo</button>
+          <button class="btn-ghost" id="verImgBtn" onclick="verImagenActual()">🖼️ Ver hoja de consumo</button>
           <button class="btn-ghost" onclick="cancelWizard()">Cancelar</button>
           <button class="btn-primary" id="enviarBtn" onclick="enviar()">Enviar hoja de consumo</button>
         </div>
@@ -530,6 +531,7 @@ async function showInicio(){
 async function showHojas(){
   setTab('hojas'); showOnly('viewHojas');
   document.getElementById('subirBtn').classList.toggle('hidden', !canSubir());
+  document.getElementById('crearBtn').classList.toggle('hidden', !canSubir());
   await loadHojas();
 }
 async function loadHojas(){
@@ -737,8 +739,13 @@ function abrirImagenNuevaPestana(){
 /* ===== WIZARD ===== */
 function openWizard(){
   if(!canSubir()){ toast('Su rol no puede subir hojas'); return; }
-  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[]};
+  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[],manual:false};
   showOnly('viewWizard'); setTab('hojas');
+  // Restaura la UI del modo "subir" (por si venía del modo manual)
+  document.getElementById('wizTitle').textContent='Subir hoja de consumo';
+  document.getElementById('wizSub').textContent='';
+  document.getElementById('wizSteps').classList.remove('hidden');
+  document.getElementById('verImgBtn').classList.remove('hidden');
   document.getElementById('wizStep1').classList.remove('hidden');
   document.getElementById('wizStep2').classList.add('hidden');
   document.getElementById('wizResult').classList.add('hidden');
@@ -746,6 +753,21 @@ function openWizard(){
   document.getElementById('prevWrap').innerHTML='';
   document.getElementById('analizarBtn').disabled=true;
   setStep(1);
+}
+/* Crear hoja manualmente: va directo al formulario (encabezado + detalle), sin foto. */
+async function openManual(){
+  if(!canSubir()){ toast('Su rol no puede crear hojas'); return; }
+  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[{}],manual:true};
+  showOnly('viewWizard'); setTab('hojas');
+  document.getElementById('wizTitle').textContent='Crear hoja de consumo';
+  document.getElementById('wizSub').textContent='Ingrese los datos manualmente';
+  document.getElementById('wizSteps').classList.add('hidden');      // no hay pasos de foto
+  document.getElementById('verImgBtn').classList.add('hidden');     // no hay imagen
+  document.getElementById('wizStep1').classList.add('hidden');
+  document.getElementById('wizResult').classList.add('hidden');
+  document.getElementById('wizStep2').classList.remove('hidden');
+  await ensureCatalogo();                                           // para buscador/validación
+  fillStep2({}, []);                                               // encabezado vacío + 1 línea
 }
 function setStep(n){
   document.getElementById('stp1').className='step '+(n>1?'done':(n===1?'active':''));
@@ -848,13 +870,16 @@ async function enviar(){
   });
   if(faltanEnc.length) errores.push('Complete los campos requeridos del encabezado: '+faltanEnc.join(', ')+'.');
 
-  // 2) Detalle: cada línea con datos debe tener TODOS los campos
+  // 2) Detalle: cada línea con datos debe tener TODOS los campos requeridos.
+  //    En modo manual la "Descripción" (texto libre) es opcional: el código ya
+  //    trae la Descripción Nutricare del catálogo.
+  const reqCols = WIZ.manual ? DET_REQ.filter(c=> c.k!=='descripcion') : DET_REQ;
   const valOf=(d,k)=> String(d[k]==null?'':d[k]).trim();
-  const isEmptyRow=(d)=> DET_REQ.every(c=> !valOf(d,c.k));
+  const isEmptyRow=(d)=> reqCols.every(c=> !valOf(d,c.k));
   const detalle=[]; const lineasIncompletas=[]; const codsInvalidos=[];
   WIZ.detalle.forEach((d,i)=>{
     if(isEmptyRow(d)) return; // se ignoran filas totalmente vacías
-    const faltan=DET_REQ.filter(c=> !valOf(d,c.k));
+    const faltan=reqCols.filter(c=> !valOf(d,c.k));
     const codInv=valOf(d,'codigo') && !catCodigoValido(d.codigo);
     if(faltan.length){
       lineasIncompletas.push(i+1);
@@ -868,7 +893,7 @@ async function enviar(){
       detalle.push({codigo:valOf(d,'codigo'),numero_equipo:valOf(d,'numero_equipo'),descripcion:valOf(d,'descripcion'),descripcion_nutricare:catDesc(d.codigo),und:d.und,reposicion_anaquel:d.reposicion_anaquel});
     }
   });
-  if(lineasIncompletas.length) errores.push('Complete todos los campos (Código, N° equipo, Descripción, Und, Reposición) en la(s) línea(s) del detalle: '+lineasIncompletas.join(', ')+'.');
+  if(lineasIncompletas.length) errores.push('Complete todos los campos ('+reqCols.map(c=>c.l).join(', ')+') en la(s) línea(s) del detalle: '+lineasIncompletas.join(', ')+'.');
   if(codsInvalidos.length) errores.push('Hay código(s) que no existen en el catálogo en la(s) línea(s): '+codsInvalidos.join(', ')+'. Corríjalos antes de enviar.');
   if(!lineasIncompletas.length && !codsInvalidos.length && !detalle.length) errores.push('Agregue al menos una línea de detalle con todos sus campos.');
 
