@@ -358,16 +358,44 @@ async function loadCatalogo(){
   }catch(e){ CATALOGO=null; toast('No se pudo cargar el catálogo de productos: '+e.message); }
 }
 async function ensureCatalogo(){ if(!catReady()) await loadCatalogo(); }
-// Carga manual del catálogo (fuerza refresco). Informa cantidad o el error exacto del endpoint.
+
+/* ===== Catálogo de lotes por producto ===== */
+let LOTES=null; // Map(codigo -> [lote, ...])
+function lotesReady(){ return LOTES instanceof Map && LOTES.size>0; }
+async function loadLotes(){
+  try{
+    const arr=await api('GET','/lotes');
+    const m=new Map();
+    (arr||[]).forEach(x=>{
+      const c=normCod(x.codigo), l=(x.lote==null?'':String(x.lote)).trim();
+      if(c&&l){ if(!m.has(c)) m.set(c,[]); const a=m.get(c); if(a.indexOf(l)<0) a.push(l); }
+    });
+    LOTES=m;
+  }catch(e){ LOTES=null; toast('No se pudo cargar el catálogo de lotes: '+e.message); }
+}
+// Lotes de un código, filtrados por texto (para el autocompletado de la columna N° Lote).
+function loteSearch(codigo, q, limit){
+  limit=limit||60;
+  if(!lotesReady()) return [];
+  const arr=LOTES.get(normCod(codigo))||[];
+  const qt=String(q==null?'':q).trim().toLowerCase();
+  const res=[];
+  for(const l of arr){ if(!qt || l.toLowerCase().indexOf(qt)>=0){ res.push(l); if(res.length>=limit) break; } }
+  return res;
+}
+
+// Carga manual de catálogos (productos + lotes). Informa cantidades o el error exacto.
 async function recargarProductos(){
   const btn=document.getElementById('prodBtn');
-  if(btn){ btn.disabled=true; btn.textContent='Cargando productos…'; }
+  if(btn){ btn.disabled=true; btn.textContent='Cargando…'; }
   try{
     const arr=await api('GET','/productos?refresh=1');
     const m=new Map();
     (arr||[]).forEach(p=>{ const c=normCod(p.codigo); if(c) m.set(c, p.descripcion||''); });
     CATALOGO=m;
-    toast('Catálogo cargado: '+m.size+' producto'+(m.size===1?'':'s')+'.');
+    let msg='Catálogo cargado: '+m.size+' producto'+(m.size===1?'':'s')+'.';
+    try{ await loadLotes(); if(lotesReady()) msg+=' Lotes: '+LOTES.size+' códigos.'; }catch(_){}
+    toast(msg);
   }catch(e){ CATALOGO=null; toast('No se pudo cargar el catálogo: '+e.message); }
   finally{ if(btn){ btn.disabled=false; btn.textContent='🔄 Cargar productos'; } }
 }
@@ -409,16 +437,27 @@ function acBox(){
   return AC.box;
 }
 function acShow(input){
-  if(!catReady()) return;               // aún no cargó el catálogo: sin sugerencias
   AC.input=input;
-  const items=catSearch(input.value, 40);
+  let items=[], vacio='';
+  if(input.classList.contains('lote-input')){
+    // Lotes filtrados por el código de esa misma línea.
+    const i=input.dataset.i;
+    const cod=(VER_DET[i] && VER_DET[i].codigo) || '';
+    if(!normCod(cod)){ acHide(); return; }          // sin código no hay lotes que mostrar
+    items=loteSearch(cod, input.value, 60).map(l=>({label:l, sub:''}));
+    vacio='Sin lotes para este código';
+  } else {
+    if(!catReady()) return;                          // aún no cargó el catálogo
+    items=catSearch(input.value, 40).map(it=>({label:it.code, sub:it.desc}));
+    vacio='Sin coincidencias en el catálogo';
+  }
   AC.list=items; AC.idx=-1;
   const box=acBox();
   if(!items.length){
-    box.innerHTML='<div class="ac-empty">Sin coincidencias en el catálogo</div>';
+    box.innerHTML='<div class="ac-empty">'+vacio+'</div>';
   } else {
     box.innerHTML=items.map((it,i)=>
-      `<div class="ac-item" data-idx="${i}"><span class="ac-code">${esc(it.code)}</span><span class="ac-desc">${esc(it.desc)}</span></div>`
+      `<div class="ac-item" data-idx="${i}"><span class="ac-code">${esc(it.label)}</span>${it.sub?`<span class="ac-desc">${esc(it.sub)}</span>`:''}</div>`
     ).join('');
   }
   acPos(input);
@@ -434,8 +473,8 @@ function acPos(input){
 function acHide(){ if(AC.box) AC.box.classList.add('hidden'); AC.input=null; AC.list=[]; AC.idx=-1; }
 function acPick(i){
   const it=AC.list[i], inp=AC.input; if(!it||!inp) return;
-  inp.value=it.code;
-  // Dispara el oninput existente (onDet/onVerDet) -> llena descripción y valida.
+  inp.value=it.label;
+  // Dispara el oninput existente (onDet/onVerDet) -> llena descripción/lote y valida.
   inp.dispatchEvent(new Event('input',{bubbles:true}));
   acHide(); inp.focus();
 }
@@ -447,9 +486,9 @@ function acMove(delta){
   const el=kids[AC.idx]; if(el&&el.scrollIntoView) el.scrollIntoView({block:'nearest'});
 }
 function acInit(){
-  const isCode = el => el && el.matches && el.matches('input.code-input');
-  document.addEventListener('focusin', e=>{ if(isCode(e.target)) acShow(e.target); });
-  document.addEventListener('input', e=>{ if(isCode(e.target)) acShow(e.target); });
+  const isAC = el => el && el.matches && el.matches('input.code-input, input.lote-input');
+  document.addEventListener('focusin', e=>{ if(isAC(e.target)) acShow(e.target); });
+  document.addEventListener('input', e=>{ if(isAC(e.target)) acShow(e.target); });
   document.addEventListener('keydown', e=>{
     if(!AC.input) return;
     if(e.key==='ArrowDown'){ e.preventDefault(); acMove(1); }
@@ -476,7 +515,8 @@ async function init(){
     document.getElementById('login').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     loadCatalogo(); // catálogo de productos en segundo plano
-    acInit();       // buscador de código (autocompletado)
+    loadLotes();    // catálogo de lotes por producto en segundo plano
+    acInit();       // buscador de código / lote (autocompletado)
     buildNav();
     showInicio();
   }catch(e){
@@ -662,9 +702,10 @@ function renderVerDet(){
         return `<td><div class="nutdesc" id="vnut_${i}">${esc(dn)}</div></td>`;
       }
       const isCode = c.k==='codigo';
+      const isLote = c.k==='numero_lote';
       const inv = (isCode && normCod(d.codigo) && !catCodigoValido(d.codigo)) ? 'invalid' : '';
-      const cls = (inv+(isCode?' code-input':'')).trim();
-      const extra = isCode ? ' autocomplete="off"' : '';
+      const cls = (inv+(isCode?' code-input':'')+(isLote?' lote-input':'')).trim();
+      const extra = (isCode||isLote) ? ' autocomplete="off"' : '';
       return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onVerDet(this)"></td>`;
     }).join('');
     const tr=document.createElement('tr');

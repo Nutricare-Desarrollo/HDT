@@ -2,6 +2,7 @@ const { app } = require('@azure/functions');
 const { query, getClient } = require('./db');
 const { analyzeLayout, parseLayout, toInt } = require('./layout');
 const { getCatalogo, getMapa, normCod } = require('./productos');
+const { getLotes } = require('./lotes');
 
 /* ============================================================
    Utilidades
@@ -125,6 +126,25 @@ app.http('productos-list', {
     } catch (e) {
       context.error(e);
       return json(502, { error: 'No se pudo obtener el catálogo de productos', detail: e.message });
+    }
+  }
+});
+
+/* ============================================================
+   /api/lotes  -> catálogo de lotes por producto (proxy + caché)
+   ============================================================ */
+app.http('lotes-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'lotes',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    try {
+      const force = (request.query.get('refresh') || '') === '1';
+      const data = await getLotes(force);
+      return json(200, data);
+    } catch (e) {
+      context.error(e);
+      return json(502, { error: 'No se pudo obtener el catálogo de lotes', detail: e.message });
     }
   }
 });

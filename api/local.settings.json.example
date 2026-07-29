@@ -19,6 +19,12 @@
     "PRODUCTOS_API_METHOD": "GET",
     "PRODUCTOS_API_BODY": "{}",
     "PRODUCTOS_API_KEY": "",
-    "PRODUCTOS_CACHE_MS": "600000"
+    "PRODUCTOS_CACHE_MS": "600000",
+
+    "LOTES_API_URL": "https://...powerplatform.com/.../invoke?api-version=1&sp=...&sv=1.0&sig=... (URL COMPLETA del flujo de lotes, con todos los query params)",
+    "LOTES_API_METHOD": "GET",
+    "LOTES_API_BODY": "{}",
+    "LOTES_API_KEY": "",
+    "LOTES_CACHE_MS": "600000"
   }
 }
