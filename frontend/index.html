@@ -617,7 +617,10 @@ function renderVerReadonly(h){
   html+='<div class="tbl-wrap"><table><thead><tr>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
   (h.detalle||[]).forEach(d=>{ html+='<tr>'+DET_COLS.map(c=>`<td>${esc(d[c.k])}</td>`).join('')+'</tr>'; });
   html+='</tbody></table></div>';
-  if(h.imagen_base64){ html+=`<div class="section-title">Imagen</div><button class="btn-ghost" onclick="verImagenGuardada()">🖼️ Ver hoja de consumo</button>`; }
+  html+='<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">';
+  if(h.imagen_base64){ html+=`<button class="btn-ghost" onclick="verImagenGuardada()">🖼️ Ver hoja de consumo</button>`; }
+  html+=`<button class="btn-ghost" onclick="imprimirHoja()">🖨️ Imprimir</button>`;
+  html+='</div>';
   document.getElementById('verBody').innerHTML=html;
 }
 
@@ -684,9 +687,13 @@ function rmVerDet(i){ VER_DET.splice(i,1); if(!VER_DET.length)VER_DET=[{}]; rend
 /* Imprime la hoja de consumo con el formato oficial de Nutricare.
    Usa los valores en pantalla (incluye ediciones sin guardar). */
 function imprimirHoja(){
-  const enc={}; ENC.forEach(f=>{ const el=document.getElementById('ver_'+f.k); enc[f.k]=el?el.value.trim():''; });
+  const h=CUR_VER||{};
+  // Encabezado: usa los inputs editables (Bodega) si existen; si no, los datos guardados (Hospital).
+  const enc={}; ENC.forEach(f=>{ const el=document.getElementById('ver_'+f.k); enc[f.k]= el ? el.value.trim() : (h[f.k]!=null?String(h[f.k]):''); });
   const noVacia=(d)=> ['codigo','numero_equipo','und','reposicion_anaquel'].some(k=> String(d[k]==null?'':d[k]).trim()!=='');
-  const filas=(VER_DET||[]).filter(noVacia).map(d=>({
+  // Detalle: tabla editable (Bodega) -> VER_DET; solo lectura (Hospital) -> detalle guardado.
+  const src = document.getElementById('verDetBody') ? (VER_DET||[]) : (h.detalle||[]);
+  const filas=src.filter(noVacia).map(d=>({
     codigo: d.codigo||'',
     equipo: d.numero_equipo||'',
     // En Bodega la DESCRIPCIÓN oficial es la Descripción Nutricare (del catálogo).
@@ -944,6 +951,12 @@ function onDet(el){
   if(k==='codigo'){
     const d=WIZ.detalle[i];
     d.descripcion_nutricare=catDesc(d.codigo);
+    // Línea nueva (Descripción vacía): poné el nombre del producto en la columna Descripción.
+    const nombre=catDesc(d.codigo);
+    if(nombre && (d.descripcion==null || String(d.descripcion).trim()==='')){
+      d.descripcion=nombre;
+      const dEl=document.querySelector(`#detBody input[data-i="${i}"][data-k="descripcion"]`); if(dEl) dEl.value=nombre;
+    }
     const cell=document.getElementById('nut_'+i); if(cell) cell.innerHTML=esc(d.descripcion_nutricare);
     el.classList.toggle('invalid', !!normCod(d.codigo) && !catCodigoValido(d.codigo));
     updateEnviarState();
