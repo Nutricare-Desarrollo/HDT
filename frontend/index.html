@@ -201,6 +201,7 @@ input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-sha
       <div class="page-head">
         <div><h2 id="hojasTitle">Hojas de consumo</h2><div class="sub" id="hojasSub"></div></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn-ghost" id="prodBtn" onclick="recargarProductos()">🔄 Cargar productos</button>
           <button class="btn-ghost" id="scopeBtn" onclick="toggleScope()">📅 Ver historial</button>
           <button class="btn-ghost hidden" id="crearBtn" onclick="openManual()">✎ Crear hoja de consumo</button>
           <button class="btn-primary hidden" id="subirBtn" onclick="openWizard()">＋ Subir hoja de consumo</button>
@@ -357,6 +358,19 @@ async function loadCatalogo(){
   }catch(e){ CATALOGO=null; toast('No se pudo cargar el catálogo de productos: '+e.message); }
 }
 async function ensureCatalogo(){ if(!catReady()) await loadCatalogo(); }
+// Carga manual del catálogo (fuerza refresco). Informa cantidad o el error exacto del endpoint.
+async function recargarProductos(){
+  const btn=document.getElementById('prodBtn');
+  if(btn){ btn.disabled=true; btn.textContent='Cargando productos…'; }
+  try{
+    const arr=await api('GET','/productos?refresh=1');
+    const m=new Map();
+    (arr||[]).forEach(p=>{ const c=normCod(p.codigo); if(c) m.set(c, p.descripcion||''); });
+    CATALOGO=m;
+    toast('Catálogo cargado: '+m.size+' producto'+(m.size===1?'':'s')+'.');
+  }catch(e){ CATALOGO=null; toast('No se pudo cargar el catálogo: '+e.message); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='🔄 Cargar productos'; } }
+}
 
 /* ===== Buscador de código (autocompletado) ===== */
 // Busca en el catálogo por código y por descripción. Devuelve hasta `limit`
@@ -767,8 +781,8 @@ async function openManual(){
   document.getElementById('wizStep1').classList.add('hidden');
   document.getElementById('wizResult').classList.add('hidden');
   document.getElementById('wizStep2').classList.remove('hidden');
-  await ensureCatalogo();                                           // para buscador/validación
-  fillStep2({}, []);                                               // encabezado vacío + 1 línea
+  fillStep2({}, []);                 // render inmediato (encabezado vacío + 1 línea)
+  ensureCatalogo();                  // catálogo en segundo plano: NO bloquea el formulario
 }
 function setStep(n){
   document.getElementById('stp1').className='step '+(n>1?'done':(n===1?'active':''));
