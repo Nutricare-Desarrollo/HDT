@@ -66,7 +66,9 @@ async function fetchCatalogo() {
   const url = process.env.PRODUCTOS_API_URL;
   if (!url) throw new Error('Falta configurar PRODUCTOS_API_URL en el servidor (Application settings del Static Web App).');
 
-  const method = (process.env.PRODUCTOS_API_METHOD || 'POST').toUpperCase();
+  // El flujo de Power Automate se invoca por GET (la firma SAS es para GET).
+  // Se puede sobreescribir con PRODUCTOS_API_METHOD si algún día cambia.
+  const method = (process.env.PRODUCTOS_API_METHOD || 'GET').toUpperCase();
   const headers = { 'Accept': 'application/json' };
   if (process.env.PRODUCTOS_API_KEY) headers['x-api-key'] = process.env.PRODUCTOS_API_KEY;
 
