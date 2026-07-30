@@ -277,22 +277,22 @@ input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-sha
         <div class="card pad">
           <div class="section-title" style="margin-top:0">Anaquel</div>
           <div class="cfg-grid">
-            <div class="field"><label>Origen</label><input id="cfg_anaquel_origen" type="text" autocomplete="off"></div>
-            <div class="field"><label>Destino</label><input id="cfg_anaquel_destino" type="text" autocomplete="off"></div>
+            <div class="field"><label>Origen <span class="req">*</span></label><input id="cfg_anaquel_origen" type="text" autocomplete="off"></div>
+            <div class="field"><label>Destino <span class="req">*</span></label><input id="cfg_anaquel_destino" type="text" autocomplete="off"></div>
           </div>
         </div>
         <div class="card pad">
           <div class="section-title" style="margin-top:0">Nutricare</div>
           <div class="cfg-grid">
-            <div class="field"><label>Origen</label><input id="cfg_nutricare_origen" type="text" autocomplete="off"></div>
-            <div class="field"><label>Destino</label><input id="cfg_nutricare_destino" type="text" autocomplete="off"></div>
+            <div class="field"><label>Origen <span class="req">*</span></label><input id="cfg_nutricare_origen" type="text" autocomplete="off"></div>
+            <div class="field"><label>Destino <span class="req">*</span></label><input id="cfg_nutricare_destino" type="text" autocomplete="off"></div>
           </div>
         </div>
         <div class="card pad">
           <div class="section-title" style="margin-top:0">Facturación</div>
           <div class="cfg-grid">
-            <div class="field"><label>Origen</label><input id="cfg_facturacion_origen" type="text" autocomplete="off"></div>
-            <div class="field"><label>Destino</label><input id="cfg_facturacion_destino" type="text" autocomplete="off"></div>
+            <div class="field"><label>Origen <span class="req">*</span></label><input id="cfg_facturacion_origen" type="text" autocomplete="off"></div>
+            <div class="field"><label>Destino <span class="req">*</span></label><input id="cfg_facturacion_destino" type="text" autocomplete="off"></div>
           </div>
         </div>
       </div>
@@ -636,6 +636,7 @@ async function loadConfig(){
     });
   }catch(e){ toast('No se pudo cargar la configuración: '+e.message); }
 }
+const CFG_LABELS={anaquel:'Anaquel',nutricare:'Nutricare',facturacion:'Facturación'};
 async function guardarConfig(){
   if(!canBodega()){ toast('Su rol no tiene acceso a Configuración'); return; }
   const cfg={};
@@ -645,6 +646,20 @@ async function guardarConfig(){
       destino:(document.getElementById('cfg_'+a+'_destino').value||'').trim()
     };
   });
+
+  // Todos los campos son requeridos.
+  document.querySelectorAll('#viewConfig .invalid').forEach(el=>el.classList.remove('invalid'));
+  const faltan=[];
+  CFG_AREAS.forEach(a=>{
+    [['origen','Origen'],['destino','Destino']].forEach(([k,l])=>{
+      if(!cfg[a][k]){
+        faltan.push(CFG_LABELS[a]+' · '+l);
+        const el=document.getElementById('cfg_'+a+'_'+k); if(el) el.classList.add('invalid');
+      }
+    });
+  });
+  if(faltan.length){ toast('Complete todos los campos: '+faltan.join(', ')+'.'); return; }
+
   const btn=document.getElementById('cfgSaveBtn'); btn.disabled=true; btn.textContent='Guardando…';
   try{
     await api('PUT','/configuracion',cfg);
