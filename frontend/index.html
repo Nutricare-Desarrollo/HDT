@@ -99,6 +99,7 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 /* View / form */
 .section-title{font-size:13px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid var(--line);padding-bottom:6px;margin:18px 0 12px}
 .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .field.full{grid-column:1/-1}
 .kv{display:grid;grid-template-columns:180px 1fr;gap:6px 14px;font-size:14px}
 .kv .k{color:var(--muted)}
@@ -264,6 +265,39 @@ input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-sha
 
       <!-- Resultado -->
       <div id="wizResult" class="card hidden"><div class="result-box" id="resultBody"></div></div>
+    </section>
+
+    <!-- CONFIGURACIÓN (solo Bodega / Administrador) -->
+    <section id="viewConfig" class="hidden">
+      <div class="page-head">
+        <div><h2>Configuración</h2><div class="sub">Ubicaciones de origen y destino por área</div></div>
+      </div>
+      <div class="dash-grid">
+        <div class="card pad">
+          <div class="section-title" style="margin-top:0">Anaquel</div>
+          <div class="cfg-grid">
+            <div class="field"><label>Origen</label><input id="cfg_anaquel_origen" type="text" autocomplete="off"></div>
+            <div class="field"><label>Destino</label><input id="cfg_anaquel_destino" type="text" autocomplete="off"></div>
+          </div>
+        </div>
+        <div class="card pad">
+          <div class="section-title" style="margin-top:0">Nutricare</div>
+          <div class="cfg-grid">
+            <div class="field"><label>Origen</label><input id="cfg_nutricare_origen" type="text" autocomplete="off"></div>
+            <div class="field"><label>Destino</label><input id="cfg_nutricare_destino" type="text" autocomplete="off"></div>
+          </div>
+        </div>
+        <div class="card pad">
+          <div class="section-title" style="margin-top:0">Facturación</div>
+          <div class="cfg-grid">
+            <div class="field"><label>Origen</label><input id="cfg_facturacion_origen" type="text" autocomplete="off"></div>
+            <div class="field"><label>Destino</label><input id="cfg_facturacion_destino" type="text" autocomplete="off"></div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap">
+        <button class="btn-primary" id="cfgSaveBtn" onclick="guardarConfig()">💾 Guardar</button>
+      </div>
     </section>
   </main>
 </div>
@@ -546,10 +580,12 @@ function changeRole(val){
 function buildNav(){
   const n=document.getElementById('navTabs'); n.innerHTML='';
   const items=[{id:'inicio',l:'🏠 Inicio',fn:showInicio},{id:'hojas',l:'📋 Hojas de consumo',fn:showHojas}];
+  // Configuración: solo visible para Bodega y Administrador, junto a Hojas de consumo.
+  if(canBodega()) items.push({id:'config',l:'⚙️ Configuración',fn:showConfig});
   items.forEach(it=>{ const b=document.createElement('button'); b.id='tab-'+it.id; b.textContent=it.l; b.onclick=it.fn; n.appendChild(b); });
 }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewVer','viewWizard'];
+const VIEWS=['viewInicio','viewHojas','viewVer','viewWizard','viewConfig'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
 
 /* ===== INICIO ===== */
@@ -580,6 +616,40 @@ async function showInicio(){
     }
     body.innerHTML=html||'<div class="empty">Sin datos.</div>';
   }catch(e){ body.innerHTML=`<div class="empty" style="color:var(--danger)">No se pudo cargar: ${esc(e.message)}</div>`; }
+}
+
+/* ===== CONFIGURACIÓN (solo Bodega / Administrador) ===== */
+const CFG_AREAS=['anaquel','nutricare','facturacion'];
+async function showConfig(){
+  if(!canBodega()){ toast('Su rol no tiene acceso a Configuración'); showInicio(); return; }
+  setTab('config'); showOnly('viewConfig');
+  await loadConfig();
+}
+async function loadConfig(){
+  try{
+    const cfg=await api('GET','/configuracion');
+    CFG_AREAS.forEach(a=>{
+      const o=document.getElementById('cfg_'+a+'_origen'), d=document.getElementById('cfg_'+a+'_destino');
+      if(o) o.value=(cfg[a]&&cfg[a].origen)||'';
+      if(d) d.value=(cfg[a]&&cfg[a].destino)||'';
+    });
+  }catch(e){ toast('No se pudo cargar la configuración: '+e.message); }
+}
+async function guardarConfig(){
+  if(!canBodega()){ toast('Su rol no tiene acceso a Configuración'); return; }
+  const cfg={};
+  CFG_AREAS.forEach(a=>{
+    cfg[a]={
+      origen:(document.getElementById('cfg_'+a+'_origen').value||'').trim(),
+      destino:(document.getElementById('cfg_'+a+'_destino').value||'').trim()
+    };
+  });
+  const btn=document.getElementById('cfgSaveBtn'); btn.disabled=true; btn.textContent='Guardando…';
+  try{
+    await api('PUT','/configuracion',cfg);
+    toast('Configuración guardada');
+  }catch(e){ toast('No se pudo guardar: '+e.message); }
+  finally{ btn.disabled=false; btn.textContent='💾 Guardar'; }
 }
 
 /* ===== GRID ===== */

@@ -375,6 +375,64 @@ app.http('resumen-bodega', {
 });
 
 /* ============================================================
+   Configuración (ubicaciones Origen/Destino) — solo Bodega/Administrador
+   ============================================================ */
+const CONFIG_AREAS = ['anaquel', 'nutricare', 'facturacion'];
+
+/* Devuelve { anaquel:{origen,destino}, nutricare:{...}, facturacion:{...} }. */
+app.http('config-get', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'configuracion',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    try {
+      if (!puedeBodega(await getRole(user))) return json(403, { error: 'Solo Bodega/Administrador' });
+      const r = await query(`SELECT Area AS area, Origen AS origen, Destino AS destino FROM dbo.Configuracion`);
+      const out = {};
+      CONFIG_AREAS.forEach(a => { out[a] = { origen: '', destino: '' }; });
+      r.rows.forEach(x => { if (out[x.area]) out[x.area] = { origen: x.origen || '', destino: x.destino || '' }; });
+      return json(200, out);
+    } catch (e) { context.error(e); return json(500, { error: 'Error al obtener la configuración', detail: e.message }); }
+  }
+});
+
+/* Guarda las tres áreas (upsert). Body: { anaquel:{origen,destino}, ... }. */
+app.http('config-save', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'configuracion',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar la configuración' });
+
+    const body = await request.json();
+    const norm = v => (v === undefined || v === null || String(v).trim() === '') ? null : String(v).trim();
+
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      for (const a of CONFIG_AREAS) {
+        const area = body[a] || {};
+        await client.query(
+          `INSERT INTO dbo.Configuracion (Area, Origen, Destino, ModificadoPor, FechaModificacion)
+           VALUES ($1,$2,$3,$4,(now() at time zone 'utc'))
+           ON CONFLICT (Area) DO UPDATE
+              SET Origen=EXCLUDED.Origen, Destino=EXCLUDED.Destino,
+                  ModificadoPor=EXCLUDED.ModificadoPor, FechaModificacion=EXCLUDED.FechaModificacion`,
+          [a, norm(area.origen), norm(area.destino), user.name || user.email]);
+      }
+      await client.query('COMMIT');
+      return json(200, { ok: true });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      context.error(e);
+      return json(500, { error: 'No se pudo guardar la configuración', detail: e.message });
+    } finally {
+      client.release();
+    }
+  }
+});
+
+/* ============================================================
    Usuarios y roles (solo Administrador)
    ============================================================ */
 app.http('usuarios-list', {

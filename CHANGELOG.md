@@ -2,6 +2,22 @@
 
 Registro de los cambios del proyecto, por parte/tanda.
 
+## [Parte 3] — Pantalla de Configuración (ubicaciones Origen/Destino)
+
+### Base de datos
+- Nueva tabla `dbo.Configuracion` (`Area`, `Origen`, `Destino` + auditoría), con las tres áreas
+  sembradas (`anaquel`, `nutricare`, `facturacion`). Migración idempotente: `database/04_Configuracion.sql`.
+
+### API (Azure Functions)
+- Nuevo endpoint `GET /api/configuracion`: devuelve `{ anaquel:{origen,destino}, nutricare:{...}, facturacion:{...} }`.
+- Nuevo endpoint `PUT /api/configuracion`: guarda las tres áreas (upsert transaccional).
+- Ambos restringidos a rol **Bodega** y **Administrador**.
+
+### Frontend
+- Nueva pestaña **⚙️ Configuración**, junto a "Hojas de consumo", visible solo para Bodega/Administrador.
+- Pantalla con 3 paneles (Anaquel, Nutricare, Facturación), cada uno con las cajas **Origen** y **Destino**.
+- Carga los valores guardados al abrir y los persiste con el botón **Guardar**.
+
 ## [Parte 2] — Catálogo de productos Nutricare
 
 ### Base de datos
