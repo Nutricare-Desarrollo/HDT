@@ -258,7 +258,7 @@ app.http('hoja-get', {
     try {
       const id = parseInt(request.params.id, 10);
       const h = await query(
-        `SELECT Id AS id, NumeroHoja AS numero_hoja, NumeroDocumento AS numero_documento, Regimen AS regimen,
+        `SELECT Id AS id, Consecutivo AS consecutivo, NumeroHoja AS numero_hoja, NumeroDocumento AS numero_documento, Regimen AS regimen,
                 Paciente AS paciente, Identificacion AS identificacion, Tipo AS tipo,
                 to_char(FechaAccidente,'YYYY-MM-DD') AS fecha_accidente,
                 to_char(FechaCirugia,'YYYY-MM-DD') AS fecha_cirugia,

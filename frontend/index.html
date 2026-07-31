@@ -813,7 +813,7 @@ async function verHoja(id, keepDyn){
     const h=await api('GET','/hojas/'+id);
     CUR_VER=h;
     // El catálogo se carga al entrar al sitio (init). No se espera aquí para que la hoja se muestre de inmediato.
-    document.getElementById('verSub').textContent=`N° ${h.numero_hoja||'—'} · ${estadoTxt(h.estado)} · ${h.fecha||''} · ${h.usuario||''}`;
+    document.getElementById('verSub').innerHTML=`N° ${esc(h.numero_hoja||'—')} · <span class="tag" style="font-weight:700">Consecutivo ${esc(h.consecutivo!=null?h.consecutivo:'—')}</span> · ${esc(estadoTxt(h.estado))} · ${esc(h.fecha||'')} · ${esc(h.usuario||'')}`;
     if(canBodega()) renderVerEdit(h); else renderVerReadonly(h);
   }catch(e){ body.innerHTML=`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`; }
 }
