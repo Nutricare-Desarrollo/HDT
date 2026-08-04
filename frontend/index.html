@@ -1549,7 +1549,10 @@ async function analizar(){
   try{
     // El catálogo ya se cargó al entrar al sitio (init); no se espera aquí.
     const out=await api('POST','/extraer',{imagenBase64:WIZ.base64,tipo:WIZ.tipo});
-    fillStep2(out.encabezado||{}, out.detalle||[]);
+    // Solo se conservan las líneas leídas que traen Código; las vacías (p. ej. de un
+    // sello o texto suelto en la foto) se descartan para no ensuciar el detalle.
+    const detLeido=(out.detalle||[]).filter(d=> String((d&&d.codigo!=null)?d.codigo:'').trim()!=='');
+    fillStep2(out.encabezado||{}, detLeido);
     document.getElementById('wizStep1').classList.add('hidden');
     document.getElementById('wizStep2').classList.remove('hidden');
     setStep(2);
