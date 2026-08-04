@@ -91,6 +91,8 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .b-CreandoTR{background:#efe3fb;color:#6a2fa0}
 .b-Finalizada{background:#d9f2e4;color:#12724a}
 .b-Error{background:#fbeae8;color:#a02b1f}
+.b-Pendientereposicion{background:#fff6e5;color:#8a5a00}
+.b-Resuelto{background:#e6f0ea;color:#1c6b45}
 
 /* Dashboard */
 .dash-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px}
@@ -227,6 +229,19 @@ input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-sha
       </div>
     </section>
 
+    <!-- PENDIENTES DE REPOSICIÓN (Hospital / Administrador) -->
+    <section id="viewPendientes" class="hidden">
+      <div class="page-head">
+        <div><h2>Pendientes de reposición</h2><div class="sub">Hojas guardadas a la espera de completar la reposición y enviar</div></div>
+        <button class="btn-ghost" onclick="loadPendientes()">🔄 Actualizar</button>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap"><table id="pendGrid"><thead id="pendHead"></thead><tbody id="pendBody"></tbody></table></div>
+        <div id="pendEmpty" class="empty hidden"><div class="big">🕒</div><div>No hay hojas pendientes de reposición.</div></div>
+        <div class="grid-foot" id="pendFoot"></div>
+      </div>
+    </section>
+
     <!-- VER (solo lectura) -->
     <section id="viewVer" class="hidden">
       <div class="page-head">
@@ -270,7 +285,9 @@ input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-sha
         </div>
         <div class="foot">
           <button class="btn-ghost" id="verImgBtn" onclick="verImagenActual()">🖼️ Ver hoja de consumo</button>
+          <button class="btn-ghost" id="wizPrintBtn" onclick="imprimirWizard()">🖨️ Imprimir</button>
           <button class="btn-ghost" onclick="cancelWizard()">Cancelar</button>
+          <button class="btn-ghost" id="guardarBtn" onclick="guardar()">💾 Guardar</button>
           <button class="btn-primary" id="enviarBtn" onclick="enviar()">Enviar hoja de consumo</button>
         </div>
       </div>
@@ -348,6 +365,19 @@ input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-sha
         <button class="btn-ghost" onclick="showPedidos()">← Volver al listado</button>
       </div>
       <div class="card pad" id="pedDetBody"></div>
+    </section>
+
+    <!-- REEMPLAZOS / CORRECCIONES (Bodega / Administrador) -->
+    <section id="viewReemplazos" class="hidden">
+      <div class="page-head">
+        <div><h2>Reemplazos / Correcciones</h2><div class="sub">Hojas creadas a partir de otra; se resuelven aquí (no van a Dynamics)</div></div>
+        <button class="btn-ghost" onclick="loadReemplazos()">🔄 Actualizar</button>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap"><table id="remGrid"><thead id="remHead"></thead><tbody id="remBody"></tbody></table></div>
+        <div id="remEmpty" class="empty hidden"><div class="big">🔁</div><div>No hay reemplazos ni correcciones.</div></div>
+        <div class="grid-foot" id="remFoot"></div>
+      </div>
     </section>
   </main>
 </div>
@@ -431,6 +461,7 @@ const GRID_COLS = [
 ];
 const ESTADOS = ['Enviado','En revisión','Creando TR','Finalizada','Error'];
 const ESTADO_COLOR = {'Enviado':'#0a5c8a','En revisión':'#e08e0b','Creando TR':'#7a3ea8','Finalizada':'#1e8f5a','Error':'#c0392b'};
+const PEND='Pendiente reposición'; // estado de una hoja guardada sin la reposición todavía
 
 let USER=null, ROL='Hospital', REAL_ROL='Hospital';
 const ROLES=['Administrador','Hospital','Bodega'];
@@ -660,14 +691,18 @@ function changeRole(val){
 function buildNav(){
   const n=document.getElementById('navTabs'); n.innerHTML='';
   const items=[{id:'inicio',l:'🏠 Inicio',fn:showInicio},{id:'hojas',l:'📋 Hojas de consumo',fn:showHojas}];
+  // Pendientes de reposición: Hospital y Administrador.
+  if(canSubir()) items.push({id:'pendientes',l:'🕒 Pendientes de reposición',fn:showPendientes});
   // Configuración e Histórico Dynamics: solo Bodega y Administrador.
   if(canBodega()) items.push({id:'config',l:'⚙️ Configuración',fn:showConfig});
   if(canBodega()) items.push({id:'trabajos',l:'🧾 Histórico Dynamics',fn:showTrabajos});
   if(canBodega()) items.push({id:'pedidos',l:'📦 Pedido Pendiente',fn:showPedidos});
+  // Reemplazos/Correcciones: solo Bodega y Administrador.
+  if(canBodega()) items.push({id:'reemplazos',l:'🔁 Reemplazos / Correcciones',fn:showReemplazos});
   items.forEach(it=>{ const b=document.createElement('button'); b.id='tab-'+it.id; b.textContent=it.l; b.onclick=it.fn; n.appendChild(b); });
 }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet'];
+const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
 
 /* ===== INICIO ===== */
@@ -795,7 +830,48 @@ function filtered(){
   }));
 }
 function onFilter(k,v){ COLF[k]=v; renderGrid(); }
-function estadoBadge(e){ const v=e||'Enviado'; return `<span class="badge b-${v.replace(/\s/g,'')}">${esc(v)}</span>`; }
+function estadoBadge(e){ const v=e||'Enviado'; const cls=v.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s/g,''); return `<span class="badge b-${cls}">${esc(v)}</span>`; }
+
+/* ===== PENDIENTES DE REPOSICIÓN (Hospital / Administrador) ===== */
+let PEND_ROWS=[], PEND_COLF={};
+async function showPendientes(){
+  if(!canSubir()){ toast('Su rol no tiene acceso'); showInicio(); return; }
+  setTab('pendientes'); showOnly('viewPendientes');
+  await loadPendientes();
+}
+async function loadPendientes(){
+  try{ PEND_ROWS=await api('GET','/hojas?estado='+encodeURIComponent(PEND)); }
+  catch(e){ PEND_ROWS=[]; toast('Error al cargar: '+e.message); }
+  renderPendientes();
+}
+function pendFiltered(){
+  return PEND_ROWS.filter(r=> Object.keys(PEND_COLF).every(k=>{
+    const f=(PEND_COLF[k]||'').trim().toLowerCase(); if(!f) return true;
+    return String(r[k]==null?'':r[k]).toLowerCase().includes(f);
+  }));
+}
+function onPendFilter(k,v){ PEND_COLF[k]=v; renderPendientes(); }
+function renderPendientes(){
+  // Mismas columnas que el grid principal, sin la de Estado (todas están 'Pendiente reposición').
+  const cols=GRID_COLS.filter(c=>!c.estado);
+  const head=document.getElementById('pendHead');
+  head.innerHTML=`<tr>${cols.map(c=>`<th>${c.l}</th>`).join('')}<th></th></tr>`
+    +`<tr class="filter-row">${cols.map(c=>`<th><input placeholder="Filtrar…" oninput="onPendFilter('${c.k}',this.value)" value="${attr(PEND_COLF[c.k])}"></th>`).join('')}<th></th></tr>`;
+  const rows=pendFiltered();
+  const b=document.getElementById('pendBody'); b.innerHTML='';
+  document.getElementById('pendEmpty').classList.toggle('hidden', PEND_ROWS.length>0);
+  document.getElementById('pendGrid').classList.toggle('hidden', PEND_ROWS.length===0);
+  const foot=document.getElementById('pendFoot');
+  if(!PEND_ROWS.length){ foot.textContent=''; return; }
+  foot.textContent = rows.length===1?'1 hoja':(rows.length+' hojas');
+  if(!rows.length){ b.innerHTML=`<tr><td colspan="${cols.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  rows.forEach(r=>{
+    const tds=cols.map(c=> c.tag?`<td><span class="tag">${esc(r[c.k])}</span></td>`:`<td>${esc(r[c.k])}</td>`).join('');
+    const tr=document.createElement('tr');
+    tr.innerHTML=tds+`<td><button class="icon-btn" onclick="openEditarPendiente(${r.id})">✎ Completar y enviar</button></td>`;
+    b.appendChild(tr);
+  });
+}
 
 /* ===== VER — solo lectura (Hospital) / editable (Bodega, Administrador) ===== */
 let CUR_VER=null, VER_DET=[];
@@ -812,6 +888,9 @@ async function verHoja(id, keepDyn){
   try{
     const h=await api('GET','/hojas/'+id);
     CUR_VER=h;
+    // Una hoja 'Pendiente reposición' se abre en el editor para completarla (Hospital/Administrador).
+    if(h.estado===PEND && canSubir()){ openEditarPendiente(id, h); return; }
+    if(h.es_reemplazo){ renderReemplazoView(h); return; }
     // El catálogo se carga al entrar al sitio (init). No se espera aquí para que la hoja se muestre de inmediato.
     document.getElementById('verSub').innerHTML=`N° ${esc(h.numero_hoja||'—')} · <span class="tag" style="font-weight:700">Consecutivo ${esc(h.consecutivo!=null?h.consecutivo:'—')}</span> · ${esc(estadoTxt(h.estado))} · ${esc(h.fecha||'')} · ${esc(h.usuario||'')}`;
     if(canBodega()) renderVerEdit(h); else renderVerReadonly(h);
@@ -830,6 +909,30 @@ function renderVerReadonly(h){
   html+='<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">';
   if(h.imagen_base64){ html+=`<button class="btn-ghost" onclick="verImagenGuardada()">🖼️ Ver hoja de consumo</button>`; }
   html+=`<button class="btn-ghost" onclick="imprimirHoja()">🖨️ Imprimir</button>`;
+  if(canSubir() && !h.es_reemplazo){ html+=`<button class="btn-ghost" onclick="openReemplazo(${h.id})">🔁 Crear reemplazo / corrección</button>`; }
+  html+='</div>';
+  document.getElementById('verBody').innerHTML=html;
+}
+
+/* Vista de un reemplazo/corrección: detalle + referencia a la original + botón resolver (Bodega). */
+function renderReemplazoView(h){
+  showOnly('viewVer'); setTab(canBodega()?'reemplazos':'hojas');
+  CUR_VER=h; VER_DET=(h.detalle||[]).map(d=>Object.assign({},d));
+  document.getElementById('verSub').innerHTML=`Reemplazo / corrección · N° ${esc(h.numero_hoja||'—')} · ${esc(estadoTxt(h.estado))}`;
+  let html='<div class="section-title" style="margin-top:0">Encabezado</div><div class="kv">';
+  ENC.forEach(f=>{ html+=`<div class="k">${f.l}</div><div>${esc(h[f.k])}</div>`; });
+  html+='</div>';
+  const org = (h.origen_numero_hoja!=null && h.origen_numero_hoja!=='') ? ('N° '+h.origen_numero_hoja) : ('#'+(h.hoja_origen_id||'—'));
+  html+='<div class="section-title">Origen</div>';
+  if(h.hoja_origen_id){ html+=`<div>Creada a partir de la hoja <span class="link-cell" onclick="verHoja(${h.hoja_origen_id})">${esc(org)}</span>.</div>`; }
+  else { html+='<div>—</div>'; }
+  html+='<div class="section-title">Detalle ('+(h.detalle?h.detalle.length:0)+' líneas)</div>';
+  html+='<div class="tbl-wrap"><table><thead><tr>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
+  (h.detalle||[]).forEach(d=>{ html+='<tr>'+DET_COLS.map(c=>{ const v = c.derived ? (d.descripcion_nutricare||catDesc(d.codigo)) : d[c.k]; return `<td>${esc(v)}</td>`; }).join('')+'</tr>'; });
+  html+='</tbody></table></div>';
+  html+='<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">';
+  html+=`<button class="btn-ghost" onclick="imprimirHoja()">🖨️ Imprimir</button>`;
+  if(canBodega() && h.estado!=='Resuelto'){ html+=`<button class="btn-primary" onclick="resolverReemplazo(${h.id})">✔️ Marcar como resuelto</button>`; }
   html+='</div>';
   document.getElementById('verBody').innerHTML=html;
 }
@@ -859,6 +962,7 @@ function renderVerEdit(h){
       <button class="btn-primary" id="verSaveBtn" onclick="guardarVer()">💾 Guardar cambios</button>
       <button class="btn-dyn" id="verDynBtn" onclick="crearTrabajosDynamics()" ${dynEnabled?'':'disabled'} title="${dynEnabled?'Crear los trabajos en Dynamics':'Primero guardá los cambios (valida los códigos) para habilitar'}">🔗 Crear Trabajos en Dynamics</button>
       <button class="btn-ghost" onclick="imprimirHoja()">🖨️ Imprimir</button>
+      ${(canSubir() && !h.es_reemplazo) ? `<button class="btn-ghost" onclick="openReemplazo(${h.id})">🔁 Crear reemplazo / corrección</button>` : ''}
     </div>`;
   document.getElementById('verBody').innerHTML=html;
   document.getElementById('verDetHead').innerHTML='<tr>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'<th></th></tr>';
@@ -914,6 +1018,10 @@ function imprimirHoja(){
     und: (d.und==null?'':d.und),
     rep: (d.reposicion_anaquel==null?'':d.reposicion_anaquel)
   }));
+  imprimirDoc(enc, filas);
+}
+/* Genera el documento imprimible (formato oficial Nutricare) y abre la impresión. */
+function imprimirDoc(enc, filas){
   const fp=(enc.fecha_hoja||'').split('-'); // [YYYY, MM, DD]
   const anio=fp[0]||'', mes=fp[1]||'', dia=fp[2]||'';
   const MIN=18, total=Math.max(filas.length, MIN);
@@ -993,6 +1101,18 @@ table{border-collapse:collapse}
   const w=window.open('','_blank');
   if(!w){ toast('El navegador bloqueó la ventana de impresión. Permití los pop-ups e intentá de nuevo.'); return; }
   w.document.open(); w.document.write(doc); w.document.close();
+}
+
+/* Imprime desde el wizard (creación/edición): usa los inputs enc_ y WIZ.detalle. */
+function imprimirWizard(){
+  const enc={}; ENC.forEach(f=>{ const el=document.getElementById('enc_'+f.k); enc[f.k]= el ? el.value.trim() : ''; });
+  const noVacia=(d)=> ['codigo','numero_equipo','und','reposicion_anaquel'].some(k=> String(d[k]==null?'':d[k]).trim()!=='');
+  const filas=(WIZ.detalle||[]).filter(noVacia).map(d=>({
+    codigo:d.codigo||'', equipo:d.numero_equipo||'',
+    desc: catDesc(d.codigo) || d.descripcion_nutricare || '',
+    und:(d.und==null?'':d.und), rep:(d.reposicion_anaquel==null?'':d.reposicion_anaquel)
+  }));
+  imprimirDoc(enc, filas);
 }
 
 async function guardarVer(){
@@ -1136,6 +1256,62 @@ function renderTrabajos(){
     }).join('');
     const tr=document.createElement('tr'); tr.innerHTML=tds; b.appendChild(tr);
   });
+}
+
+/* ===== REEMPLAZOS / CORRECCIONES (Bodega / Administrador) ===== */
+let REM_ROWS=[], REM_COLF={};
+const REM_COLS=[
+  {k:'fecha',l:'Fecha y hora'},{k:'usuario',l:'Usuario'},{k:'numero_hoja',l:'N°',tag:true},
+  {k:'origen_numero_hoja',l:'Origen (N°)'},{k:'diagnostico',l:'Diagnóstico'},
+  {k:'cantidad_lineas',l:'Artículos'},{k:'estado',l:'Estado',estado:true}
+];
+async function showReemplazos(){
+  if(!canBodega()){ toast('Su rol no tiene acceso'); showInicio(); return; }
+  setTab('reemplazos'); showOnly('viewReemplazos');
+  await loadReemplazos();
+}
+async function loadReemplazos(){
+  try{ REM_ROWS=await api('GET','/hojas?reemplazos=1'); }
+  catch(e){ REM_ROWS=[]; toast('Error al cargar: '+e.message); }
+  renderReemplazos();
+}
+function remFiltered(){
+  return REM_ROWS.filter(r=> Object.keys(REM_COLF).every(k=>{
+    const f=(REM_COLF[k]||'').trim().toLowerCase(); if(!f) return true;
+    return String(r[k]==null?'':r[k]).toLowerCase().includes(f);
+  }));
+}
+function onRemFilter(k,v){ REM_COLF[k]=v; renderReemplazos(); }
+function renderReemplazos(){
+  const head=document.getElementById('remHead');
+  head.innerHTML=`<tr>${REM_COLS.map(c=>`<th>${c.l}</th>`).join('')}<th></th></tr>`
+    +`<tr class="filter-row">${REM_COLS.map(c=> c.estado?'<th></th>':`<th><input placeholder="Filtrar…" oninput="onRemFilter('${c.k}',this.value)" value="${attr(REM_COLF[c.k])}"></th>`).join('')}<th></th></tr>`;
+  const rows=remFiltered();
+  const b=document.getElementById('remBody'); b.innerHTML='';
+  document.getElementById('remEmpty').classList.toggle('hidden', REM_ROWS.length>0);
+  document.getElementById('remGrid').classList.toggle('hidden', REM_ROWS.length===0);
+  const foot=document.getElementById('remFoot');
+  if(!REM_ROWS.length){ foot.textContent=''; return; }
+  foot.textContent = rows.length===1?'1 reemplazo':(rows.length+' reemplazos');
+  if(!rows.length){ b.innerHTML=`<tr><td colspan="${REM_COLS.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  rows.forEach(r=>{
+    const tds=REM_COLS.map(c=>{
+      if(c.estado) return `<td>${estadoBadge(r.estado)}</td>`;
+      if(c.tag) return `<td><span class="tag">${esc(r[c.k])}</span></td>`;
+      return `<td>${esc(r[c.k])}</td>`;
+    }).join('');
+    const tr=document.createElement('tr');
+    tr.innerHTML=tds+`<td><button class="icon-btn" onclick="verHoja(${r.id})">👁️ Ver / resolver</button></td>`;
+    b.appendChild(tr);
+  });
+}
+async function resolverReemplazo(id){
+  if(!canBodega()){ toast('Su rol no puede resolver'); return; }
+  try{
+    await api('POST','/hojas/'+id+'/resolver');
+    toast('Reemplazo marcado como resuelto');
+    showReemplazos();
+  }catch(e){ toast('No se pudo resolver: '+e.message); }
 }
 
 /* ===== Pedido Pendiente ===== */
@@ -1286,7 +1462,7 @@ function abrirImagenNuevaPestana(){
 /* ===== WIZARD ===== */
 function openWizard(){
   if(!canSubir()){ toast('Su rol no puede subir hojas'); return; }
-  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[],manual:false};
+  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[],manual:false,editId:null,esReemplazo:false,origenId:null};
   showOnly('viewWizard'); setTab('hojas');
   // Restaura la UI del modo "subir" (por si venía del modo manual)
   document.getElementById('wizTitle').textContent='Subir hoja de consumo';
@@ -1304,7 +1480,7 @@ function openWizard(){
 /* Crear hoja manualmente: va directo al formulario (encabezado + detalle), sin foto. */
 async function openManual(){
   if(!canSubir()){ toast('Su rol no puede crear hojas'); return; }
-  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[{}],manual:true};
+  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[{}],manual:true,editId:null,esReemplazo:false,origenId:null};
   showOnly('viewWizard'); setTab('hojas');
   document.getElementById('wizTitle').textContent='Crear hoja de consumo';
   document.getElementById('wizSub').textContent='Ingrese los datos manualmente';
@@ -1315,6 +1491,41 @@ async function openManual(){
   document.getElementById('wizStep2').classList.remove('hidden');
   fillStep2({}, []);                 // render inmediato (encabezado vacío + 1 línea)
   // El catálogo se carga al entrar al sitio (init) o con el botón "Cargar productos".
+}
+/* Abrir una hoja 'Pendiente reposición' para completar la reposición y enviarla. */
+async function openEditarPendiente(id, preH){
+  if(!canSubir()){ toast('Su rol no puede completar hojas'); return; }
+  try{
+    const h = preH || await api('GET','/hojas/'+id);
+    WIZ={dataUrl:'',base64:'',tipo:'',detalle:[],manual:true,editId:id};
+    showOnly('viewWizard'); setTab('pendientes');
+    document.getElementById('wizTitle').textContent='Completar reposición y enviar';
+    document.getElementById('wizSub').textContent='N° '+(h.numero_hoja||'—')+' · pendiente de reposición';
+    document.getElementById('wizSteps').classList.add('hidden');
+    document.getElementById('verImgBtn').classList.toggle('hidden', !h.imagen_base64);
+    document.getElementById('wizStep1').classList.add('hidden');
+    document.getElementById('wizResult').classList.add('hidden');
+    document.getElementById('wizStep2').classList.remove('hidden');
+    WIZ.dataUrl = h.imagen_base64 ? `data:${h.imagen_tipo||'image/jpeg'};base64,${h.imagen_base64}` : '';
+    fillStep2(h, h.detalle||[]);
+  }catch(e){ toast('No se pudo abrir la hoja: '+e.message); }
+}
+/* Crear una hoja NUEVA a partir de una existente (reemplazo/corrección). */
+async function openReemplazo(id){
+  if(!canSubir()){ toast('Su rol no puede crear reemplazos'); return; }
+  try{
+    const h = await api('GET','/hojas/'+id);
+    WIZ={dataUrl:'',base64:'',tipo:'',detalle:[],manual:true,editId:null,esReemplazo:true,origenId:id};
+    showOnly('viewWizard'); setTab('hojas');
+    document.getElementById('wizTitle').textContent='Crear reemplazo / corrección';
+    document.getElementById('wizSub').textContent='A partir de la hoja N° '+(h.numero_hoja||'—');
+    document.getElementById('wizSteps').classList.add('hidden');
+    document.getElementById('verImgBtn').classList.add('hidden');
+    document.getElementById('wizStep1').classList.add('hidden');
+    document.getElementById('wizResult').classList.add('hidden');
+    document.getElementById('wizStep2').classList.remove('hidden');
+    fillStep2(h, h.detalle||[]);
+  }catch(e){ toast('No se pudo crear el reemplazo: '+e.message); }
 }
 function setStep(n){
   document.getElementById('stp1').className='step '+(n>1?'done':(n===1?'active':''));
@@ -1394,39 +1605,39 @@ function onDet(el){
 }
 // Deshabilita "Enviar" mientras haya códigos que no existen en el catálogo.
 function updateEnviarState(){
-  const btn=document.getElementById('enviarBtn'); if(!btn) return;
   const hayInvalidos=WIZ.detalle.some(d=> normCod(d.codigo) && !catCodigoValido(d.codigo));
-  btn.disabled=hayInvalidos;
-  btn.title=hayInvalidos?'Hay códigos que no existen en el catálogo de productos':'';
+  ['enviarBtn','guardarBtn'].forEach(id=>{
+    const btn=document.getElementById(id); if(!btn) return;
+    btn.disabled=hayInvalidos;
+    btn.title=hayInvalidos?'Hay códigos que no existen en el catálogo de productos':'';
+  });
 }
 function addDetRow(){ WIZ.detalle.push({}); renderDet(); }
 function rmDet(i){ WIZ.detalle.splice(i,1); if(!WIZ.detalle.length)WIZ.detalle=[{}]; renderDet(); }
 function cancelWizard(){ showHojas(); }
 function verImagenActual(){ if(WIZ.dataUrl) openImg(WIZ.dataUrl); else toast('No hay imagen cargada'); }
 
-async function enviar(){
+/* Junta encabezado + detalle del wizard, valida y marca errores en pantalla.
+   reqReposicion=true exige la columna Reposición en cada línea (solo al Enviar). */
+function recolectarWizard(reqReposicion){
   const enc={}; ENC.forEach(f=>{ const el=document.getElementById('enc_'+f.k); enc[f.k]=el?el.value.trim():''; });
-
-  // Limpiar marcas de error previas
   document.querySelectorAll('#encFields .invalid, #detBody .invalid').forEach(el=>el.classList.remove('invalid'));
   const errores=[];
 
-  // 1) Campos requeridos del encabezado
+  // Requeridos del encabezado
   const faltanEnc=[];
   ENC.filter(f=>f.req).forEach(f=>{
     if(!enc[f.k]){ faltanEnc.push(f.l); const el=document.getElementById('enc_'+f.k); if(el) el.classList.add('invalid'); }
   });
   if(faltanEnc.length) errores.push('Complete los campos requeridos del encabezado: '+faltanEnc.join(', ')+'.');
 
-  // 2) Detalle: cada línea con datos debe tener TODOS los campos requeridos.
-  //    En modo manual la "Descripción" (texto libre) es opcional: el código ya
-  //    trae la Descripción Nutricare del catálogo.
-  const reqCols = WIZ.manual ? DET_REQ.filter(c=> c.k!=='descripcion') : DET_REQ;
+  // Detalle: la Descripción es derivada (no se captura). La Reposición solo se exige al Enviar.
+  const reqCols = DET_REQ.filter(c=> c.k!=='reposicion_anaquel' || reqReposicion);
   const valOf=(d,k)=> String(d[k]==null?'':d[k]).trim();
-  const isEmptyRow=(d)=> reqCols.every(c=> !valOf(d,c.k));
+  const isEmptyRow=(d)=> reqCols.every(c=> !valOf(d,c.k)) && !valOf(d,'reposicion_anaquel');
   const detalle=[]; const lineasIncompletas=[]; const codsInvalidos=[];
   WIZ.detalle.forEach((d,i)=>{
-    if(isEmptyRow(d)) return; // se ignoran filas totalmente vacías
+    if(isEmptyRow(d)) return; // filas totalmente vacías se ignoran
     const faltan=reqCols.filter(c=> !valOf(d,c.k));
     const codInv=valOf(d,'codigo') && !catCodigoValido(d.codigo);
     if(faltan.length){
@@ -1443,14 +1654,33 @@ async function enviar(){
     }
   });
   if(lineasIncompletas.length) errores.push('Complete todos los campos ('+reqCols.map(c=>c.l).join(', ')+') en la(s) línea(s) del detalle: '+lineasIncompletas.join(', ')+'.');
-  if(codsInvalidos.length) errores.push('Hay código(s) que no existen en el catálogo en la(s) línea(s): '+codsInvalidos.join(', ')+'. Corríjalos antes de enviar.');
+  if(codsInvalidos.length) errores.push('Hay código(s) que no existen en el catálogo en la(s) línea(s): '+codsInvalidos.join(', ')+'. Corríjalos antes de continuar.');
   if(!lineasIncompletas.length && !codsInvalidos.length && !detalle.length) errores.push('Agregue al menos una línea de detalle con todos sus campos.');
+  return { enc, detalle, errores };
+}
 
+/* Guardar: crea (o actualiza) la hoja como 'Pendiente reposición' — NO exige reposición. */
+async function guardar(){
+  const { enc, detalle, errores }=recolectarWizard(false);
   if(errores.length){ toast(errores.join('  ·  ')); return; }
+  const btn=document.getElementById('guardarBtn'); if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  try{
+    if(WIZ.editId){ await api('PUT','/hojas/'+WIZ.editId,{encabezado:enc,detalle,estado:PEND}); }
+    else { await api('POST','/hojas',{encabezado:enc,detalle,imagenBase64:WIZ.base64,imagenTipo:WIZ.tipo,estado:PEND,es_reemplazo:!!WIZ.esReemplazo,hoja_origen_id:WIZ.origenId||null}); }
+    toast('Hoja guardada como pendiente de reposición');
+    showPendientes();
+  }catch(e){ toast('No se pudo guardar: '+e.message); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='💾 Guardar'; } }
+}
 
+/* Enviar: exige reposición en cada línea y deja la hoja en 'Enviado' (revisión de Bodega). */
+async function enviar(){
+  const { enc, detalle, errores }=recolectarWizard(true);
+  if(errores.length){ toast(errores.join('  ·  ')); return; }
   const btn=document.getElementById('enviarBtn'); btn.disabled=true; btn.textContent='Enviando…';
   try{
-    await api('POST','/hojas',{encabezado:enc,detalle,imagenBase64:WIZ.base64,imagenTipo:WIZ.tipo});
+    if(WIZ.editId){ await api('PUT','/hojas/'+WIZ.editId,{encabezado:enc,detalle,estado:'Enviado'}); }
+    else { await api('POST','/hojas',{encabezado:enc,detalle,imagenBase64:WIZ.base64,imagenTipo:WIZ.tipo,estado:'Enviado',es_reemplazo:!!WIZ.esReemplazo,hoja_origen_id:WIZ.origenId||null}); }
     showResult(true);
   }catch(e){ showResult(false, e.message); }
   finally{ btn.disabled=false; btn.textContent='Enviar hoja de consumo'; }

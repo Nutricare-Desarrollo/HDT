@@ -193,7 +193,13 @@ app.http('hoja-create', {
     }
     cols.push('ImagenBase64'); vals.push(body.imagenBase64 || null); ph.push('$' + (++i));
     cols.push('ImagenTipo'); vals.push(body.imagenTipo || null); ph.push('$' + (++i));
-    cols.push('Estado'); vals.push('Enviado'); ph.push('$' + (++i));
+    // Estado inicial: 'Enviado' (por defecto) o 'Pendiente reposición' (acción Guardar de Hospital).
+    const estadoInicial = (body.estado === 'Pendiente reposición') ? 'Pendiente reposición' : 'Enviado';
+    cols.push('Estado'); vals.push(estadoInicial); ph.push('$' + (++i));
+    // Reemplazo/corrección: marca + referencia a la hoja original (se resuelve en Bodega, no va a Dynamics).
+    const origenId = parseInt(body.hoja_origen_id, 10);
+    cols.push('EsReemplazo'); vals.push(body.es_reemplazo === true); ph.push('$' + (++i));
+    cols.push('HojaOrigenId'); vals.push(Number.isFinite(origenId) ? origenId : null); ph.push('$' + (++i));
     cols.push('CreadoPor'); vals.push(user.name || user.email); ph.push('$' + (++i));
     cols.push('CreadoPorEmail'); vals.push(user.email); ph.push('$' + (++i));
 
@@ -234,16 +240,32 @@ app.http('hojas-list', {
       await getRole(user);
       const scope = (request.query.get('scope') || 'hoy').toLowerCase();
       const soloHoy = scope !== 'historial';
-      const where = soloHoy
-        ? `WHERE (FechaCreacion AT TIME ZONE 'UTC' AT TIME ZONE 'America/Costa_Rica')::date
-                 = (now() AT TIME ZONE 'America/Costa_Rica')::date`
-        : '';
+      const estadoF = request.query.get('estado');
+      const soloReemplazos = request.query.get('reemplazos') === '1';
+      let where = '', params = [];
+      if (soloReemplazos) {
+        // Bandeja de reemplazos/correcciones (Bodega): todas las marcadas como reemplazo.
+        where = `WHERE h.EsReemplazo = TRUE`;
+      } else if (estadoF) {
+        // Filtro explícito por estado (p. ej. la bandeja de Pendientes de reposición).
+        where = `WHERE h.Estado = $1`; params = [estadoF];
+      } else {
+        // Grid principal: se excluyen las pendientes de reposición y los reemplazos (tienen su bandeja).
+        const conds = [`h.Estado <> 'Pendiente reposición'`, `h.EsReemplazo = FALSE`];
+        if (soloHoy) conds.push(`(h.FechaCreacion AT TIME ZONE 'UTC' AT TIME ZONE 'America/Costa_Rica')::date
+                 = (now() AT TIME ZONE 'America/Costa_Rica')::date`);
+        where = 'WHERE ' + conds.join(' AND ');
+      }
       const r = await query(
-        `SELECT Id AS id, NumeroHoja AS numero_hoja, NumeroDocumento AS numero_documento,
-                Regimen AS regimen, Cirujano AS cirujano, Instrumentista AS instrumentista,
-                Diagnostico AS diagnostico, Estado AS estado, CreadoPor AS usuario,
-                CreadoPorEmail AS usuario_email, ${FECHA_LOCAL} AS fecha, CantidadLineas AS cantidad_lineas
-         FROM dbo.vHojaConsumo ${where} ORDER BY FechaCreacion DESC`);
+        `SELECT h.Id AS id, h.NumeroHoja AS numero_hoja, h.NumeroDocumento AS numero_documento,
+                h.Regimen AS regimen, h.Cirujano AS cirujano, h.Instrumentista AS instrumentista,
+                h.Diagnostico AS diagnostico, h.Estado AS estado, h.CreadoPor AS usuario,
+                h.CreadoPorEmail AS usuario_email,
+                to_char((h.FechaCreacion AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica', 'YYYY-MM-DD HH24:MI') AS fecha,
+                (SELECT COUNT(*) FROM dbo.HojaConsumoDetalle d WHERE d.HojaConsumoId = h.Id) AS cantidad_lineas,
+                h.EsReemplazo AS es_reemplazo, h.HojaOrigenId AS hoja_origen_id,
+                (SELECT o.NumeroHoja FROM dbo.HojaConsumo o WHERE o.Id = h.HojaOrigenId) AS origen_numero_hoja
+         FROM dbo.HojaConsumo h ${where} ORDER BY h.FechaCreacion DESC`, params);
       return json(200, r.rows);
     } catch (e) { context.error(e); return json(500, { error: 'Error al listar', detail: e.message }); }
   }
@@ -266,6 +288,8 @@ app.http('hoja-get', {
                 Cirujano AS cirujano, Instrumentista AS instrumentista, Diagnostico AS diagnostico,
                 Procedimiento AS procedimiento, ImagenBase64 AS imagen_base64, ImagenTipo AS imagen_tipo,
                 Estado AS estado, CreadoPor AS usuario, CreadoPorEmail AS usuario_email,
+                EsReemplazo AS es_reemplazo, HojaOrigenId AS hoja_origen_id,
+                (SELECT o.NumeroHoja FROM dbo.HojaConsumo o WHERE o.Id = HojaConsumo.HojaOrigenId) AS origen_numero_hoja,
                 ${FECHA_LOCAL} AS fecha, ResultadoTR AS resultado_tr
          FROM dbo.HojaConsumo WHERE Id=$1`, [id]);
       if (!h.rows.length) return json(404, { error: 'No encontrada' });
@@ -285,14 +309,26 @@ app.http('hoja-update', {
   handler: async (request, context) => {
     const user = getUser(request);
     if (!user) return json(401, { error: 'No autenticado' });
-    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar hojas' });
-
     const id = parseInt(request.params.id, 10);
     if (!id) return json(400, { error: 'Id inválido' });
+
+    // Estado actual: define permisos y las transiciones permitidas.
+    const curH = await query(`SELECT Estado AS estado FROM dbo.HojaConsumo WHERE Id=$1`, [id]);
+    if (!curH.rows.length) return json(404, { error: 'No encontrada' });
+    const estadoActual = curH.rows[0].estado;
+    const rolEditor = await getRole(user);
+    const esPendiente = estadoActual === 'Pendiente reposición';
+    // Bodega/Administrador siempre pueden editar; Hospital solo si la hoja está 'Pendiente reposición'.
+    if (!(puedeBodega(rolEditor) || (puedeSubir(rolEditor) && esPendiente))) {
+      return json(403, { error: 'No tiene permiso para editar esta hoja' });
+    }
 
     const body = await request.json();
     const enc = body.encabezado || {};
     const detalle = Array.isArray(body.detalle) ? body.detalle : [];
+    // Transición de estado permitida solo desde 'Pendiente reposición' (Guardar/Enviar de Hospital).
+    let nuevoEstado = null;
+    if (esPendiente && (body.estado === 'Pendiente reposición' || body.estado === 'Enviado')) nuevoEstado = body.estado;
 
     // Validación de códigos contra el catálogo (no bloquea si el catálogo no responde).
     const mapa = await mapaCatalogo(context);
@@ -308,6 +344,7 @@ app.http('hoja-update', {
       if (DATE_KEYS.has(k) && v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) v = null; // fecha inválida -> null
       sets.push(`${col}=$${i}`); vals.push(v);
     }
+    if (nuevoEstado) { i++; sets.push(`Estado=$${i}`); vals.push(nuevoEstado); }
     const idPh = '$' + (++i); vals.push(id);
 
     const client = await getClient();
@@ -340,6 +377,23 @@ app.http('hoja-update', {
   }
 });
 
+/* Marcar un reemplazo/corrección como 'Resuelto' (Bodega/Administrador). */
+app.http('hoja-resolver', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'hojas/{id}/resolver',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para resolver reemplazos' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    try {
+      const r = await query(`UPDATE dbo.HojaConsumo SET Estado='Resuelto' WHERE Id=$1 AND EsReemplazo=TRUE RETURNING Id`, [id]);
+      if (!r.rowCount) return json(400, { error: 'La hoja no existe o no es un reemplazo/corrección' });
+      return json(200, { ok: true });
+    } catch (e) { context.error(e); return json(500, { error: 'No se pudo resolver', detail: e.message }); }
+  }
+});
+
 /* Resumen Hospital: cantidad de hojas subidas hoy y ayer (fecha local CR). */
 app.http('resumen-hospital', {
   methods: ['GET'], authLevel: 'anonymous', route: 'resumen/hospital',
@@ -367,7 +421,7 @@ app.http('resumen-bodega', {
     if (!user) return json(401, { error: 'No autenticado' });
     try {
       if (!puedeBodega(await getRole(user))) return json(403, { error: 'Solo Bodega/Administrador' });
-      const r = await query(`SELECT Estado AS estado, COUNT(*) AS n FROM dbo.HojaConsumo GROUP BY Estado`);
+      const r = await query(`SELECT Estado AS estado, COUNT(*) AS n FROM dbo.HojaConsumo WHERE Estado <> 'Pendiente reposición' AND EsReemplazo = FALSE GROUP BY Estado`);
       const out = {};
       r.rows.forEach(x => { out[x.estado] = parseInt(x.n, 10); });
       return json(200, out);
@@ -518,6 +572,9 @@ app.http('dynamics-start', {
     const hojaId = parseInt(request.params.id, 10);
     if (!hojaId) return json(400, { error: 'Id inválido' });
     try {
+      // Los reemplazos/correcciones se resuelven en Bodega; no se envían a Dynamics.
+      const flag = await query(`SELECT EsReemplazo AS es FROM dbo.HojaConsumo WHERE Id=$1`, [hojaId]);
+      if (flag.rows.length && flag.rows[0].es) return json(400, { error: 'Los reemplazos/correcciones no se envían a Dynamics; se resuelven en su bandeja.' });
       const payload = await construirPayloadDynamics(hojaId);
       // Marca la hoja como "Creando TR" desde ya (por si el proceso es largo).
       await query(`UPDATE dbo.HojaConsumo SET Estado='Creando TR' WHERE Id=$1`, [hojaId]);
