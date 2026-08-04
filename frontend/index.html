@@ -529,6 +529,41 @@ function loteSearch(codigo, q, limit){
   return res;
 }
 
+/* ===== Catálogo de equipos (Anexo #2) para validar "N° equipo" ===== */
+let EQUIPOS=null; // Map(codigo normalizado -> nombre)
+function equipoReady(){ return EQUIPOS instanceof Map && EQUIPOS.size>0; }
+// Normaliza igual que el servidor: sin espacios, sin prefijo NUT-, en mayúsculas.
+function normEquipo(v){ return String(v==null?'':v).replace(/\s+/g,'').replace(/^nut-?/i,'').toUpperCase(); }
+// Fail-open: si el catálogo no cargó, no bloquea. Un valor vacío nunca es válido.
+function equipoValido(v){ const c=normEquipo(v); if(!c) return false; if(!equipoReady()) return true; return EQUIPOS.has(c); }
+function equipoNombre(v){ return equipoReady() ? (EQUIPOS.get(normEquipo(v))||'') : ''; }
+async function loadEquipos(){
+  try{
+    const arr=await api('GET','/equipos');
+    const m=new Map();
+    (arr||[]).forEach(e=>{ const c=normEquipo(e.codigo!=null?e.codigo:e.demarcado); if(c) m.set(c, e.nombre||''); });
+    EQUIPOS=m;
+  }catch(e){ EQUIPOS=null; }
+}
+// Busca equipos por código o nombre para el autocompletado.
+function equipoSearch(q, limit){
+  limit=limit||40;
+  if(!equipoReady()) return [];
+  const qn=normEquipo(q), qt=String(q==null?'':q).trim().toLowerCase();
+  const res=[];
+  for(const [code,nombre] of EQUIPOS){
+    const nl=(nombre||'').toLowerCase();
+    let score=-1;
+    if(qn && code.indexOf(qn)===0) score=0;
+    else if(qn && code.indexOf(qn)>0) score=1;
+    else if(qt && nl.indexOf(qt)>=0) score=2;
+    else if(!qn && !qt) score=3;
+    if(score>=0) res.push({code:code, nombre:nombre, score:score});
+  }
+  res.sort((a,b)=> a.score-b.score || a.code.localeCompare(b.code));
+  return res.slice(0,limit);
+}
+
 // Carga manual de catálogos (productos + lotes). Informa cantidades o el error exacto.
 async function recargarProductos(){
   const btn=document.getElementById('prodBtn');
@@ -540,6 +575,7 @@ async function recargarProductos(){
     CATALOGO=m;
     let msg='Catálogo cargado: '+m.size+' producto'+(m.size===1?'':'s')+'.';
     try{ await loadLotes(); if(lotesReady()) msg+=' Lotes: '+LOTES.size+' códigos.'; }catch(_){}
+    try{ await loadEquipos(); if(equipoReady()) msg+=' Equipos: '+EQUIPOS.size+'.'; }catch(_){}
     toast(msg);
   }catch(e){ CATALOGO=null; toast('No se pudo cargar el catálogo: '+e.message); }
   finally{ if(btn){ btn.disabled=false; btn.textContent='🔄 Cargar productos'; } }
@@ -591,6 +627,10 @@ function acShow(input){
     if(!normCod(cod)){ acHide(); return; }          // sin código no hay lotes que mostrar
     items=loteSearch(cod, input.value, 60).map(l=>({label:l, sub:''}));
     vacio='Sin lotes para este código';
+  } else if(input.classList.contains('equipo-input')){
+    if(!equipoReady()) return;                        // aún no cargó el catálogo de equipos
+    items=equipoSearch(input.value, 40).map(it=>({label:it.code, sub:it.nombre}));
+    vacio='Sin coincidencias en equipos';
   } else {
     if(!catReady()) return;                          // aún no cargó el catálogo
     items=catSearch(input.value, 40).map(it=>({label:it.code, sub:it.desc}));
@@ -631,7 +671,7 @@ function acMove(delta){
   const el=kids[AC.idx]; if(el&&el.scrollIntoView) el.scrollIntoView({block:'nearest'});
 }
 function acInit(){
-  const isAC = el => el && el.matches && el.matches('input.code-input, input.lote-input');
+  const isAC = el => el && el.matches && el.matches('input.code-input, input.lote-input, input.equipo-input');
   document.addEventListener('focusin', e=>{ if(isAC(e.target)) acShow(e.target); });
   document.addEventListener('input', e=>{ if(isAC(e.target)) acShow(e.target); });
   document.addEventListener('keydown', e=>{
@@ -661,6 +701,7 @@ async function init(){
     document.getElementById('app').classList.remove('hidden');
     loadCatalogo(); // catálogo de productos en segundo plano
     loadLotes();    // catálogo de lotes por producto en segundo plano
+    loadEquipos();  // catálogo de equipos (Anexo #2) en segundo plano
     acInit();       // buscador de código / lote (autocompletado)
     buildNav();
     showInicio();
@@ -979,9 +1020,12 @@ function renderVerDet(){
       }
       const isCode = c.k==='codigo';
       const isLote = c.k==='numero_lote';
-      const inv = (isCode && normCod(d.codigo) && !catCodigoValido(d.codigo)) ? 'invalid' : '';
-      const cls = (inv+(isCode?' code-input':'')+(isLote?' lote-input':'')).trim();
-      const extra = (isCode||isLote) ? ' autocomplete="off"' : '';
+      const isEquipo = c.k==='numero_equipo';
+      let inv='';
+      if(isCode && normCod(d.codigo) && !catCodigoValido(d.codigo)) inv='invalid';
+      if(isEquipo && normEquipo(d.numero_equipo) && !equipoValido(d.numero_equipo)) inv='invalid';
+      const cls = (inv+(isCode?' code-input':'')+(isLote?' lote-input':'')+(isEquipo?' equipo-input':'')).trim();
+      const extra = (isCode||isLote||isEquipo) ? ' autocomplete="off"' : '';
       return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onVerDet(this)"></td>`;
     }).join('');
     const tr=document.createElement('tr');
@@ -996,6 +1040,9 @@ function onVerDet(el){
     d.descripcion_nutricare=catDesc(d.codigo);
     const cell=document.getElementById('vnut_'+i); if(cell) cell.innerHTML=esc(d.descripcion_nutricare);
     el.classList.toggle('invalid', !!normCod(d.codigo) && !catCodigoValido(d.codigo));
+  }
+  if(k==='numero_equipo'){
+    el.classList.toggle('invalid', !!normEquipo(el.value) && !equipoValido(el.value));
   }
 }
 function addVerDet(){ VER_DET.push({}); renderVerDet(); }
@@ -1134,11 +1181,12 @@ async function guardarVer(){
   //    descripción del OCR aunque Bodega no la vea en pantalla.
   const valOf=(d,k)=> String(d[k]==null?'':d[k]).trim();
   const isEmptyRow=(d)=> BODEGA_DET_REQ.every(c=> !valOf(d,c.k)) && !valOf(d,'numero_lote');
-  const detalle=[]; const lineasIncompletas=[]; const codsInvalidos=[];
+  const detalle=[]; const lineasIncompletas=[]; const codsInvalidos=[]; const equiposInvalidos=[];
   VER_DET.forEach((d,i)=>{
     if(isEmptyRow(d)) return; // filas totalmente vacías se ignoran
     const faltan=BODEGA_DET_REQ.filter(c=> !valOf(d,c.k));
     const codInv=valOf(d,'codigo') && !catCodigoValido(d.codigo);
+    const equipoInv=valOf(d,'numero_equipo') && !equipoValido(d.numero_equipo);
     if(faltan.length){
       lineasIncompletas.push(i+1);
       faltan.forEach(c=>{ const el=document.querySelector(`#verDetBody input[data-i="${i}"][data-k="${c.k}"]`); if(el) el.classList.add('invalid'); });
@@ -1147,13 +1195,18 @@ async function guardarVer(){
       codsInvalidos.push(i+1);
       const el=document.querySelector(`#verDetBody input[data-i="${i}"][data-k="codigo"]`); if(el) el.classList.add('invalid');
     }
-    if(!faltan.length && !codInv){
+    if(equipoInv){
+      equiposInvalidos.push(i+1);
+      const el=document.querySelector(`#verDetBody input[data-i="${i}"][data-k="numero_equipo"]`); if(el) el.classList.add('invalid');
+    }
+    if(!faltan.length && !codInv && !equipoInv){
       detalle.push({codigo:valOf(d,'codigo'),numero_equipo:valOf(d,'numero_equipo'),descripcion:(d.descripcion==null?'':String(d.descripcion)),descripcion_nutricare:catDesc(d.codigo),und:d.und,reposicion_anaquel:d.reposicion_anaquel,numero_lote:valOf(d,'numero_lote')});
     }
   });
   if(lineasIncompletas.length) errores.push('Complete todos los campos (Código, N° equipo, Und, Reposición) en la(s) línea(s): '+lineasIncompletas.join(', ')+'.');
   if(codsInvalidos.length) errores.push('Hay código(s) que no existen en el catálogo en la(s) línea(s): '+codsInvalidos.join(', ')+'.');
-  if(!lineasIncompletas.length && !codsInvalidos.length && !detalle.length) errores.push('Debe quedar al menos una línea de detalle completa.');
+  if(equiposInvalidos.length) errores.push('Hay N° de equipo que no existen en la lista en la(s) línea(s): '+equiposInvalidos.join(', ')+'.');
+  if(!lineasIncompletas.length && !codsInvalidos.length && !equiposInvalidos.length && !detalle.length) errores.push('Debe quedar al menos una línea de detalle completa.');
 
   if(errores.length){ toast(errores.join('  ·  ')); return; }
 
@@ -1592,9 +1645,12 @@ function renderDet(){
         return `<td><div class="nutdesc" id="nut_${i}">${esc(dn)}</div></td>`;
       }
       const isCode = c.k==='codigo';
-      const inv = (isCode && normCod(d.codigo) && !catCodigoValido(d.codigo)) ? 'invalid' : '';
-      const cls = (inv+(isCode?' code-input':'')).trim();
-      const extra = isCode ? ' autocomplete="off"' : '';
+      const isEquipo = c.k==='numero_equipo';
+      let inv='';
+      if(isCode && normCod(d.codigo) && !catCodigoValido(d.codigo)) inv='invalid';
+      if(isEquipo && normEquipo(d.numero_equipo) && !equipoValido(d.numero_equipo)) inv='invalid';
+      const cls = (inv+(isCode?' code-input':'')+(isEquipo?' equipo-input':'')).trim();
+      const extra = (isCode||isEquipo) ? ' autocomplete="off"' : '';
       return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onDet(this)"></td>`;
     }).join('');
     const tr=document.createElement('tr');
@@ -1613,10 +1669,14 @@ function onDet(el){
     el.classList.toggle('invalid', !!normCod(d.codigo) && !catCodigoValido(d.codigo));
     updateEnviarState();
   }
+  if(k==='numero_equipo'){
+    el.classList.toggle('invalid', !!normEquipo(el.value) && !equipoValido(el.value));
+    updateEnviarState();
+  }
 }
 // Deshabilita "Enviar" mientras haya códigos que no existen en el catálogo.
 function updateEnviarState(){
-  const hayInvalidos=WIZ.detalle.some(d=> normCod(d.codigo) && !catCodigoValido(d.codigo));
+  const hayInvalidos=WIZ.detalle.some(d=> (normCod(d.codigo) && !catCodigoValido(d.codigo)) || (normEquipo(d.numero_equipo) && !equipoValido(d.numero_equipo)));
   ['enviarBtn','guardarBtn'].forEach(id=>{
     const btn=document.getElementById(id); if(!btn) return;
     btn.disabled=hayInvalidos;
@@ -1646,11 +1706,12 @@ function recolectarWizard(reqReposicion){
   const reqCols = DET_REQ.filter(c=> c.k!=='reposicion_anaquel' || reqReposicion);
   const valOf=(d,k)=> String(d[k]==null?'':d[k]).trim();
   const isEmptyRow=(d)=> reqCols.every(c=> !valOf(d,c.k)) && !valOf(d,'reposicion_anaquel');
-  const detalle=[]; const lineasIncompletas=[]; const codsInvalidos=[];
+  const detalle=[]; const lineasIncompletas=[]; const codsInvalidos=[]; const equiposInvalidos=[];
   WIZ.detalle.forEach((d,i)=>{
     if(isEmptyRow(d)) return; // filas totalmente vacías se ignoran
     const faltan=reqCols.filter(c=> !valOf(d,c.k));
     const codInv=valOf(d,'codigo') && !catCodigoValido(d.codigo);
+    const equipoInv=valOf(d,'numero_equipo') && !equipoValido(d.numero_equipo);
     if(faltan.length){
       lineasIncompletas.push(i+1);
       faltan.forEach(c=>{ const el=document.querySelector(`#detBody input[data-i="${i}"][data-k="${c.k}"]`); if(el) el.classList.add('invalid'); });
@@ -1659,14 +1720,19 @@ function recolectarWizard(reqReposicion){
       codsInvalidos.push(i+1);
       const el=document.querySelector(`#detBody input[data-i="${i}"][data-k="codigo"]`); if(el) el.classList.add('invalid');
     }
-    if(!faltan.length && !codInv){
+    if(equipoInv){
+      equiposInvalidos.push(i+1);
+      const el=document.querySelector(`#detBody input[data-i="${i}"][data-k="numero_equipo"]`); if(el) el.classList.add('invalid');
+    }
+    if(!faltan.length && !codInv && !equipoInv){
       // Se descarta la descripción del OCR: la oficial es descripcion_nutricare (por código).
       detalle.push({codigo:valOf(d,'codigo'),numero_equipo:valOf(d,'numero_equipo'),descripcion:'',descripcion_nutricare:catDesc(d.codigo),und:d.und,reposicion_anaquel:d.reposicion_anaquel});
     }
   });
   if(lineasIncompletas.length) errores.push('Complete todos los campos ('+reqCols.map(c=>c.l).join(', ')+') en la(s) línea(s) del detalle: '+lineasIncompletas.join(', ')+'.');
   if(codsInvalidos.length) errores.push('Hay código(s) que no existen en el catálogo en la(s) línea(s): '+codsInvalidos.join(', ')+'. Corríjalos antes de continuar.');
-  if(!lineasIncompletas.length && !codsInvalidos.length && !detalle.length) errores.push('Agregue al menos una línea de detalle con todos sus campos.');
+  if(equiposInvalidos.length) errores.push('Hay N° de equipo que no existen en la lista en la(s) línea(s): '+equiposInvalidos.join(', ')+'. Corríjalos antes de continuar.');
+  if(!lineasIncompletas.length && !codsInvalidos.length && !equiposInvalidos.length && !detalle.length) errores.push('Agregue al menos una línea de detalle con todos sus campos.');
   return { enc, detalle, errores };
 }
 
