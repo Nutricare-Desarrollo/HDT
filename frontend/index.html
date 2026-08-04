@@ -1472,6 +1472,8 @@ function openWizard(){
   document.getElementById('wizStep1').classList.remove('hidden');
   document.getElementById('wizStep2').classList.add('hidden');
   document.getElementById('wizResult').classList.add('hidden');
+  document.getElementById('enviarBtn').classList.add('hidden');    // en creación solo se Guarda; Enviar es al completar la reposición
+  document.getElementById('guardarBtn').classList.remove('hidden');
   document.getElementById('fileInput').value='';
   document.getElementById('prevWrap').innerHTML='';
   document.getElementById('analizarBtn').disabled=true;
@@ -1489,6 +1491,8 @@ async function openManual(){
   document.getElementById('wizStep1').classList.add('hidden');
   document.getElementById('wizResult').classList.add('hidden');
   document.getElementById('wizStep2').classList.remove('hidden');
+  document.getElementById('enviarBtn').classList.add('hidden');    // en creación solo se Guarda
+  document.getElementById('guardarBtn').classList.remove('hidden');
   fillStep2({}, []);                 // render inmediato (encabezado vacío + 1 línea)
   // El catálogo se carga al entrar al sitio (init) o con el botón "Cargar productos".
 }
@@ -1507,6 +1511,8 @@ async function openEditarPendiente(id, preH){
     document.getElementById('wizResult').classList.add('hidden');
     document.getElementById('wizStep2').classList.remove('hidden');
     WIZ.dataUrl = h.imagen_base64 ? `data:${h.imagen_tipo||'image/jpeg'};base64,${h.imagen_base64}` : '';
+    document.getElementById('enviarBtn').classList.remove('hidden');  // al completar la reposición sí se puede Enviar
+    document.getElementById('guardarBtn').classList.remove('hidden');
     fillStep2(h, h.detalle||[]);
   }catch(e){ toast('No se pudo abrir la hoja: '+e.message); }
 }
@@ -1524,6 +1530,8 @@ async function openReemplazo(id){
     document.getElementById('wizStep1').classList.add('hidden');
     document.getElementById('wizResult').classList.add('hidden');
     document.getElementById('wizStep2').classList.remove('hidden');
+    document.getElementById('enviarBtn').classList.remove('hidden');  // el reemplazo se corrige y se envía
+    document.getElementById('guardarBtn').classList.remove('hidden');
     fillStep2(h, h.detalle||[]);
   }catch(e){ toast('No se pudo crear el reemplazo: '+e.message); }
 }
