@@ -548,12 +548,21 @@ async function loadEquipos(){
   }catch(e){ EQUIPOS=null; }
 }
 // Busca equipos por código o nombre para el autocompletado.
-function equipoSearch(q, limit){
+function equipoSearch(q, limit, restrictCodigo){
   limit=limit||40;
   if(!equipoReady()) return [];
   const qn=normEquipo(q), qt=String(q==null?'':q).trim().toLowerCase();
+  // Si la línea ya tiene un código, restringir a los equipos que lo contienen (si hay alguno).
+  let allowed=null;
+  const rc=normCod(restrictCodigo);
+  if(rc && equipoProdReady()){
+    const s=new Set();
+    for(const [e,set] of EQUIPOPROD){ if(set.has(rc)) s.add(e); }
+    if(s.size) allowed=s;   // si ningún equipo lo contiene, no se restringe (fallback)
+  }
   const res=[];
   for(const [code,o] of EQUIPOS){
+    if(allowed && !allowed.has(code)) continue;
     const nombre=(o&&o.nombre)||'';
     const nl=nombre.toLowerCase();
     let score=-1;
@@ -705,8 +714,11 @@ function acShow(input){
     vacio='Sin lotes para este código';
   } else if(input.classList.contains('equipo-input')){
     if(!equipoReady()) return;                        // aún no cargó el catálogo de equipos
-    items=equipoSearch(input.value, 40).map(it=>({label:it.code, sub:it.nombre}));
-    vacio='Sin coincidencias en equipos';
+    // Filtra por el código de la misma línea: solo equipos que contienen ese código.
+    const tr=input.closest('tr'); const codEl=tr?tr.querySelector('input[data-k="codigo"]'):null;
+    const cod=codEl?codEl.value:'';
+    items=equipoSearch(input.value, 40, cod).map(it=>({label:it.code, sub:it.nombre}));
+    vacio = normCod(cod) ? 'Ningún equipo del listado contiene ese código' : 'Sin coincidencias en equipos';
   } else {
     if(!catReady()) return;                          // aún no cargó el catálogo
     items=catSearch(input.value, 40).map(it=>({label:it.code, sub:it.desc}));
