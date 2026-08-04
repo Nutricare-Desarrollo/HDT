@@ -21,9 +21,11 @@ DROP VIEW IF EXISTS dbo.vHojaConsumo;
 ALTER TABLE dbo.HojaConsumo ALTER COLUMN Estado TYPE VARCHAR(30);
 
 -- 3) Reemplazar el CHECK para admitir el nuevo estado.
+--    Se incluye también 'Resuelto' (del 08) para que re-ejecutar sea seguro aunque
+--    ya existan reemplazos resueltos: el 07 corre antes del 08 y no debe chocar.
 ALTER TABLE dbo.HojaConsumo DROP CONSTRAINT IF EXISTS CK_HojaConsumo_Estado;
 ALTER TABLE dbo.HojaConsumo ADD CONSTRAINT CK_HojaConsumo_Estado
-    CHECK (Estado IN ('Pendiente reposición','Enviado','En revisión','Creando TR','Finalizada','Error'));
+    CHECK (Estado IN ('Pendiente reposición','Enviado','En revisión','Creando TR','Finalizada','Error','Resuelto'));
 
 -- 4) Recrear la vista idéntica a la de 01_Esquema_HojaConsumo.sql.
 CREATE OR REPLACE VIEW dbo.vHojaConsumo AS
