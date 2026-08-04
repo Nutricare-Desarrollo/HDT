@@ -159,6 +159,7 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 /* Campos requeridos / inválidos */
 label .req{color:var(--danger);margin-left:2px}
 input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-shadow:0 0 0 3px rgba(192,57,43,.15)}
+input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224,142,11,.22)}
 
 /* Buscador de código (autocompletado) */
 .ac-box{position:fixed;z-index:80;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);max-height:320px;overflow-y:auto;min-width:280px;padding:4px}
@@ -536,12 +537,13 @@ function equipoReady(){ return EQUIPOS instanceof Map && EQUIPOS.size>0; }
 function normEquipo(v){ return String(v==null?'':v).replace(/\s+/g,'').replace(/^nut-?/i,'').toUpperCase(); }
 // Fail-open: si el catálogo no cargó, no bloquea. Un valor vacío nunca es válido.
 function equipoValido(v){ const c=normEquipo(v); if(!c) return false; if(!equipoReady()) return true; return EQUIPOS.has(c); }
-function equipoNombre(v){ return equipoReady() ? (EQUIPOS.get(normEquipo(v))||'') : ''; }
+function equipoNombre(v){ if(!equipoReady()) return ''; const o=EQUIPOS.get(normEquipo(v)); return o?(o.nombre||''):''; }
+function equipoColor(v){ if(!equipoReady()) return ''; const o=EQUIPOS.get(normEquipo(v)); return o?(o.color||''):''; }
 async function loadEquipos(){
   try{
     const arr=await api('GET','/equipos');
     const m=new Map();
-    (arr||[]).forEach(e=>{ const c=normEquipo(e.codigo!=null?e.codigo:e.demarcado); if(c) m.set(c, e.nombre||''); });
+    (arr||[]).forEach(e=>{ const c=normEquipo(e.codigo!=null?e.codigo:e.demarcado); if(c) m.set(c, {nombre:e.nombre||'', color:e.color||''}); });
     EQUIPOS=m;
   }catch(e){ EQUIPOS=null; }
 }
@@ -551,8 +553,9 @@ function equipoSearch(q, limit){
   if(!equipoReady()) return [];
   const qn=normEquipo(q), qt=String(q==null?'':q).trim().toLowerCase();
   const res=[];
-  for(const [code,nombre] of EQUIPOS){
-    const nl=(nombre||'').toLowerCase();
+  for(const [code,o] of EQUIPOS){
+    const nombre=(o&&o.nombre)||'';
+    const nl=nombre.toLowerCase();
     let score=-1;
     if(qn && code.indexOf(qn)===0) score=0;
     else if(qn && code.indexOf(qn)>0) score=1;
@@ -593,12 +596,48 @@ function comboBad(d){
 // ¿La celda de Código va en rojo? (no existe en catálogo, o no pertenece al equipo indicado)
 function codigoInvalidRow(d){ return (!!normCod(d.codigo) && !catCodigoValido(d.codigo)) || comboBad(d); }
 function equipoInvalidRow(d){ return !!normEquipo(d.numero_equipo) && !equipoValido(d.numero_equipo); }
-// Repinta el estado inválido de las celdas Código y N° equipo de una línea.
+/* Colores de demarcación del Anexo #2 -> estilo para pintar la celda de N° equipo. */
+const COLORMAP={amarillo:'#f2c200','café':'#6f4e37',cafe:'#6f4e37',verde:'#2e9e4b',azul:'#1f6fd6',negro:'#222222',rojo:'#d13b32',morado:'#7a3ea8',blanco:'#ffffff',naranja:'#f28c28',gris:'#8a8f94'};
+function colorHex(name){ return COLORMAP[String(name||'').trim().toLowerCase()]||null; }
+function contraste(hex){ if(!hex) return '#111'; const h=hex.replace('#',''); const r=parseInt(h.substr(0,2),16),g=parseInt(h.substr(2,2),16),b=parseInt(h.substr(4,2),16); return (0.299*r+0.587*g+0.114*b)>150?'#111':'#fff'; }
+// Estilo para un nombre de color (1 o 2 colores) o null.
+function equipoColorStyle(name){
+  const hexes=String(name||'').split(/[\s\-\/]+/).map(colorHex).filter(Boolean);
+  if(!hexes.length) return null;
+  if(hexes.length===1) return {background:hexes[0], color:contraste(hexes[0])};
+  return {background:`linear-gradient(90deg, ${hexes[0]} 0 50%, ${hexes[1]} 50% 100%)`, color:'#111', shadow:'0 0 2px #fff,0 0 2px #fff'};
+}
+// Pinta (o limpia) la celda de N° equipo según el color del equipo válido.
+function paintEquipoCell(el, d){
+  if(!el) return;
+  el.style.background=''; el.style.color=''; el.style.textShadow='';
+  const st = (normEquipo(d.numero_equipo) && equipoValido(d.numero_equipo)) ? equipoColorStyle(equipoColor(d.numero_equipo)) : null;
+  if(st){ el.style.background=st.background; el.style.color=st.color; if(st.shadow) el.style.textShadow=st.shadow; }
+}
+// Clase de estado de cada celda: '' | 'invalid' (no existe) | 'combo-invalid' (no cruza).
+function codigoCellCls(d){
+  if(normCod(d.codigo) && !catCodigoValido(d.codigo)) return 'invalid';
+  if(comboBad(d)) return 'combo-invalid';
+  return '';
+}
+function equipoCellCls(d){
+  if(normEquipo(d.numero_equipo) && !equipoValido(d.numero_equipo)) return 'invalid';
+  if(comboBad(d)) return 'combo-invalid';
+  return '';
+}
+const COMBO_MSG='El código no pertenece al N° equipo indicado';
+function setCellState(el, cls, title){
+  if(!el) return;
+  el.classList.remove('invalid','combo-invalid');
+  if(cls) el.classList.add(cls);
+  el.title = (cls==='combo-invalid') ? title : '';
+}
+// Repinta estado (rojo/ámbar) + color del equipo de las celdas Código y N° equipo de una línea.
 function markDetRow(bodySel, i, d){
-  const cEl=document.querySelector(`${bodySel} input[data-i="${i}"][data-k="codigo"]`);
-  if(cEl) cEl.classList.toggle('invalid', codigoInvalidRow(d));
+  setCellState(document.querySelector(`${bodySel} input[data-i="${i}"][data-k="codigo"]`), codigoCellCls(d), COMBO_MSG);
   const eEl=document.querySelector(`${bodySel} input[data-i="${i}"][data-k="numero_equipo"]`);
-  if(eEl) eEl.classList.toggle('invalid', equipoInvalidRow(d));
+  setCellState(eEl, equipoCellCls(d), COMBO_MSG);
+  paintEquipoCell(eEl, d);
 }
 
 // Carga manual de catálogos (productos + lotes). Informa cantidades o el error exacto.
@@ -1059,11 +1098,13 @@ function renderVerDet(){
       const isCode = c.k==='codigo';
       const isLote = c.k==='numero_lote';
       const isEquipo = c.k==='numero_equipo';
-      let inv='';
-      if(isCode && codigoInvalidRow(d)) inv='invalid';
-      if(isEquipo && equipoInvalidRow(d)) inv='invalid';
-      const cls = (inv+(isCode?' code-input':'')+(isLote?' lote-input':'')+(isEquipo?' equipo-input':'')).trim();
-      const extra = (isCode||isLote||isEquipo) ? ' autocomplete="off"' : '';
+      let stateCls='';
+      if(isCode) stateCls=codigoCellCls(d);
+      if(isEquipo) stateCls=equipoCellCls(d);
+      const cls = (stateCls+(isCode?' code-input':'')+(isLote?' lote-input':'')+(isEquipo?' equipo-input':'')).trim();
+      let extra = (isCode||isLote||isEquipo) ? ' autocomplete="off"' : '';
+      if(stateCls==='combo-invalid') extra += ` title="${COMBO_MSG}"`;
+      if(isEquipo){ const st=(normEquipo(d.numero_equipo)&&equipoValido(d.numero_equipo))?equipoColorStyle(equipoColor(d.numero_equipo)):null; if(st) extra += ` style="background:${st.background};color:${st.color};${st.shadow?('text-shadow:'+st.shadow+';'):''}"`; }
       return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onVerDet(this)"></td>`;
     }).join('');
     const tr=document.createElement('tr');
@@ -1203,7 +1244,7 @@ async function guardarVer(){
   if(!canBodega()){ toast('Su rol no puede editar hojas'); return; }
   const enc={}; ENC.forEach(f=>{ const el=document.getElementById('ver_'+f.k); enc[f.k]=el?el.value.trim():''; });
 
-  document.querySelectorAll('#verBody .invalid').forEach(el=>el.classList.remove('invalid'));
+  document.querySelectorAll('#verBody .invalid, #verBody .combo-invalid').forEach(el=>{ el.classList.remove('invalid','combo-invalid'); el.title=''; });
   const errores=[];
 
   // 1) Requeridos del encabezado
@@ -1239,7 +1280,7 @@ async function guardarVer(){
     }
     if(comboInv){
       combosInvalidos.push(i+1);
-      const el=document.querySelector(`#verDetBody input[data-i="${i}"][data-k="codigo"]`); if(el) el.classList.add('invalid');
+      ['codigo','numero_equipo'].forEach(k=>{ const el=document.querySelector(`#verDetBody input[data-i="${i}"][data-k="${k}"]`); if(el){ el.classList.add('combo-invalid'); el.title=COMBO_MSG; } });
     }
     if(!faltan.length && !codInv && !equipoInv && !comboInv){
       detalle.push({codigo:valOf(d,'codigo'),numero_equipo:valOf(d,'numero_equipo'),descripcion:(d.descripcion==null?'':String(d.descripcion)),descripcion_nutricare:catDesc(d.codigo),und:d.und,reposicion_anaquel:d.reposicion_anaquel,numero_lote:valOf(d,'numero_lote')});
@@ -1689,11 +1730,13 @@ function renderDet(){
       }
       const isCode = c.k==='codigo';
       const isEquipo = c.k==='numero_equipo';
-      let inv='';
-      if(isCode && codigoInvalidRow(d)) inv='invalid';
-      if(isEquipo && equipoInvalidRow(d)) inv='invalid';
-      const cls = (inv+(isCode?' code-input':'')+(isEquipo?' equipo-input':'')).trim();
-      const extra = (isCode||isEquipo) ? ' autocomplete="off"' : '';
+      let stateCls='';
+      if(isCode) stateCls=codigoCellCls(d);
+      if(isEquipo) stateCls=equipoCellCls(d);
+      const cls = (stateCls+(isCode?' code-input':'')+(isEquipo?' equipo-input':'')).trim();
+      let extra = (isCode||isEquipo) ? ' autocomplete="off"' : '';
+      if(stateCls==='combo-invalid') extra += ` title="${COMBO_MSG}"`;
+      if(isEquipo){ const st=(normEquipo(d.numero_equipo)&&equipoValido(d.numero_equipo))?equipoColorStyle(equipoColor(d.numero_equipo)):null; if(st) extra += ` style="background:${st.background};color:${st.color};${st.shadow?('text-shadow:'+st.shadow+';'):''}"`; }
       return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onDet(this)"></td>`;
     }).join('');
     const tr=document.createElement('tr');
@@ -1734,7 +1777,7 @@ function verImagenActual(){ if(WIZ.dataUrl) openImg(WIZ.dataUrl); else toast('No
    reqReposicion=true exige la columna Reposición en cada línea (solo al Enviar). */
 function recolectarWizard(reqReposicion){
   const enc={}; ENC.forEach(f=>{ const el=document.getElementById('enc_'+f.k); enc[f.k]=el?el.value.trim():''; });
-  document.querySelectorAll('#encFields .invalid, #detBody .invalid').forEach(el=>el.classList.remove('invalid'));
+  document.querySelectorAll('#encFields .invalid, #detBody .invalid, #detBody .combo-invalid').forEach(el=>{ el.classList.remove('invalid','combo-invalid'); el.title=''; });
   const errores=[];
 
   // Requeridos del encabezado
@@ -1769,7 +1812,7 @@ function recolectarWizard(reqReposicion){
     }
     if(comboInv){
       combosInvalidos.push(i+1);
-      const el=document.querySelector(`#detBody input[data-i="${i}"][data-k="codigo"]`); if(el) el.classList.add('invalid');
+      ['codigo','numero_equipo'].forEach(k=>{ const el=document.querySelector(`#detBody input[data-i="${i}"][data-k="${k}"]`); if(el){ el.classList.add('combo-invalid'); el.title=COMBO_MSG; } });
     }
     if(!faltan.length && !codInv && !equipoInv && !comboInv){
       // Se descarta la descripción del OCR: la oficial es descripcion_nutricare (por código).

@@ -159,7 +159,7 @@ app.http('equipos-list', {
     const user = getUser(request);
     if (!user) return json(401, { error: 'No autenticado' });
     try {
-      const r = await query(`SELECT Codigo AS codigo, Demarcado AS demarcado, Nombre AS nombre FROM cat.Equipo ORDER BY Codigo`);
+      const r = await query(`SELECT Codigo AS codigo, Demarcado AS demarcado, Nombre AS nombre, Color AS color FROM cat.Equipo ORDER BY Codigo`);
       return json(200, r.rows);
     } catch (e) {
       context.error(e);
@@ -186,7 +186,8 @@ app.http('equipos-importar', {
       if (!map.has(cod)) map.set(cod, {
         codigo: cod,
         demarcado: (e.demarcado != null && String(e.demarcado).trim() !== '') ? String(e.demarcado).trim() : null,
-        nombre: (e.nombre != null && String(e.nombre).trim() !== '') ? String(e.nombre).trim() : null
+        nombre: (e.nombre != null && String(e.nombre).trim() !== '') ? String(e.nombre).trim() : null,
+        color: (e.color != null && String(e.color).trim() !== '') ? String(e.color).trim() : null
       });
     }
     if (!map.size) return json(400, { error: 'No se encontraron equipos válidos para importar' });
@@ -196,9 +197,9 @@ app.http('equipos-importar', {
       await client.query(`DELETE FROM cat.Equipo`);
       for (const it of map.values()) {
         await client.query(
-          `INSERT INTO cat.Equipo (Codigo, Demarcado, Nombre, ActualizadoPor, FechaActualizacion)
-           VALUES ($1,$2,$3,$4,(now() at time zone 'utc'))`,
-          [it.codigo, it.demarcado, it.nombre, user.name || user.email]);
+          `INSERT INTO cat.Equipo (Codigo, Demarcado, Nombre, Color, ActualizadoPor, FechaActualizacion)
+           VALUES ($1,$2,$3,$4,$5,(now() at time zone 'utc'))`,
+          [it.codigo, it.demarcado, it.nombre, it.color, user.name || user.email]);
       }
       await client.query('COMMIT');
       return json(200, { ok: true, total: map.size });
