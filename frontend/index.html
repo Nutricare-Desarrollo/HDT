@@ -564,6 +564,43 @@ function equipoSearch(q, limit){
   return res.slice(0,limit);
 }
 
+/* ===== Relación equipo <-> producto (para validar la combinación código+equipo) ===== */
+let EQUIPOPROD=null; // Map(equipoCod normalizado -> Set(prodCod normalizado))
+function equipoProdReady(){ return EQUIPOPROD instanceof Map && EQUIPOPROD.size>0; }
+async function loadEquipoProd(){
+  try{
+    const arr=await api('GET','/equipos/productos');
+    const m=new Map();
+    (arr||[]).forEach(x=>{ const e=normEquipo(x.equipo); if(!e) return; const s=m.get(e)||new Set(); (x.codigos||[]).forEach(c=>{ const cc=normCod(c); if(cc) s.add(cc); }); m.set(e,s); });
+    EQUIPOPROD=m;
+  }catch(e){ EQUIPOPROD=null; }
+}
+// ¿El código pertenece al equipo? Fail-open si la relación no cargó o el equipo no tiene listado.
+function comboValido(codigo, equipo){
+  const e=normEquipo(equipo), c=normCod(codigo);
+  if(!e || !c) return true;
+  if(!equipoProdReady()) return true;
+  const set=EQUIPOPROD.get(e);
+  if(!set) return true;            // equipo sin listado: no se puede validar el par
+  return set.has(c);
+}
+// La combinación es "mala" solo si código y equipo son válidos por separado pero no cruzan.
+function comboBad(d){
+  return !!normCod(d.codigo) && catCodigoValido(d.codigo)
+      && !!normEquipo(d.numero_equipo) && equipoValido(d.numero_equipo)
+      && !comboValido(d.codigo, d.numero_equipo);
+}
+// ¿La celda de Código va en rojo? (no existe en catálogo, o no pertenece al equipo indicado)
+function codigoInvalidRow(d){ return (!!normCod(d.codigo) && !catCodigoValido(d.codigo)) || comboBad(d); }
+function equipoInvalidRow(d){ return !!normEquipo(d.numero_equipo) && !equipoValido(d.numero_equipo); }
+// Repinta el estado inválido de las celdas Código y N° equipo de una línea.
+function markDetRow(bodySel, i, d){
+  const cEl=document.querySelector(`${bodySel} input[data-i="${i}"][data-k="codigo"]`);
+  if(cEl) cEl.classList.toggle('invalid', codigoInvalidRow(d));
+  const eEl=document.querySelector(`${bodySel} input[data-i="${i}"][data-k="numero_equipo"]`);
+  if(eEl) eEl.classList.toggle('invalid', equipoInvalidRow(d));
+}
+
 // Carga manual de catálogos (productos + lotes). Informa cantidades o el error exacto.
 async function recargarProductos(){
   const btn=document.getElementById('prodBtn');
@@ -702,6 +739,7 @@ async function init(){
     loadCatalogo(); // catálogo de productos en segundo plano
     loadLotes();    // catálogo de lotes por producto en segundo plano
     loadEquipos();  // catálogo de equipos (Anexo #2) en segundo plano
+    loadEquipoProd(); // relación equipo<->producto en segundo plano
     acInit();       // buscador de código / lote (autocompletado)
     buildNav();
     showInicio();
@@ -1022,8 +1060,8 @@ function renderVerDet(){
       const isLote = c.k==='numero_lote';
       const isEquipo = c.k==='numero_equipo';
       let inv='';
-      if(isCode && normCod(d.codigo) && !catCodigoValido(d.codigo)) inv='invalid';
-      if(isEquipo && normEquipo(d.numero_equipo) && !equipoValido(d.numero_equipo)) inv='invalid';
+      if(isCode && codigoInvalidRow(d)) inv='invalid';
+      if(isEquipo && equipoInvalidRow(d)) inv='invalid';
       const cls = (inv+(isCode?' code-input':'')+(isLote?' lote-input':'')+(isEquipo?' equipo-input':'')).trim();
       const extra = (isCode||isLote||isEquipo) ? ' autocomplete="off"' : '';
       return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onVerDet(this)"></td>`;
@@ -1035,14 +1073,13 @@ function renderVerDet(){
 }
 function onVerDet(el){
   const i=+el.dataset.i, k=el.dataset.k; VER_DET[i]=VER_DET[i]||{}; VER_DET[i][k]=el.value;
+  const d=VER_DET[i];
   if(k==='codigo'){
-    const d=VER_DET[i];
     d.descripcion_nutricare=catDesc(d.codigo);
     const cell=document.getElementById('vnut_'+i); if(cell) cell.innerHTML=esc(d.descripcion_nutricare);
-    el.classList.toggle('invalid', !!normCod(d.codigo) && !catCodigoValido(d.codigo));
   }
-  if(k==='numero_equipo'){
-    el.classList.toggle('invalid', !!normEquipo(el.value) && !equipoValido(el.value));
+  if(k==='codigo' || k==='numero_equipo'){
+    markDetRow('#verDetBody', i, d);
   }
 }
 function addVerDet(){ VER_DET.push({}); renderVerDet(); }
@@ -1181,12 +1218,13 @@ async function guardarVer(){
   //    descripción del OCR aunque Bodega no la vea en pantalla.
   const valOf=(d,k)=> String(d[k]==null?'':d[k]).trim();
   const isEmptyRow=(d)=> BODEGA_DET_REQ.every(c=> !valOf(d,c.k)) && !valOf(d,'numero_lote');
-  const detalle=[]; const lineasIncompletas=[]; const codsInvalidos=[]; const equiposInvalidos=[];
+  const detalle=[]; const lineasIncompletas=[]; const codsInvalidos=[]; const equiposInvalidos=[]; const combosInvalidos=[];
   VER_DET.forEach((d,i)=>{
     if(isEmptyRow(d)) return; // filas totalmente vacías se ignoran
     const faltan=BODEGA_DET_REQ.filter(c=> !valOf(d,c.k));
     const codInv=valOf(d,'codigo') && !catCodigoValido(d.codigo);
     const equipoInv=valOf(d,'numero_equipo') && !equipoValido(d.numero_equipo);
+    const comboInv=!codInv && !equipoInv && comboBad(d);
     if(faltan.length){
       lineasIncompletas.push(i+1);
       faltan.forEach(c=>{ const el=document.querySelector(`#verDetBody input[data-i="${i}"][data-k="${c.k}"]`); if(el) el.classList.add('invalid'); });
@@ -1199,14 +1237,19 @@ async function guardarVer(){
       equiposInvalidos.push(i+1);
       const el=document.querySelector(`#verDetBody input[data-i="${i}"][data-k="numero_equipo"]`); if(el) el.classList.add('invalid');
     }
-    if(!faltan.length && !codInv && !equipoInv){
+    if(comboInv){
+      combosInvalidos.push(i+1);
+      const el=document.querySelector(`#verDetBody input[data-i="${i}"][data-k="codigo"]`); if(el) el.classList.add('invalid');
+    }
+    if(!faltan.length && !codInv && !equipoInv && !comboInv){
       detalle.push({codigo:valOf(d,'codigo'),numero_equipo:valOf(d,'numero_equipo'),descripcion:(d.descripcion==null?'':String(d.descripcion)),descripcion_nutricare:catDesc(d.codigo),und:d.und,reposicion_anaquel:d.reposicion_anaquel,numero_lote:valOf(d,'numero_lote')});
     }
   });
   if(lineasIncompletas.length) errores.push('Complete todos los campos (Código, N° equipo, Und, Reposición) en la(s) línea(s): '+lineasIncompletas.join(', ')+'.');
   if(codsInvalidos.length) errores.push('Hay código(s) que no existen en el catálogo en la(s) línea(s): '+codsInvalidos.join(', ')+'.');
   if(equiposInvalidos.length) errores.push('Hay N° de equipo que no existen en la lista en la(s) línea(s): '+equiposInvalidos.join(', ')+'.');
-  if(!lineasIncompletas.length && !codsInvalidos.length && !equiposInvalidos.length && !detalle.length) errores.push('Debe quedar al menos una línea de detalle completa.');
+  if(combosInvalidos.length) errores.push('Hay línea(s) donde el Código no pertenece al N° equipo indicado: '+combosInvalidos.join(', ')+'.');
+  if(!lineasIncompletas.length && !codsInvalidos.length && !equiposInvalidos.length && !combosInvalidos.length && !detalle.length) errores.push('Debe quedar al menos una línea de detalle completa.');
 
   if(errores.length){ toast(errores.join('  ·  ')); return; }
 
@@ -1647,8 +1690,8 @@ function renderDet(){
       const isCode = c.k==='codigo';
       const isEquipo = c.k==='numero_equipo';
       let inv='';
-      if(isCode && normCod(d.codigo) && !catCodigoValido(d.codigo)) inv='invalid';
-      if(isEquipo && normEquipo(d.numero_equipo) && !equipoValido(d.numero_equipo)) inv='invalid';
+      if(isCode && codigoInvalidRow(d)) inv='invalid';
+      if(isEquipo && equipoInvalidRow(d)) inv='invalid';
       const cls = (inv+(isCode?' code-input':'')+(isEquipo?' equipo-input':'')).trim();
       const extra = (isCode||isEquipo) ? ' autocomplete="off"' : '';
       return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onDet(this)"></td>`;
@@ -1661,22 +1704,21 @@ function renderDet(){
 }
 function onDet(el){
   const i=+el.dataset.i, k=el.dataset.k; WIZ.detalle[i]=WIZ.detalle[i]||{}; WIZ.detalle[i][k]=el.value;
+  const d=WIZ.detalle[i];
   if(k==='codigo'){
-    const d=WIZ.detalle[i];
     // La Descripción se toma SIEMPRE del catálogo por código (columna derivada de solo lectura).
     d.descripcion_nutricare=catDesc(d.codigo);
     const cell=document.getElementById('nut_'+i); if(cell) cell.innerHTML=esc(d.descripcion_nutricare);
-    el.classList.toggle('invalid', !!normCod(d.codigo) && !catCodigoValido(d.codigo));
-    updateEnviarState();
   }
-  if(k==='numero_equipo'){
-    el.classList.toggle('invalid', !!normEquipo(el.value) && !equipoValido(el.value));
+  // Cambiar código o equipo afecta la validez individual y la de la combinación de esa línea.
+  if(k==='codigo' || k==='numero_equipo'){
+    markDetRow('#detBody', i, d);
     updateEnviarState();
   }
 }
 // Deshabilita "Enviar" mientras haya códigos que no existen en el catálogo.
 function updateEnviarState(){
-  const hayInvalidos=WIZ.detalle.some(d=> (normCod(d.codigo) && !catCodigoValido(d.codigo)) || (normEquipo(d.numero_equipo) && !equipoValido(d.numero_equipo)));
+  const hayInvalidos=WIZ.detalle.some(d=> codigoInvalidRow(d) || equipoInvalidRow(d));
   ['enviarBtn','guardarBtn'].forEach(id=>{
     const btn=document.getElementById(id); if(!btn) return;
     btn.disabled=hayInvalidos;
@@ -1706,12 +1748,13 @@ function recolectarWizard(reqReposicion){
   const reqCols = DET_REQ.filter(c=> c.k!=='reposicion_anaquel' || reqReposicion);
   const valOf=(d,k)=> String(d[k]==null?'':d[k]).trim();
   const isEmptyRow=(d)=> reqCols.every(c=> !valOf(d,c.k)) && !valOf(d,'reposicion_anaquel');
-  const detalle=[]; const lineasIncompletas=[]; const codsInvalidos=[]; const equiposInvalidos=[];
+  const detalle=[]; const lineasIncompletas=[]; const codsInvalidos=[]; const equiposInvalidos=[]; const combosInvalidos=[];
   WIZ.detalle.forEach((d,i)=>{
     if(isEmptyRow(d)) return; // filas totalmente vacías se ignoran
     const faltan=reqCols.filter(c=> !valOf(d,c.k));
     const codInv=valOf(d,'codigo') && !catCodigoValido(d.codigo);
     const equipoInv=valOf(d,'numero_equipo') && !equipoValido(d.numero_equipo);
+    const comboInv=!codInv && !equipoInv && comboBad(d);
     if(faltan.length){
       lineasIncompletas.push(i+1);
       faltan.forEach(c=>{ const el=document.querySelector(`#detBody input[data-i="${i}"][data-k="${c.k}"]`); if(el) el.classList.add('invalid'); });
@@ -1724,7 +1767,11 @@ function recolectarWizard(reqReposicion){
       equiposInvalidos.push(i+1);
       const el=document.querySelector(`#detBody input[data-i="${i}"][data-k="numero_equipo"]`); if(el) el.classList.add('invalid');
     }
-    if(!faltan.length && !codInv && !equipoInv){
+    if(comboInv){
+      combosInvalidos.push(i+1);
+      const el=document.querySelector(`#detBody input[data-i="${i}"][data-k="codigo"]`); if(el) el.classList.add('invalid');
+    }
+    if(!faltan.length && !codInv && !equipoInv && !comboInv){
       // Se descarta la descripción del OCR: la oficial es descripcion_nutricare (por código).
       detalle.push({codigo:valOf(d,'codigo'),numero_equipo:valOf(d,'numero_equipo'),descripcion:'',descripcion_nutricare:catDesc(d.codigo),und:d.und,reposicion_anaquel:d.reposicion_anaquel});
     }
@@ -1732,7 +1779,8 @@ function recolectarWizard(reqReposicion){
   if(lineasIncompletas.length) errores.push('Complete todos los campos ('+reqCols.map(c=>c.l).join(', ')+') en la(s) línea(s) del detalle: '+lineasIncompletas.join(', ')+'.');
   if(codsInvalidos.length) errores.push('Hay código(s) que no existen en el catálogo en la(s) línea(s): '+codsInvalidos.join(', ')+'. Corríjalos antes de continuar.');
   if(equiposInvalidos.length) errores.push('Hay N° de equipo que no existen en la lista en la(s) línea(s): '+equiposInvalidos.join(', ')+'. Corríjalos antes de continuar.');
-  if(!lineasIncompletas.length && !codsInvalidos.length && !equiposInvalidos.length && !detalle.length) errores.push('Agregue al menos una línea de detalle con todos sus campos.');
+  if(combosInvalidos.length) errores.push('Hay línea(s) donde el Código no pertenece al N° equipo indicado: '+combosInvalidos.join(', ')+'. Corríjalos antes de continuar.');
+  if(!lineasIncompletas.length && !codsInvalidos.length && !equiposInvalidos.length && !combosInvalidos.length && !detalle.length) errores.push('Agregue al menos una línea de detalle con todos sus campos.');
   return { enc, detalle, errores };
 }
 

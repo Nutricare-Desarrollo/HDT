@@ -212,6 +212,24 @@ app.http('equipos-importar', {
   }
 });
 
+/* GET /api/equipos/productos -> relación equipo -> [códigos] para validar la combinación. */
+app.http('equipo-productos', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'equipos/productos',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    try {
+      const r = await query(
+        `SELECT EquipoCodigo AS equipo, array_agg(ProductoCodigo ORDER BY ProductoCodigo) AS codigos
+         FROM cat.EquipoProducto GROUP BY EquipoCodigo ORDER BY EquipoCodigo`);
+      return json(200, r.rows);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener la relación equipo-producto', detail: e.message });
+    }
+  }
+});
+
 /* ============================================================
    Hojas de consumo — CRUD
    ============================================================ */
