@@ -263,6 +263,13 @@ app.http('hoja-create', {
     const invalidos = codigosInvalidos(detalle, mapa);
     if (invalidos.length) return json(400, { error: 'Hay códigos que no existen en el catálogo: ' + invalidos.join(', ') });
 
+    // Una cirugía admite una sola hoja "real"; los reemplazos sí se permiten.
+    const cirugiaIdChk = parseInt(body.cirugia_id, 10);
+    if (Number.isFinite(cirugiaIdChk) && body.es_reemplazo !== true) {
+      const ya = await query(`SELECT 1 FROM dbo.HojaConsumo WHERE CirugiaId=$1 AND EsReemplazo=FALSE LIMIT 1`, [cirugiaIdChk]);
+      if (ya.rows.length) return json(400, { error: 'La cirugía ya tiene una hoja de consumo. Cree un reemplazo desde esa hoja si necesita corregirla.' });
+    }
+
     const cols = [], vals = [], ph = [];
     let i = 0;
     for (const [k, col] of ENC_FIELDS) {
@@ -279,8 +286,10 @@ app.http('hoja-create', {
     cols.push('Estado'); vals.push(estadoInicial); ph.push('$' + (++i));
     // Reemplazo/corrección: marca + referencia a la hoja original (se resuelve en Bodega, no va a Dynamics).
     const origenId = parseInt(body.hoja_origen_id, 10);
+    const cirugiaId = parseInt(body.cirugia_id, 10);
     cols.push('EsReemplazo'); vals.push(body.es_reemplazo === true); ph.push('$' + (++i));
     cols.push('HojaOrigenId'); vals.push(Number.isFinite(origenId) ? origenId : null); ph.push('$' + (++i));
+    cols.push('CirugiaId'); vals.push(Number.isFinite(cirugiaId) ? cirugiaId : null); ph.push('$' + (++i));
     cols.push('CreadoPor'); vals.push(user.name || user.email); ph.push('$' + (++i));
     cols.push('CreadoPorEmail'); vals.push(user.email); ph.push('$' + (++i));
 
@@ -369,7 +378,7 @@ app.http('hoja-get', {
                 Cirujano AS cirujano, Instrumentista AS instrumentista, Diagnostico AS diagnostico,
                 Procedimiento AS procedimiento, ImagenBase64 AS imagen_base64, ImagenTipo AS imagen_tipo,
                 Estado AS estado, CreadoPor AS usuario, CreadoPorEmail AS usuario_email,
-                EsReemplazo AS es_reemplazo, HojaOrigenId AS hoja_origen_id,
+                EsReemplazo AS es_reemplazo, HojaOrigenId AS hoja_origen_id, CirugiaId AS cirugia_id,
                 (SELECT o.NumeroHoja FROM dbo.HojaConsumo o WHERE o.Id = HojaConsumo.HojaOrigenId) AS origen_numero_hoja,
                 ${FECHA_LOCAL} AS fecha, ResultadoTR AS resultado_tr
          FROM dbo.HojaConsumo WHERE Id=$1`, [id]);
@@ -507,6 +516,104 @@ app.http('resumen-bodega', {
       r.rows.forEach(x => { out[x.estado] = parseInt(x.n, 10); });
       return json(200, out);
     } catch (e) { context.error(e); return json(500, { error: 'Error al obtener resumen', detail: e.message }); }
+  }
+});
+
+/* ============================================================
+   Cirugías programadas (calendario) — Hospital / Administrador
+   ============================================================ */
+const CIR_FIELDS = [
+  ['fecha_cirugia', 'FechaCirugia'], ['hora_inicio', 'HoraInicio'], ['hora_fin', 'HoraFin'], ['tiempo', 'Tiempo'],
+  ['ubicacion', 'Ubicacion'], ['identificacion', 'Identificacion'], ['paciente', 'Paciente'], ['regimen', 'Regimen'],
+  ['fecha_accidente', 'FechaAccidente'], ['numero_caso', 'NumeroCaso'], ['cirugia', 'Cirugia'], ['cirujano', 'Cirujano'],
+  ['observacion', 'Observacion'], ['requerimiento', 'RequerimientoQuirurgico']
+];
+const CIR_DATE_KEYS = new Set(['fecha_cirugia', 'fecha_accidente']);
+const CIR_ESTADOS = ['Programada', 'Realizada', 'Cancelada'];
+const CIR_SELECT = `SELECT Id AS id, to_char(FechaCirugia,'YYYY-MM-DD') AS fecha_cirugia, HoraInicio AS hora_inicio,
+  HoraFin AS hora_fin, Tiempo AS tiempo, Ubicacion AS ubicacion, Identificacion AS identificacion, Paciente AS paciente,
+  Regimen AS regimen, to_char(FechaAccidente,'YYYY-MM-DD') AS fecha_accidente, NumeroCaso AS numero_caso,
+  Cirugia AS cirugia, Cirujano AS cirujano, Observacion AS observacion, RequerimientoQuirurgico AS requerimiento,
+  Estado AS estado FROM dbo.Cirugia`;
+
+/* GET /api/cirugias?desde=YYYY-MM-DD&hasta=YYYY-MM-DD -> cirugías en el rango (para el calendario). */
+app.http('cirugias-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'cirugias',
+  handler: async (request, context) => {
+    const user = getUser(request); if (!user) return json(401, { error: 'No autenticado' });
+    try {
+      const desde = request.query.get('desde'), hasta = request.query.get('hasta');
+      const ok = (s) => s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+      let where = '', params = [];
+      if (ok(desde) && ok(hasta)) { where = `WHERE FechaCirugia BETWEEN $1 AND $2`; params = [desde, hasta]; }
+      const r = await query(`${CIR_SELECT} ${where} ORDER BY FechaCirugia, HoraInicio, Id`, params);
+      return json(200, r.rows);
+    } catch (e) { context.error(e); return json(500, { error: 'Error al listar cirugías', detail: e.message }); }
+  }
+});
+
+/* GET /api/cirugias/{id} -> una cirugía + sus hojas de consumo. */
+app.http('cirugia-get', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'cirugias/{id}',
+  handler: async (request, context) => {
+    const user = getUser(request); if (!user) return json(401, { error: 'No autenticado' });
+    try {
+      const id = parseInt(request.params.id, 10);
+      const r = await query(`${CIR_SELECT} WHERE Id=$1`, [id]);
+      if (!r.rows.length) return json(404, { error: 'No encontrada' });
+      const h = await query(
+        `SELECT Id AS id, NumeroHoja AS numero_hoja, Estado AS estado, EsReemplazo AS es_reemplazo
+         FROM dbo.HojaConsumo WHERE CirugiaId=$1 ORDER BY EsReemplazo, Id`, [id]);
+      return json(200, { ...r.rows[0], hojas: h.rows });
+    } catch (e) { context.error(e); return json(500, { error: 'Error al obtener la cirugía', detail: e.message }); }
+  }
+});
+
+/* POST /api/cirugias -> programar una cirugía (Hospital/Administrador). */
+app.http('cirugia-create', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'cirugias',
+  handler: async (request, context) => {
+    const user = getUser(request); if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeSubir(await getRole(user))) return json(403, { error: 'No tiene permiso para programar cirugías' });
+    const body = await request.json();
+    const cols = [], vals = [], ph = []; let i = 0;
+    for (const [k, col] of CIR_FIELDS) {
+      i++; cols.push(col); ph.push('$' + i);
+      let v = body[k]; v = (v === undefined || v === null || v === '') ? null : v;
+      if (CIR_DATE_KEYS.has(k) && v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) v = null;
+      vals.push(v);
+    }
+    cols.push('Estado'); vals.push(CIR_ESTADOS.includes(body.estado) ? body.estado : 'Programada'); ph.push('$' + (++i));
+    cols.push('CreadoPor'); vals.push(user.name || user.email); ph.push('$' + (++i));
+    cols.push('CreadoPorEmail'); vals.push(user.email); ph.push('$' + (++i));
+    try {
+      const r = await query(`INSERT INTO dbo.Cirugia (${cols.join(',')}) VALUES (${ph.join(',')}) RETURNING Id`, vals);
+      return json(201, { ok: true, id: r.rows[0].id });
+    } catch (e) { context.error(e); return json(500, { error: 'No se pudo programar la cirugía', detail: e.message }); }
+  }
+});
+
+/* PUT /api/cirugias/{id} -> editar una cirugía (incluye estado). */
+app.http('cirugia-update', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'cirugias/{id}',
+  handler: async (request, context) => {
+    const user = getUser(request); if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeSubir(await getRole(user))) return json(403, { error: 'No tiene permiso para editar cirugías' });
+    const id = parseInt(request.params.id, 10); if (!id) return json(400, { error: 'Id inválido' });
+    const body = await request.json();
+    const sets = [], vals = []; let i = 0;
+    for (const [k, col] of CIR_FIELDS) {
+      i++; let v = body[k]; v = (v === undefined || v === null || v === '') ? null : v;
+      if (CIR_DATE_KEYS.has(k) && v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) v = null;
+      sets.push(`${col}=$${i}`); vals.push(v);
+    }
+    if (CIR_ESTADOS.includes(body.estado)) { i++; sets.push(`Estado=$${i}`); vals.push(body.estado); }
+    const idPh = '$' + (++i); vals.push(id);
+    try {
+      const up = await query(`UPDATE dbo.Cirugia SET ${sets.join(',')} WHERE Id=${idPh}`, vals);
+      if (!up.rowCount) return json(404, { error: 'No encontrada' });
+      return json(200, { ok: true });
+    } catch (e) { context.error(e); return json(500, { error: 'No se pudo actualizar la cirugía', detail: e.message }); }
   }
 });
 

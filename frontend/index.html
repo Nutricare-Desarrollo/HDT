@@ -169,6 +169,27 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
 .ac-desc{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ac-empty{padding:10px 12px;color:var(--muted);font-size:13px}
 
+/* Calendario de cirugías */
+.cal-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.cal-nav{display:flex;gap:6px;align-items:center}
+.cal-title{font-weight:700;color:var(--brand-d);font-size:16px}
+.mes-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.mes-grid .dow{font-size:12px;font-weight:700;color:var(--muted);text-align:center;padding:4px 0}
+.mes-cell{min-height:96px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:4px;display:flex;flex-direction:column;gap:3px;cursor:pointer;overflow:hidden}
+.mes-cell.otro{background:#f5f7f9;color:var(--muted)}
+.mes-cell.hoy{border-color:var(--accent);box-shadow:0 0 0 2px rgba(18,164,180,.2)}
+.mes-cell .dnum{font-size:12px;font-weight:700;align-self:flex-end}
+.cir-pill{background:#e3f0fb;color:#0a5c8a;border-radius:5px;padding:2px 6px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;display:inline-block;max-width:100%}
+.cir-pill.Realizada{background:#d9f2e4;color:#12724a}
+.cir-pill.Cancelada{background:#fbeae8;color:#a02b1f;text-decoration:line-through}
+.sem-list{display:flex;flex-direction:column;gap:10px}
+.sem-day{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.sem-day h4{margin:0;padding:8px 12px;background:var(--brand-d);color:#fff;font-size:13px}
+.sem-day .srow{display:flex;gap:10px;padding:8px 12px;border-top:1px solid var(--line);cursor:pointer;align-items:center;flex-wrap:wrap}
+.sem-day .srow:hover{background:#f5fafc}
+.sem-day .hora{font-weight:700;color:var(--brand-d);min-width:52px}
+.sem-empty{padding:10px 12px;color:var(--muted);font-size:13px}
+
 @media(max-width:640px){
   main{padding:14px 10px 40px}
   .kv{grid-template-columns:1fr}
@@ -380,6 +401,24 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div class="grid-foot" id="remFoot"></div>
       </div>
     </section>
+
+    <!-- CIRUGÍAS (calendario) — Hospital / Administrador -->
+    <section id="viewCirugias" class="hidden">
+      <div class="page-head">
+        <div><h2>Cirugías</h2><div class="sub">Planeación quirúrgica</div></div>
+        <button class="btn-primary" onclick="openCirForm()">＋ Programar cirugía</button>
+      </div>
+      <div class="cal-head">
+        <div class="cal-nav">
+          <button class="btn-ghost" onclick="cirHoy()">Hoy</button>
+          <button class="btn-ghost" onclick="cirNav(-1)">←</button>
+          <button class="btn-ghost" onclick="cirNav(1)">→</button>
+        </div>
+        <div class="cal-title" id="cirTitle"></div>
+        <div style="margin-left:auto"><button class="btn-ghost" id="cirToggle" onclick="cirToggle()">Ver semana</button></div>
+      </div>
+      <div id="cirCal"></div>
+    </section>
   </main>
 </div>
 
@@ -427,6 +466,27 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       <button class="btn-ghost" onclick="closeEnvio()">Cancelar</button>
       <button class="btn-primary" id="envioSaveBtn" onclick="guardarEnvio()">Agregar</button>
     </div>
+  </div>
+</div>
+
+<!-- MODAL programar/editar cirugía -->
+<div id="cirModal" class="overlay hidden">
+  <div class="modal">
+    <div class="modal-head"><h3 id="cirModalTitle">Programar cirugía</h3><button class="x" onclick="closeCir()">×</button></div>
+    <div class="modal-body"><div class="form-grid" id="cirFields"></div></div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="closeCir()">Cancelar</button>
+      <button class="btn-primary" id="cirSaveBtn" onclick="guardarCir()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL detalle de cirugía -->
+<div id="cirDetModal" class="overlay hidden">
+  <div class="modal">
+    <div class="modal-head"><h3>Cirugía</h3><button class="x" onclick="closeCirDet()">×</button></div>
+    <div class="modal-body" id="cirDetBody"></div>
+    <div class="modal-foot" id="cirDetFoot"></div>
   </div>
 </div>
 
@@ -823,6 +883,7 @@ function buildNav(){
   const items=[{id:'inicio',l:'🏠 Inicio',fn:showInicio},{id:'hojas',l:'📋 Hojas de consumo',fn:showHojas}];
   // Pendientes de reposición: Hospital y Administrador.
   if(canSubir()) items.push({id:'pendientes',l:'🕒 Pendientes de reposición',fn:showPendientes});
+  if(canSubir()) items.push({id:'cirugias',l:'📅 Cirugías',fn:showCirugias});
   // Configuración e Histórico Dynamics: solo Bodega y Administrador.
   if(canBodega()) items.push({id:'config',l:'⚙️ Configuración',fn:showConfig});
   if(canBodega()) items.push({id:'trabajos',l:'🧾 Histórico Dynamics',fn:showTrabajos});
@@ -832,7 +893,7 @@ function buildNav(){
   items.forEach(it=>{ const b=document.createElement('button'); b.id='tab-'+it.id; b.textContent=it.l; b.onclick=it.fn; n.appendChild(b); });
 }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos'];
+const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
 
 /* ===== INICIO ===== */
@@ -1611,7 +1672,7 @@ function abrirImagenNuevaPestana(){
 /* ===== WIZARD ===== */
 function openWizard(){
   if(!canSubir()){ toast('Su rol no puede subir hojas'); return; }
-  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[],manual:false,editId:null,esReemplazo:false,origenId:null};
+  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[],manual:false,editId:null,esReemplazo:false,origenId:null,cirugiaId:null};
   showOnly('viewWizard'); setTab('hojas');
   // Restaura la UI del modo "subir" (por si venía del modo manual)
   document.getElementById('wizTitle').textContent='Subir hoja de consumo';
@@ -1631,7 +1692,7 @@ function openWizard(){
 /* Crear hoja manualmente: va directo al formulario (encabezado + detalle), sin foto. */
 async function openManual(){
   if(!canSubir()){ toast('Su rol no puede crear hojas'); return; }
-  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[{}],manual:true,editId:null,esReemplazo:false,origenId:null};
+  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[{}],manual:true,editId:null,esReemplazo:false,origenId:null,cirugiaId:null};
   showOnly('viewWizard'); setTab('hojas');
   document.getElementById('wizTitle').textContent='Crear hoja de consumo';
   document.getElementById('wizSub').textContent='Ingrese los datos manualmente';
@@ -1670,7 +1731,7 @@ async function openReemplazo(id){
   if(!canSubir()){ toast('Su rol no puede crear reemplazos'); return; }
   try{
     const h = await api('GET','/hojas/'+id);
-    WIZ={dataUrl:'',base64:'',tipo:'',detalle:[],manual:true,editId:null,esReemplazo:true,origenId:id};
+    WIZ={dataUrl:'',base64:'',tipo:'',detalle:[],manual:true,editId:null,esReemplazo:true,origenId:id,cirugiaId:(h&&h.cirugia_id)||null};
     showOnly('viewWizard'); setTab('hojas');
     document.getElementById('wizTitle').textContent='Crear reemplazo / corrección';
     document.getElementById('wizSub').textContent='A partir de la hoja N° '+(h.numero_hoja||'—');
@@ -1846,7 +1907,7 @@ async function guardar(){
   const btn=document.getElementById('guardarBtn'); if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
   try{
     if(WIZ.editId){ await api('PUT','/hojas/'+WIZ.editId,{encabezado:enc,detalle,estado:PEND}); }
-    else { await api('POST','/hojas',{encabezado:enc,detalle,imagenBase64:WIZ.base64,imagenTipo:WIZ.tipo,estado:PEND,es_reemplazo:!!WIZ.esReemplazo,hoja_origen_id:WIZ.origenId||null}); }
+    else { await api('POST','/hojas',{encabezado:enc,detalle,imagenBase64:WIZ.base64,imagenTipo:WIZ.tipo,estado:PEND,es_reemplazo:!!WIZ.esReemplazo,hoja_origen_id:WIZ.origenId||null,cirugia_id:WIZ.cirugiaId||null}); }
     toast('Hoja guardada como pendiente de reposición');
     showPendientes();
   }catch(e){ toast('No se pudo guardar: '+e.message); }
@@ -1860,7 +1921,7 @@ async function enviar(){
   const btn=document.getElementById('enviarBtn'); btn.disabled=true; btn.textContent='Enviando…';
   try{
     if(WIZ.editId){ await api('PUT','/hojas/'+WIZ.editId,{encabezado:enc,detalle,estado:'Enviado'}); }
-    else { await api('POST','/hojas',{encabezado:enc,detalle,imagenBase64:WIZ.base64,imagenTipo:WIZ.tipo,estado:'Enviado',es_reemplazo:!!WIZ.esReemplazo,hoja_origen_id:WIZ.origenId||null}); }
+    else { await api('POST','/hojas',{encabezado:enc,detalle,imagenBase64:WIZ.base64,imagenTipo:WIZ.tipo,estado:'Enviado',es_reemplazo:!!WIZ.esReemplazo,hoja_origen_id:WIZ.origenId||null,cirugia_id:WIZ.cirugiaId||null}); }
     showResult(true);
   }catch(e){ showResult(false, e.message); }
   finally{ btn.disabled=false; btn.textContent='Enviar hoja de consumo'; }
@@ -1886,6 +1947,145 @@ function backToStep2(){ document.getElementById('wizResult').classList.add('hidd
 /* ===== MODAL imagen ===== */
 function openImg(src){ document.getElementById('imgModalBody').innerHTML=`<img src="${src}" alt="hoja">`; document.getElementById('imgModal').classList.remove('hidden'); }
 function closeImg(){ document.getElementById('imgModal').classList.add('hidden'); document.getElementById('imgModalBody').innerHTML=''; }
+
+/* ===== CIRUGÍAS (calendario) — Hospital / Administrador ===== */
+let CIR_VIEW='mes', CIR_REF=null, CIR_ROWS=[], CIR_EDIT=null, CUR_CIR=null;
+const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const DOW=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+const CIR_FORM=[
+  {k:'fecha_cirugia',l:'Fecha de cirugía',t:'date',req:true},{k:'hora_inicio',l:'Hora inicio',t:'time'},
+  {k:'hora_fin',l:'Hora fin',t:'time'},{k:'tiempo',l:'Tiempo (ej. 2 Hora(s))'},
+  {k:'ubicacion',l:'Ubicación / Sala'},{k:'paciente',l:'Paciente'},{k:'identificacion',l:'Identificación'},
+  {k:'regimen',l:'Régimen'},{k:'fecha_accidente',l:'Fecha de accidente',t:'date'},{k:'numero_caso',l:'N° de caso'},
+  {k:'cirujano',l:'Cirujano'},{k:'cirugia',l:'Cirugía (procedimiento)',full:true},
+  {k:'observacion',l:'Observación',full:true,area:true},{k:'requerimiento',l:'Requerimiento quirúrgico',full:true,area:true},
+  {k:'estado',l:'Estado',sel:['Programada','Realizada','Cancelada']}
+];
+function cirTodayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function cirParse(s){ const p=String(s||'').split('-'); return new Date(+p[0],(+p[1]||1)-1,+p[2]||1); }
+function cirFmt(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+async function showCirugias(){
+  if(!canSubir()){ toast('Su rol no tiene acceso'); showInicio(); return; }
+  setTab('cirugias'); showOnly('viewCirugias');
+  if(!CIR_REF) CIR_REF=cirTodayStr();
+  await loadCirugias();
+}
+function cirRango(){
+  const ref=cirParse(CIR_REF);
+  if(CIR_VIEW==='mes'){
+    const first=new Date(ref.getFullYear(),ref.getMonth(),1), last=new Date(ref.getFullYear(),ref.getMonth()+1,0);
+    const start=new Date(first); start.setDate(first.getDate()-((first.getDay()+6)%7));
+    const end=new Date(last); end.setDate(last.getDate()+(6-((last.getDay()+6)%7)));
+    return {desde:cirFmt(start),hasta:cirFmt(end)};
+  }
+  const start=new Date(ref); start.setDate(ref.getDate()-((ref.getDay()+6)%7));
+  const end=new Date(start); end.setDate(start.getDate()+6);
+  return {desde:cirFmt(start),hasta:cirFmt(end)};
+}
+async function loadCirugias(){
+  const {desde,hasta}=cirRango();
+  try{ CIR_ROWS=await api('GET','/cirugias?desde='+desde+'&hasta='+hasta); }
+  catch(e){ CIR_ROWS=[]; toast('Error al cargar cirugías: '+e.message); }
+  renderCir();
+}
+function cirByDay(){ const m={}; CIR_ROWS.forEach(c=>{ const k=c.fecha_cirugia||''; (m[k]=m[k]||[]).push(c); }); return m; }
+function cirNav(dir){ const ref=cirParse(CIR_REF); if(CIR_VIEW==='mes') ref.setMonth(ref.getMonth()+dir); else ref.setDate(ref.getDate()+7*dir); CIR_REF=cirFmt(ref); loadCirugias(); }
+function cirHoy(){ CIR_REF=cirTodayStr(); loadCirugias(); }
+function cirToggle(){ CIR_VIEW=CIR_VIEW==='mes'?'semana':'mes'; document.getElementById('cirToggle').textContent=CIR_VIEW==='mes'?'Ver semana':'Ver mes'; loadCirugias(); }
+function renderCir(){ CIR_VIEW==='mes'?renderMes():renderSemana(); }
+function cirPill(c){ return `<div class="cir-pill ${esc(c.estado)}" onclick="event.stopPropagation();openCirDet(${c.id})" title="${attr((c.hora_inicio||'')+' '+(c.cirugia||''))}">${esc((c.hora_inicio||'').slice(0,5))} ${esc(c.cirugia||c.paciente||'Cirugía')}</div>`; }
+function renderMes(){
+  const ref=cirParse(CIR_REF); document.getElementById('cirTitle').textContent=MESES[ref.getMonth()]+' '+ref.getFullYear();
+  let cur=cirParse(cirRango().desde); const byDay=cirByDay(), hoy=cirTodayStr(), mesRef=ref.getMonth();
+  let html='<div class="mes-grid">'+DOW.map(d=>`<div class="dow">${d}</div>`).join('');
+  for(let w=0;w<6;w++){ for(let d=0;d<7;d++){
+    const ds=cirFmt(cur), otro=cur.getMonth()!==mesRef?' otro':'', esHoy=ds===hoy?' hoy':'';
+    const items=(byDay[ds]||[]).map(cirPill).join('');
+    html+=`<div class="mes-cell${otro}${esHoy}" onclick="openCirForm(null,'${ds}')"><span class="dnum">${cur.getDate()}</span>${items}</div>`;
+    cur.setDate(cur.getDate()+1);
+  } }
+  html+='</div>'; document.getElementById('cirCal').innerHTML=html;
+}
+function renderSemana(){
+  let cur=cirParse(cirRango().desde); const byDay=cirByDay(), hoy=cirTodayStr();
+  document.getElementById('cirTitle').textContent='Semana del '+cur.getDate()+' de '+MESES[cur.getMonth()];
+  let html='<div class="sem-list">';
+  for(let d=0;d<7;d++){
+    const ds=cirFmt(cur);
+    const items=(byDay[ds]||[]).slice().sort((a,b)=>String(a.hora_inicio||'').localeCompare(String(b.hora_inicio||'')));
+    html+=`<div class="sem-day"><h4>${DOW[d]} ${cur.getDate()} de ${MESES[cur.getMonth()]}${ds===hoy?' · hoy':''} <button class="btn-ghost" style="float:right;padding:2px 8px;font-size:12px" onclick="openCirForm(null,'${ds}')">＋</button></h4>`;
+    if(!items.length) html+='<div class="sem-empty">Sin cirugías.</div>';
+    else items.forEach(c=>{ html+=`<div class="srow" onclick="openCirDet(${c.id})"><span class="hora">${esc((c.hora_inicio||'').slice(0,5)||'—')}</span><span class="cir-pill ${esc(c.estado)}">${esc(c.estado)}</span><span>${esc(c.cirugia||'Cirugía')} · ${esc(c.paciente||'')} · ${esc(c.cirujano||'')}</span></div>`; });
+    html+='</div>'; cur.setDate(cur.getDate()+1);
+  }
+  html+='</div>'; document.getElementById('cirCal').innerHTML=html;
+}
+function openCirForm(id, presetDate){
+  CIR_EDIT=id||null;
+  document.getElementById('cirModalTitle').textContent=id?'Editar cirugía':'Programar cirugía';
+  const fill=(data)=>{
+    const c=document.getElementById('cirFields'); c.innerHTML='';
+    CIR_FORM.forEach(f=>{
+      let val=data[f.k]!=null?data[f.k]:'';
+      if(!val && !id && f.k==='fecha_cirugia' && presetDate) val=presetDate;
+      if(!val && f.k==='estado') val='Programada';
+      const w=document.createElement('div'); w.className='field'+(f.full?' full':'');
+      let inner=`<label>${f.l}${f.req?' <span class="req">*</span>':''}</label>`;
+      if(f.sel) inner+=`<select id="cir_${f.k}">`+f.sel.map(o=>`<option${o===val?' selected':''}>${o}</option>`).join('')+`</select>`;
+      else if(f.area) inner+=`<textarea id="cir_${f.k}" rows="2">${attr(val)}</textarea>`;
+      else inner+=`<input id="cir_${f.k}" type="${f.t||'text'}" value="${attr(val)}">`;
+      w.innerHTML=inner; c.appendChild(w);
+    });
+    document.getElementById('cirModal').classList.remove('hidden');
+  };
+  if(id) api('GET','/cirugias/'+id).then(fill).catch(e=>toast('No se pudo abrir: '+e.message));
+  else fill({});
+}
+function closeCir(){ document.getElementById('cirModal').classList.add('hidden'); }
+async function guardarCir(){
+  const data={}; CIR_FORM.forEach(f=>{ const el=document.getElementById('cir_'+f.k); data[f.k]=el?el.value.trim():''; });
+  if(!data.fecha_cirugia){ toast('La fecha de cirugía es requerida'); return; }
+  const btn=document.getElementById('cirSaveBtn'); btn.disabled=true; btn.textContent='Guardando…';
+  try{
+    if(CIR_EDIT) await api('PUT','/cirugias/'+CIR_EDIT,data); else await api('POST','/cirugias',data);
+    toast('Cirugía guardada'); closeCir(); loadCirugias();
+  }catch(e){ toast('No se pudo guardar: '+e.message); }
+  finally{ btn.disabled=false; btn.textContent='Guardar'; }
+}
+async function openCirDet(id){
+  try{ const c=await api('GET','/cirugias/'+id); CUR_CIR=c; renderCirDet(c); document.getElementById('cirDetModal').classList.remove('hidden'); }
+  catch(e){ toast('No se pudo abrir la cirugía: '+e.message); }
+}
+function closeCirDet(){ document.getElementById('cirDetModal').classList.add('hidden'); }
+function renderCirDet(c){
+  const kv=[['Fecha',(c.fecha_cirugia||'—')+' '+((c.hora_inicio||'').slice(0,5))],['Tiempo',c.tiempo],['Ubicación',c.ubicacion],['Paciente',c.paciente],['Identificación',c.identificacion],['Régimen',c.regimen],['F. accidente',c.fecha_accidente],['N° de caso',c.numero_caso],['Cirujano',c.cirujano],['Cirugía',c.cirugia],['Observación',c.observacion],['Requerimiento',c.requerimiento],['Estado',c.estado]];
+  let html='<div class="kv">'+kv.map(([k,v])=>`<div class="k">${k}</div><div>${esc(v)}</div>`).join('')+'</div>';
+  const principal=(c.hojas||[]).find(h=>!h.es_reemplazo);
+  html+='<div class="section-title">Hoja de consumo</div>';
+  if(principal) html+=`<div>Hoja N° ${esc(principal.numero_hoja||principal.id)} · ${esc(estadoTxt(principal.estado))} <button class="btn-ghost" style="padding:4px 10px" onclick="closeCirDet();verHoja(${principal.id})">Ver hoja</button></div>`;
+  else html+='<div style="color:var(--muted)">Aún no tiene hoja de consumo.</div>';
+  document.getElementById('cirDetBody').innerHTML=html;
+  let fh=`<button class="btn-ghost" onclick="openCirForm(${c.id})">✎ Editar</button>`;
+  if(!principal) fh+=`<button class="btn-primary" onclick="crearHojaDeCirugia()">＋ Crear hoja de consumo</button>`;
+  document.getElementById('cirDetFoot').innerHTML=fh;
+}
+function crearHojaDeCirugia(){
+  const c=CUR_CIR; if(!c) return; if(!canSubir()){ toast('Su rol no puede crear hojas'); return; }
+  closeCirDet();
+  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[{}],manual:true,editId:null,esReemplazo:false,origenId:null,cirugiaId:c.id};
+  showOnly('viewWizard'); setTab('cirugias');
+  document.getElementById('wizTitle').textContent='Crear hoja de consumo (cirugía)';
+  document.getElementById('wizSub').textContent=(c.paciente||'')+' · '+(c.cirugia||'');
+  document.getElementById('wizSteps').classList.add('hidden');
+  document.getElementById('verImgBtn').classList.add('hidden');
+  document.getElementById('wizStep1').classList.add('hidden');
+  document.getElementById('wizResult').classList.add('hidden');
+  document.getElementById('wizStep2').classList.remove('hidden');
+  document.getElementById('enviarBtn').classList.add('hidden');   // borrador: solo Guardar
+  document.getElementById('guardarBtn').classList.remove('hidden');
+  const enc={ paciente:c.paciente, identificacion:c.identificacion, regimen:c.regimen, fecha_accidente:c.fecha_accidente, fecha_cirugia:c.fecha_cirugia, cirujano:c.cirujano, procedimiento:c.cirugia, diagnostico:c.observacion, numero_documento:c.numero_caso };
+  fillStep2(enc, []);
+}
 
 /* ===== Utilidades ===== */
 function esc(s){ if(s===undefined||s===null||s==='')return '—'; return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
