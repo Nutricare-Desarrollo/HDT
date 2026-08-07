@@ -617,6 +617,55 @@ app.http('cirugia-update', {
   }
 });
 
+/* POST /api/cirugias/importar -> alta/actualización masiva (Excel del INS).
+   Body: { cirugias: [ {campos...} ] }. Upsert por NumeroCaso cuando viene. */
+app.http('cirugias-importar', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'cirugias/importar',
+  handler: async (request, context) => {
+    const user = getUser(request); if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeSubir(await getRole(user))) return json(403, { error: 'No tiene permiso para importar cirugías' });
+    const body = await request.json();
+    const arr = Array.isArray(body.cirugias) ? body.cirugias : [];
+    const okDate = (s) => s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    let creadas = 0, actualizadas = 0, omitidas = 0;
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      for (const c of arr) {
+        const fecha = okDate(c.fecha_cirugia) ? c.fecha_cirugia : null;
+        if (!fecha) { omitidas++; continue; }
+        const facc = okDate(c.fecha_accidente) ? c.fecha_accidente : null;
+        const caso = (c.numero_caso != null && String(c.numero_caso).trim() !== '') ? String(c.numero_caso).trim() : null;
+        const vals = [fecha, c.hora_inicio || null, c.tiempo || null, c.ubicacion || null, c.identificacion || null,
+          c.paciente || null, c.regimen || null, facc, caso, c.cirugia || null, c.cirujano || null,
+          c.observacion || null, c.requerimiento || null];
+        let upd = null;
+        if (caso) {
+          upd = await client.query(
+            `UPDATE dbo.Cirugia SET FechaCirugia=$1,HoraInicio=$2,Tiempo=$3,Ubicacion=$4,Identificacion=$5,
+               Paciente=$6,Regimen=$7,FechaAccidente=$8,Cirugia=$10,Cirujano=$11,Observacion=$12,RequerimientoQuirurgico=$13
+             WHERE NumeroCaso=$9`, vals);
+        }
+        if (upd && upd.rowCount) { actualizadas += upd.rowCount; continue; }
+        await client.query(
+          `INSERT INTO dbo.Cirugia (FechaCirugia,HoraInicio,Tiempo,Ubicacion,Identificacion,Paciente,Regimen,
+             FechaAccidente,NumeroCaso,Cirugia,Cirujano,Observacion,RequerimientoQuirurgico,Estado,CreadoPor,CreadoPorEmail)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Programada',$14,$15)`,
+          [...vals, user.name || user.email, user.email]);
+        creadas++;
+      }
+      await client.query('COMMIT');
+      return json(200, { ok: true, creadas, actualizadas, omitidas });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      context.error(e);
+      return json(500, { error: 'No se pudo importar', detail: e.message });
+    } finally {
+      client.release();
+    }
+  }
+});
+
 /* ============================================================
    Configuración (ubicaciones Origen/Destino) — solo Bodega/Administrador
    ============================================================ */
