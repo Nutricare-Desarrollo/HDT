@@ -2085,7 +2085,7 @@ function renderCirDet(c){
   if(principal) html+=`<div>Hoja N° ${esc(principal.numero_hoja||principal.id)} · ${esc(estadoTxt(principal.estado))} <button class="btn-ghost" style="padding:4px 10px" onclick="closeCirDet();verHoja(${principal.id})">Ver hoja</button></div>`;
   else html+='<div style="color:var(--muted)">Aún no tiene hoja de consumo.</div>';
   document.getElementById('cirDetBody').innerHTML=html;
-  let fh=`<button class="btn-ghost" onclick="openCirForm(${c.id})">✎ Editar</button>`;
+  let fh=`<button class="btn-ghost" onclick="closeCirDet();openCirForm(${c.id})">✎ Editar</button>`;
   if(!principal) fh+=`<button class="btn-primary" onclick="crearHojaDeCirugia()">＋ Crear hoja de consumo</button>`;
   document.getElementById('cirDetFoot').innerHTML=fh;
 }
