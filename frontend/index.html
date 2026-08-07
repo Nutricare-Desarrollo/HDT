@@ -2108,7 +2108,7 @@ function crearHojaDeCirugia(){
 }
 
 /* ===== Importar cirugías desde el Excel del INS ===== */
-let IMP_ROWS=[];
+let IMP_ROWS=[], IMP_OMIT_NUT=0;
 function impNorm(s){ return String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim(); }
 const IMP_MES={enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,julio:7,agosto:8,septiembre:9,setiembre:9,octubre:10,noviembre:11,diciembre:12,ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,set:9,oct:10,nov:11,dic:12,jan:1,apr:4,aug:8,dec:12};
 function impPad(n){ return String(n).padStart(2,'0'); }
@@ -2144,7 +2144,7 @@ function impParseSheet(rows, filename){
     regimen:impFindCol(H,['regimen']), fecha_accidente:impFindCol(H,['accidente']), numero_caso:impFindCol(H,['caso']),
     cirujano:impFindCol(H,['cirujano']), tiempo:impFindCol(H,['tiempo']), observacion:impFindCol(H,['observaci']),
     requerimiento:impFindCol(H,['requerimiento']), ubicacion:impFindCol(H,['ubicaci']), fecha:impFindCol(H,['fecha'],['accidente']),
-    cirugia:impFindCol(H,['cirug'],['cirujano'])
+    cirugia:impFindCol(H,['cirug'],['cirujano']), nutricare:impFindCol(H,['nutricare'])
   };
   const fnFecha=impFecha(String(filename||'').replace(/_/g,' '));
   const out=[];
@@ -2153,6 +2153,8 @@ function impParseSheet(rows, filename){
     const ident=String(g(col.identificacion)).trim(), pac=String(g(col.paciente)).trim(), cir=String(g(col.cirugia)).trim();
     if(!ident && !pac && !cir) continue;
     if(!ident && !cir && impNorm(g(col.observacion)).includes('cupo')) continue;
+    // Solo se cargan las cirugías marcadas como Nutricare = Sí.
+    if(impNorm(g(col.nutricare))!=='si'){ IMP_OMIT_NUT++; continue; }
     out.push({
       fecha_cirugia:(col.fecha>=0? impFecha(g(col.fecha)):null) || fnFecha,
       hora_inicio:impHora(g(col.hora)), tiempo:String(g(col.tiempo)).trim(), ubicacion:String(g(col.ubicacion)).trim(),
@@ -2173,7 +2175,7 @@ function impClose(){ document.getElementById('impModal').classList.add('hidden')
 function impParse(input){
   const files=Array.from(input.files||[]); if(!files.length) return;
   if(typeof XLSX==='undefined'){ toast('No se pudo cargar el lector de Excel (revisá tu conexión a internet).'); return; }
-  document.getElementById('impPreview').innerHTML='Leyendo…'; IMP_ROWS=[];
+  document.getElementById('impPreview').innerHTML='Leyendo…'; IMP_ROWS=[]; IMP_OMIT_NUT=0;
   let pend=files.length;
   files.forEach(f=>{
     const rdr=new FileReader();
@@ -2195,8 +2197,8 @@ function impRenderPreview(){
   IMP_ROWS=[...map.values(), ...sinCaso];
   const prev=document.getElementById('impPreview');
   const conFecha=IMP_ROWS.filter(r=>r.fecha_cirugia).length, sinFecha=IMP_ROWS.length-conFecha;
-  if(!IMP_ROWS.length){ prev.innerHTML='<div class="empty">No se reconocieron cirugías en el/los archivo(s).</div>'; document.getElementById('impConfirmBtn').classList.add('hidden'); return; }
-  let html=`<div style="margin-bottom:8px"><b>${IMP_ROWS.length}</b> cirugías leídas`+(sinFecha?` · <span style="color:var(--danger)">${sinFecha} sin fecha (se omitirán)</span>`:'')+`.</div>`;
+  if(!IMP_ROWS.length){ prev.innerHTML='<div class="empty">No se reconocieron cirugías Nutricare (Sí) en el/los archivo(s).'+(IMP_OMIT_NUT?`<br><span class="sub">${IMP_OMIT_NUT} fila(s) no marcadas como Nutricare=Sí (o sin esa columna).</span>`:'')+'</div>'; document.getElementById('impConfirmBtn').classList.add('hidden'); return; }
+  let html=`<div style="margin-bottom:8px"><b>${IMP_ROWS.length}</b> cirugías Nutricare (Sí) leídas`+(sinFecha?` · <span style="color:var(--danger)">${sinFecha} sin fecha (se omitirán)</span>`:'')+(IMP_OMIT_NUT?` · ${IMP_OMIT_NUT} omitidas (no Nutricare=Sí)`:'')+`.</div>`;
   html+='<div class="tbl-wrap" style="max-height:300px;overflow:auto"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Paciente</th><th>Cirugía</th><th>Cirujano</th><th>Caso</th></tr></thead><tbody>';
   IMP_ROWS.slice(0,50).forEach(r=>{ html+=`<tr><td>${esc(r.fecha_cirugia)}</td><td>${esc(r.hora_inicio)}</td><td>${esc(r.paciente)}</td><td>${esc(r.cirugia)}</td><td>${esc(r.cirujano)}</td><td>${esc(r.numero_caso)}</td></tr>`; });
   html+='</tbody></table></div>'+(IMP_ROWS.length>50?`<div class="sub" style="margin-top:6px">Mostrando 50 de ${IMP_ROWS.length}.</div>`:'');
