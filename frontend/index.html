@@ -1592,7 +1592,7 @@ async function resolverReemplazo(id){
 /* ===== Pedido Pendiente ===== */
 let PED_ROWS=[], PED_COLF={}, CUR_PED=null, PED_ENVIOS=[], ENV_EDIT_IDX=null;
 const PED_COLS=[
-  {k:'hoja_id',l:'Hoja',link:true},
+  {k:'consecutivo',l:'Consecutivo',link:true},
   {k:'ubicacion',l:'Bandeja'},
   {k:'id_producto',l:'Código'},
   {k:'descripcion',l:'Descripción'},
@@ -1633,7 +1633,7 @@ function renderPedidos(){
   rows.forEach(r=>{
     const tds=PED_COLS.map(c=>{
       if(c.k==='estado') return `<td>${estadoBadge(r.estado)}</td>`;
-      if(c.link) return `<td>${r.hoja_id!=null?`<span class="link-cell" onclick="verHoja(${r.hoja_id})" title="Abrir la hoja de consumo">${esc(r.hoja_id)}</span>`:''}</td>`;
+      if(c.link){ const txt=(r.consecutivo!=null&&r.consecutivo!=='')?r.consecutivo:(r.hoja_id!=null?r.hoja_id:''); return `<td>${r.hoja_id!=null?`<span class="link-cell" onclick="verHoja(${r.hoja_id})" title="Abrir la hoja de consumo">${esc(txt)}</span>`:esc(txt)}</td>`; }
       return `<td>${esc(r[c.k])}</td>`;
     }).join('');
     const tr=document.createElement('tr');
