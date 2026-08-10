@@ -93,6 +93,8 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .b-Error{background:#fbeae8;color:#a02b1f}
 .b-Pendientereposicion{background:#fff6e5;color:#8a5a00}
 .b-Resuelto{background:#e6f0ea;color:#1c6b45}
+.b-Pendiente{background:#fff6e5;color:#8a5a00}
+.b-Procesado{background:#d9f2e4;color:#12724a}
 
 /* Dashboard */
 .dash-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px}
@@ -465,11 +467,15 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <label>Cantidad a enviar <span class="req">*</span></label>
         <input id="envioCant" type="number" min="1" step="1" autocomplete="off" oninput="onEnvioInput()">
       </div>
+      <div class="field" style="margin-top:10px">
+        <label>Lote <span class="req">*</span></label>
+        <input id="envioLote" type="text" autocomplete="off" oninput="onEnvioInput()">
+      </div>
       <p id="envioQueda" style="color:var(--muted);font-size:13px;margin:8px 0 0"></p>
     </div>
     <div class="modal-foot">
-      <button class="btn-ghost" onclick="closeEnvio()">Cancelar</button>
-      <button class="btn-primary" id="envioSaveBtn" onclick="guardarEnvio()">Agregar</button>
+      <button class="btn-ghost" onclick="closeEnvio()">Cerrar</button>
+      <button class="btn-primary" id="envioSaveBtn" onclick="aplicarEnvio()">Agregar</button>
     </div>
   </div>
 </div>
@@ -1572,7 +1578,7 @@ async function resolverReemplazo(id){
 }
 
 /* ===== Pedido Pendiente ===== */
-let PED_ROWS=[], PED_COLF={}, CUR_PED=null;
+let PED_ROWS=[], PED_COLF={}, CUR_PED=null, PED_ENVIOS=[], ENV_EDIT_IDX=null;
 const PED_COLS=[
   {k:'ubicacion',l:'Bandeja'},
   {k:'id_producto',l:'Código'},
@@ -1633,64 +1639,164 @@ async function verPedido(id){
   }catch(e){ body.innerHTML=`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`; }
 }
 function renderPedidoDet(p){
-  const pendiente=(p.cantidad_total||0)-(p.cantidad_enviada||0);
+  // Copia de trabajo (borrador): las líneas Pendientes se editan aquí y se persisten con Guardar.
+  PED_ENVIOS = (p.envios||[]).map(e=>({
+    id: e.id, cantidad: e.cantidad_enviada, lote: e.lote||'', estado: e.estado||'Pendiente',
+    numero_tr: e.numero_tr||'', usuario: e.usuario||'', fecha: e.fecha||''
+  }));
+  ENV_EDIT_IDX=null;
+  renderPedProducto(p);
+  renderEnviosGrid();
+}
+// Panel del producto (con botón para copiar el Código) + grid de envíos + Guardar/Cancelar.
+function renderPedProducto(p){
   document.getElementById('pedDetSub').textContent=`${p.id_producto||'—'} · ${estadoTxt(p.estado)}`;
   const campos=[
-    ['Bandeja',p.ubicacion],['Código',p.id_producto],['Descripción',p.descripcion],
-    ['Cantidad',p.cantidad_total],['Reposición',p.reposicion_anaquel],
-    ['Cantidad Enviada',p.cantidad_enviada],['Pendiente por enviar',pendiente],['Estado',p.estado]
+    ['Bandeja', esc(p.ubicacion)],
+    ['Código', `${esc(p.id_producto)} <button class="icon-btn" title="Copiar código" onclick="copiarCodigo()" style="padding:2px 8px;margin-left:6px">📋 Copiar</button>`],
+    ['Descripción', esc(p.descripcion)],
+    ['Cantidad', esc(p.cantidad_total)],
+    ['Reposición', esc(p.reposicion_anaquel)],
+    ['Estado', esc(p.estado)]
   ];
   let html='<div class="section-title" style="margin-top:0">Producto</div><div class="kv">';
-  campos.forEach(([k,v])=>{ html+=`<div class="k">${k}</div><div>${esc(v)}</div>`; });
+  campos.forEach(([k,v])=>{ html+=`<div class="k">${k}</div><div>${v}</div>`; });
   html+='</div>';
-  html+='<div class="section-title">Envíos <button class="btn-ghost" id="pedAddBtn" style="padding:6px 12px;margin-left:8px" onclick="openEnvio()">＋ Agregar envío de productos</button></div>';
-  const envios=p.envios||[];
-  html+='<div class="tbl-wrap"><table><thead><tr><th>Fecha y hora</th><th>Usuario</th><th>Cantidad enviada</th></tr></thead><tbody>';
-  if(!envios.length){ html+=`<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:22px">Sin envíos registrados.</td></tr>`; }
-  else envios.forEach(e=>{ html+=`<tr><td>${esc(e.fecha)}</td><td>${esc(e.usuario)}</td><td>${esc(e.cantidad_enviada)}</td></tr>`; });
-  html+='</tbody></table></div>';
+  html+='<div class="section-title">Cantidades a enviar '
+      +'<button class="btn-ghost" id="pedAddBtn" style="padding:6px 12px;margin-left:8px" onclick="openEnvio()">＋ Agregar envío de productos</button>'
+      +'</div>';
+  html+='<div class="tbl-wrap"><table id="envGrid"><thead><tr>'
+      +'<th>Usuario</th><th>Fecha y hora</th><th>Cantidad</th><th>Lote</th><th>Estado</th><th>TR</th><th></th>'
+      +'</tr></thead><tbody id="envBody"></tbody></table></div>';
+  html+='<p id="envDisp" style="color:var(--muted);font-size:13px;margin:8px 0 0"></p>';
+  html+='<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">'
+      +'<button class="btn-primary" onclick="guardarPedido()">💾 Guardar</button>'
+      +'<button class="btn-ghost" onclick="cancelarPedido()">✖ Cancelar</button>'
+      +'</div>';
   document.getElementById('pedDetBody').innerHTML=html;
-  // Sin pendiente, no se puede agregar más.
-  const addBtn=document.getElementById('pedAddBtn'); if(addBtn && pendiente<=0){ addBtn.disabled=true; addBtn.title='No queda cantidad pendiente por enviar'; }
 }
+// Dibuja el grid de envíos desde PED_ENVIOS. Editar/Eliminar SOLO si la línea está 'Pendiente'.
+function renderEnviosGrid(){
+  const b=document.getElementById('envBody'); if(!b) return;
+  if(!PED_ENVIOS.length){
+    b.innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:22px">Sin líneas. Use “Agregar envío de productos”.</td></tr>`;
+  } else {
+    b.innerHTML=PED_ENVIOS.map((e,i)=>{
+      const acc = (e.estado==='Pendiente')
+        ? `<button class="icon-btn" onclick="editarEnvio(${i})">✏️ Editar</button> <button class="icon-btn" onclick="eliminarEnvio(${i})">🗑️ Eliminar</button>`
+        : '';
+      return '<tr>'
+        +`<td>${esc(e.usuario||'')}</td>`
+        +`<td>${esc(e.fecha||'—')}</td>`
+        +`<td>${esc(e.cantidad)}</td>`
+        +`<td>${esc(e.lote||'')}</td>`
+        +`<td>${estadoBadge(e.estado)}</td>`
+        +`<td>${esc(e.numero_tr||'')}</td>`
+        +`<td style="white-space:nowrap">${acc}</td>`
+        +'</tr>';
+    }).join('');
+  }
+  actualizarDisp();
+}
+// Suma de cantidades que ocupan cupo (Pendiente + Procesado); 'Error' no cuenta.
+function envUsados(exclIdx){
+  return PED_ENVIOS.reduce((a,e,i)=> (i===exclIdx) ? a
+    : a + ((e.estado==='Pendiente'||e.estado==='Procesado') ? (parseInt(e.cantidad,10)||0) : 0), 0);
+}
+function envDisponible(exclIdx){ return (CUR_PED?(CUR_PED.cantidad_total||0):0) - envUsados(exclIdx); }
+function actualizarDisp(){
+  const el=document.getElementById('envDisp'); if(!el||!CUR_PED) return;
+  const disp=envDisponible(null);
+  el.textContent=`Disponible por enviar: ${disp} de ${CUR_PED.cantidad_total||0}.`;
+  const addBtn=document.getElementById('pedAddBtn');
+  if(addBtn){ const sin=disp<=0; addBtn.disabled=sin; addBtn.title=sin?'No queda cantidad disponible por enviar':''; }
+}
+/* --- Modal: agregar o editar una línea (borrador; se persiste con Guardar) --- */
 function openEnvio(){
   if(!CUR_PED) return;
-  const pendiente=(CUR_PED.cantidad_total||0)-(CUR_PED.cantidad_enviada||0);
-  if(pendiente<=0){ toast('No queda cantidad pendiente por enviar'); return; }
+  if(envDisponible(null)<=0){ toast('No queda cantidad disponible por enviar'); return; }
+  ENV_EDIT_IDX=null; abrirEnvioModal(null);
+}
+function editarEnvio(idx){
+  const e=PED_ENVIOS[idx]; if(!e) return;
+  if(e.estado!=='Pendiente'){ toast('Solo se pueden editar líneas Pendientes'); return; }
+  ENV_EDIT_IDX=idx; abrirEnvioModal(e);
+}
+function eliminarEnvio(idx){
+  const e=PED_ENVIOS[idx]; if(!e) return;
+  if(e.estado!=='Pendiente'){ toast('Solo se pueden eliminar líneas Pendientes'); return; }
+  PED_ENVIOS.splice(idx,1); renderEnviosGrid();
+}
+function abrirEnvioModal(e){
+  const disp=envDisponible(ENV_EDIT_IDX);
   document.getElementById('envioInfo').innerHTML=
      `<div class="k">Producto</div><div>${esc(CUR_PED.id_producto)} — ${esc(CUR_PED.descripcion)}</div>`
     +`<div class="k">Cantidad total</div><div>${esc(CUR_PED.cantidad_total)}</div>`
-    +`<div class="k">Ya enviado</div><div>${esc(CUR_PED.cantidad_enviada)}</div>`
-    +`<div class="k">Pendiente por enviar</div><div><b>${pendiente}</b></div>`;
-  const inp=document.getElementById('envioCant'); inp.value=''; inp.max=pendiente;
+    +`<div class="k">Disponible por enviar</div><div><b>${disp}</b></div>`;
+  const inpC=document.getElementById('envioCant'); inpC.value=e?e.cantidad:''; inpC.max=disp;
+  const inpL=document.getElementById('envioLote'); inpL.value=e?(e.lote||''):'';
   document.getElementById('envioQueda').textContent='';
+  document.getElementById('envioSaveBtn').textContent = e?'Guardar cambios':'Agregar';
   document.getElementById('envioModal').classList.remove('hidden');
-  setTimeout(()=>inp.focus(),50);
+  setTimeout(()=>inpC.focus(),50);
 }
-function closeEnvio(){ document.getElementById('envioModal').classList.add('hidden'); }
+function closeEnvio(){ document.getElementById('envioModal').classList.add('hidden'); ENV_EDIT_IDX=null; }
 function onEnvioInput(){
   if(!CUR_PED) return;
-  const pendiente=(CUR_PED.cantidad_total||0)-(CUR_PED.cantidad_enviada||0);
+  const disp=envDisponible(ENV_EDIT_IDX);
   const v=parseInt(document.getElementById('envioCant').value,10);
   const el=document.getElementById('envioQueda');
-  if(!v||v<=0){ el.textContent=''; return; }
-  if(v>pendiente){ el.style.color='var(--danger)'; el.textContent=`Excede el pendiente (${pendiente}).`; return; }
-  el.style.color='var(--muted)'; el.textContent=`Quedará pendiente por enviar: ${pendiente-v}.`;
+  if(!v||v<=0){ el.style.color='var(--muted)'; el.textContent=''; return; }
+  if(v>disp){ el.style.color='var(--danger)'; el.textContent=`Excede el disponible (${disp}).`; return; }
+  el.style.color='var(--muted)'; el.textContent=`Quedará disponible por enviar: ${disp-v}.`;
 }
-async function guardarEnvio(){
+// Aplica el modal al borrador (grid en memoria). No toca la BD todavía.
+function aplicarEnvio(){
   if(!CUR_PED) return;
-  const pendiente=(CUR_PED.cantidad_total||0)-(CUR_PED.cantidad_enviada||0);
+  const disp=envDisponible(ENV_EDIT_IDX);
   const v=parseInt(document.getElementById('envioCant').value,10);
-  if(!v||v<=0){ toast('La cantidad a enviar debe ser mayor a cero'); return; }
-  if(v>pendiente){ toast(`La cantidad no puede superar el pendiente (${pendiente})`); return; }
-  const btn=document.getElementById('envioSaveBtn'); btn.disabled=true; btn.textContent='Agregando…';
+  const lote=String(document.getElementById('envioLote').value||'').trim();
+  if(!v||v<=0){ toast('La cantidad a enviar debe ser un entero mayor a cero'); return; }
+  if(v>disp){ toast(`La cantidad no puede superar el disponible (${disp})`); return; }
+  if(!lote){ toast('El Lote es obligatorio'); return; }
+  if(ENV_EDIT_IDX!=null && PED_ENVIOS[ENV_EDIT_IDX]){
+    PED_ENVIOS[ENV_EDIT_IDX].cantidad=v; PED_ENVIOS[ENV_EDIT_IDX].lote=lote;
+  } else {
+    PED_ENVIOS.push({ id:null, cantidad:v, lote:lote, estado:'Pendiente', numero_tr:'',
+                      usuario:(typeof USER!=='undefined'&&USER)?(USER.name||USER.email||''):'', fecha:'' });
+  }
+  closeEnvio(); renderEnviosGrid();
+}
+// Guardar: persiste en la BD el conjunto de líneas Pendientes (altas/ediciones/bajas). Quedan 'Pendiente'.
+async function guardarPedido(){
+  if(!CUR_PED) return;
+  const pend=PED_ENVIOS.filter(e=>e.estado==='Pendiente').map(e=>({ id:e.id||undefined, cantidad:e.cantidad, lote:e.lote }));
   try{
-    await api('POST','/pedidos/'+CUR_PED.id+'/envios',{cantidad:v});
-    toast('Envío registrado');
-    closeEnvio();
-    verPedido(CUR_PED.id); // recarga el detalle con el nuevo envío y el pendiente actualizado
-  }catch(e){ toast('No se pudo registrar: '+e.message); }
-  finally{ btn.disabled=false; btn.textContent='Agregar'; }
+    await api('PUT','/pedidos/'+CUR_PED.id+'/envios',{envios:pend});
+    toast('Cambios guardados');
+    verPedido(CUR_PED.id);
+  }catch(e){ toast('No se pudo guardar: '+e.message); }
+}
+// Cancelar: borra las líneas Pendientes de la BD y vuelve el formulario a su estado anterior.
+async function cancelarPedido(){
+  if(!CUR_PED) return;
+  if(!confirm('¿Cancelar? Se eliminarán las líneas en estado Pendiente de este pedido.')) return;
+  try{
+    await api('DELETE','/pedidos/'+CUR_PED.id+'/envios/pendientes');
+    toast('Se cancelaron las líneas pendientes');
+    verPedido(CUR_PED.id);
+  }catch(e){ toast('No se pudo cancelar: '+e.message); }
+}
+// Copia el Código del producto al portapapeles.
+function copiarCodigo(){
+  const t=String((CUR_PED&&CUR_PED.id_producto)||'');
+  const ok=()=>toast('Código copiado: '+t);
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(t).then(ok).catch(()=>fallbackCopy(t,ok)); }
+  else fallbackCopy(t,ok);
+}
+function fallbackCopy(t,ok){
+  try{ const ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); ok&&ok(); }
+  catch(e){ toast('No se pudo copiar el código'); }
 }
 
 function verImagenGuardada(){ if(CUR_VER&&CUR_VER.imagen_base64) openImg(`data:${CUR_VER.imagen_tipo||'image/jpeg'};base64,${CUR_VER.imagen_base64}`); }

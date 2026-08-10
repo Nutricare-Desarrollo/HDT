@@ -932,17 +932,34 @@ app.http('pedido-get', {
       const p = await query(`${PP_SELECT} WHERE p.Id=$1`, [id]);
       if (!p.rows.length) return json(404, { error: 'No encontrado' });
       const e = await query(
-        `SELECT Id AS id, CantidadEnviada AS cantidad_enviada, Usuario AS usuario, ${PP_FECHA_LOCAL} AS fecha
+        `SELECT Id AS id, CantidadEnviada AS cantidad_enviada, Lote AS lote, Estado AS estado,
+                NumeroTR AS numero_tr, Usuario AS usuario, ${PP_FECHA_LOCAL} AS fecha
          FROM dbo.PedidoPendienteEnvio WHERE PedidoPendienteId=$1 ORDER BY FechaHora, Id`, [id]);
       return json(200, { ...p.rows[0], envios: e.rows });
     } catch (e) { context.error(e); return json(500, { error: 'Error al obtener el pedido', detail: e.message }); }
   }
 });
 
-/* POST /api/pedidos/{id}/envios -> registra un envío parcial al anaquel.
-   Body: { cantidad }. Valida: entero > 0 y no mayor al pendiente (CantidadTotal - CantidadEnviada). */
-app.http('pedido-envio-add', {
-  methods: ['POST'], authLevel: 'anonymous', route: 'pedidos/{id}/envios',
+// Recalcula el acumulado del pedido a partir de sus envíos. Cuentan 'Pendiente' y
+// 'Procesado'; 'Error' no cuenta. Debe llamarse dentro de una transacción abierta.
+async function recalcCantidadEnviada(client, pedidoId) {
+  await client.query(
+    `UPDATE dbo.PedidoPendiente
+        SET CantidadEnviada = COALESCE((
+              SELECT SUM(CantidadEnviada) FROM dbo.PedidoPendienteEnvio
+               WHERE PedidoPendienteId=$1 AND Estado IN ('Pendiente','Procesado')), 0)
+      WHERE Id=$1`, [pedidoId]);
+}
+
+/* PUT /api/pedidos/{id}/envios -> GUARDA el conjunto de líneas en estado 'Pendiente'.
+   Body: { envios: [{ id?, cantidad, lote }, ...] }  (solo las Pendientes; las nuevas sin id).
+   - Lote obligatorio y cantidad entera > 0 en cada línea.
+   - La suma de Pendientes + lo ya 'Procesado' no puede superar CantidadTotal.
+   - Reemplaza el conjunto Pendiente: conserva las que traen id, inserta las nuevas y
+     borra las Pendientes que ya no vengan (ediciones/altas/bajas en una sola operación).
+   El Estado y el NumeroTR NUNCA los fija el usuario: las nuevas quedan 'Pendiente' y TR en blanco. */
+app.http('pedido-envios-guardar', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'pedidos/{id}/envios',
   handler: async (request, context) => {
     const user = getUser(request);
     if (!user) return json(401, { error: 'No autenticado' });
@@ -950,33 +967,88 @@ app.http('pedido-envio-add', {
     const id = parseInt(request.params.id, 10);
     if (!id) return json(400, { error: 'Id inválido' });
     const body = await request.json();
-    const cantidad = toInt(body.cantidad);
-    if (!cantidad || cantidad <= 0) return json(400, { error: 'La cantidad a enviar debe ser mayor a cero' });
+    const envios = Array.isArray(body.envios) ? body.envios : [];
+
+    // Validación de cada línea.
+    const limpias = [];
+    for (const e of envios) {
+      const cantidad = toInt(e && e.cantidad);
+      const lote = String((e && e.lote != null) ? e.lote : '').trim();
+      if (!cantidad || cantidad <= 0) return json(400, { error: 'La cantidad de cada línea debe ser un entero mayor a cero' });
+      if (!lote) return json(400, { error: 'El Lote es obligatorio en cada línea de envío' });
+      limpias.push({ id: (e && e.id) ? parseInt(e.id, 10) : null, cantidad, lote });
+    }
 
     const client = await getClient();
     try {
       await client.query('BEGIN');
-      // Bloquea la fila para calcular el pendiente sin condiciones de carrera.
-      const p = await client.query(
-        `SELECT CantidadTotal AS total, CantidadEnviada AS enviada FROM dbo.PedidoPendiente WHERE Id=$1 FOR UPDATE`, [id]);
+      const p = await client.query(`SELECT CantidadTotal AS total FROM dbo.PedidoPendiente WHERE Id=$1 FOR UPDATE`, [id]);
       if (!p.rows.length) { await client.query('ROLLBACK'); return json(404, { error: 'Pedido no encontrado' }); }
-      const pendiente = p.rows[0].total - p.rows[0].enviada;
-      if (cantidad > pendiente) {
+      const total = p.rows[0].total;
+      // Lo ya 'Procesado' no se puede editar y sigue contando contra el total.
+      const proc = await client.query(
+        `SELECT COALESCE(SUM(CantidadEnviada),0) AS s FROM dbo.PedidoPendienteEnvio WHERE PedidoPendienteId=$1 AND Estado='Procesado'`, [id]);
+      const yaProcesado = Number(proc.rows[0].s) || 0;
+      const sumaPendientes = limpias.reduce((a, x) => a + x.cantidad, 0);
+      if (yaProcesado + sumaPendientes > total) {
         await client.query('ROLLBACK');
-        return json(400, { error: `La cantidad a enviar (${cantidad}) no puede superar el pendiente (${pendiente})` });
+        return json(400, { error: `El total a enviar (${yaProcesado + sumaPendientes}) supera la cantidad del pedido (${total}).` });
       }
-      await client.query(
-        `INSERT INTO dbo.PedidoPendienteEnvio (PedidoPendienteId, CantidadEnviada, Usuario, FechaHora)
-         VALUES ($1,$2,$3,(now() at time zone 'utc'))`, [id, cantidad, user.name || user.email]);
-      // Acumula lo enviado. El estado se mantiene 'Por enviar'.
-      await client.query(
-        `UPDATE dbo.PedidoPendiente SET CantidadEnviada = CantidadEnviada + $2 WHERE Id=$1`, [id, cantidad]);
+
+      // Reemplaza el conjunto Pendiente.
+      const idsSubmit = limpias.filter(x => x.id).map(x => x.id);
+      if (idsSubmit.length) {
+        await client.query(
+          `DELETE FROM dbo.PedidoPendienteEnvio WHERE PedidoPendienteId=$1 AND Estado='Pendiente' AND Id <> ALL($2::int[])`, [id, idsSubmit]);
+      } else {
+        await client.query(`DELETE FROM dbo.PedidoPendienteEnvio WHERE PedidoPendienteId=$1 AND Estado='Pendiente'`, [id]);
+      }
+      for (const x of limpias) {
+        if (x.id) {
+          // Solo se pueden editar líneas que siguen 'Pendiente' (nunca 'Procesado'/'Error').
+          await client.query(
+            `UPDATE dbo.PedidoPendienteEnvio SET CantidadEnviada=$2, Lote=$3
+              WHERE Id=$1 AND PedidoPendienteId=$4 AND Estado='Pendiente'`, [x.id, x.cantidad, x.lote, id]);
+        } else {
+          await client.query(
+            `INSERT INTO dbo.PedidoPendienteEnvio (PedidoPendienteId, CantidadEnviada, Lote, Estado, Usuario, FechaHora)
+             VALUES ($1,$2,$3,'Pendiente',$4,(now() at time zone 'utc'))`, [id, x.cantidad, x.lote, user.name || user.email]);
+        }
+      }
+      await recalcCantidadEnviada(client, id);
       await client.query('COMMIT');
-      return json(201, { ok: true });
+      return json(200, { ok: true });
     } catch (e) {
       await client.query('ROLLBACK').catch(() => {});
       context.error(e);
-      return json(500, { error: 'No se pudo registrar el envío', detail: e.message });
+      return json(500, { error: 'No se pudieron guardar los envíos', detail: e.message });
+    } finally {
+      client.release();
+    }
+  }
+});
+
+/* DELETE /api/pedidos/{id}/envios/pendientes -> CANCELAR: borra todas las líneas en
+   estado 'Pendiente' del pedido (las 'Procesado'/'Error' no se tocan) y recalcula. */
+app.http('pedido-envios-cancelar', {
+  methods: ['DELETE'], authLevel: 'anonymous', route: 'pedidos/{id}/envios/pendientes',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para cancelar envíos' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      await client.query(`DELETE FROM dbo.PedidoPendienteEnvio WHERE PedidoPendienteId=$1 AND Estado='Pendiente'`, [id]);
+      await recalcCantidadEnviada(client, id);
+      await client.query('COMMIT');
+      return json(200, { ok: true });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      context.error(e);
+      return json(500, { error: 'No se pudo cancelar', detail: e.message });
     } finally {
       client.release();
     }
