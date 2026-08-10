@@ -294,6 +294,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         </div>
         <div class="foot">
           <button class="btn-ghost" onclick="showHojas()">Cancelar</button>
+          <button class="btn-ghost hidden" id="sinFotoBtn" onclick="continuarSinFoto()">✎ Ingresar sin foto</button>
           <button class="btn-primary" id="analizarBtn" onclick="analizar()" disabled>Continuar →</button>
         </div>
       </div>
@@ -1704,6 +1705,7 @@ function openWizard(){
   document.getElementById('wizResult').classList.add('hidden');
   document.getElementById('enviarBtn').classList.add('hidden');    // en creación solo se Guarda; Enviar es al completar la reposición
   document.getElementById('guardarBtn').classList.remove('hidden');
+  document.getElementById('sinFotoBtn').classList.add('hidden');
   document.getElementById('fileInput').value='';
   document.getElementById('prevWrap').innerHTML='';
   document.getElementById('analizarBtn').disabled=true;
@@ -1790,7 +1792,7 @@ async function analizar(){
     // Solo se conservan las líneas leídas que traen Código; las vacías (p. ej. de un
     // sello o texto suelto en la foto) se descartan para no ensuciar el detalle.
     const detLeido=(out.detalle||[]).filter(d=> String((d&&d.codigo!=null)?d.codigo:'').trim()!=='');
-    fillStep2(out.encabezado||{}, detLeido);
+    fillStep2(mergeEnc(out.encabezado||{}, WIZ.prefillEnc), detLeido);
     document.getElementById('wizStep1').classList.add('hidden');
     document.getElementById('wizStep2').classList.remove('hidden');
     setStep(2);
@@ -1799,6 +1801,7 @@ async function analizar(){
 }
 function showLoading(){ document.getElementById('loadModal').classList.remove('hidden'); }
 function hideLoading(){ document.getElementById('loadModal').classList.add('hidden'); }
+function mergeEnc(base, over){ const o=Object.assign({}, base||{}); if(over) Object.keys(over).forEach(k=>{ if(over[k]!=null && over[k]!=='') o[k]=over[k]; }); return o; }
 function fillStep2(enc, det){
   const c=document.getElementById('encFields'); c.innerHTML='';
   ENC.forEach(f=>{
@@ -2089,22 +2092,34 @@ function renderCirDet(c){
   if(!principal) fh+=`<button class="btn-primary" onclick="crearHojaDeCirugia()">＋ Crear hoja de consumo</button>`;
   document.getElementById('cirDetFoot').innerHTML=fh;
 }
+function cirEnc(c){ return { paciente:c.paciente, identificacion:c.identificacion, regimen:c.regimen, fecha_accidente:c.fecha_accidente, fecha_cirugia:c.fecha_cirugia, cirujano:c.cirujano, procedimiento:c.cirugia, diagnostico:c.observacion, numero_documento:c.numero_caso }; }
 function crearHojaDeCirugia(){
   const c=CUR_CIR; if(!c) return; if(!canSubir()){ toast('Su rol no puede crear hojas'); return; }
   closeCirDet();
-  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[{}],manual:true,editId:null,esReemplazo:false,origenId:null,cirugiaId:c.id};
+  // Igual que "Subir hoja": permite foto (OCR) o ingreso sin foto; el encabezado viene precargado de la cirugía.
+  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[],manual:false,editId:null,esReemplazo:false,origenId:null,cirugiaId:c.id,prefillEnc:cirEnc(c)};
   showOnly('viewWizard'); setTab('cirugias');
   document.getElementById('wizTitle').textContent='Crear hoja de consumo (cirugía)';
   document.getElementById('wizSub').textContent=(c.paciente||'')+' · '+(c.cirugia||'');
-  document.getElementById('wizSteps').classList.add('hidden');
-  document.getElementById('verImgBtn').classList.add('hidden');
-  document.getElementById('wizStep1').classList.add('hidden');
+  document.getElementById('wizSteps').classList.remove('hidden');
+  document.getElementById('verImgBtn').classList.remove('hidden');
+  document.getElementById('wizStep1').classList.remove('hidden');
+  document.getElementById('wizStep2').classList.add('hidden');
   document.getElementById('wizResult').classList.add('hidden');
-  document.getElementById('wizStep2').classList.remove('hidden');
-  document.getElementById('enviarBtn').classList.add('hidden');   // borrador: solo Guardar
+  document.getElementById('fileInput').value='';
+  document.getElementById('prevWrap').innerHTML='';
+  document.getElementById('analizarBtn').disabled=true;
+  document.getElementById('sinFotoBtn').classList.remove('hidden');  // opción de ingresar sin foto
+  document.getElementById('enviarBtn').classList.add('hidden');      // borrador: solo Guardar
   document.getElementById('guardarBtn').classList.remove('hidden');
-  const enc={ paciente:c.paciente, identificacion:c.identificacion, regimen:c.regimen, fecha_accidente:c.fecha_accidente, fecha_cirugia:c.fecha_cirugia, cirujano:c.cirujano, procedimiento:c.cirugia, diagnostico:c.observacion, numero_documento:c.numero_caso };
-  fillStep2(enc, []);
+  setStep(1);
+}
+/* Salta el paso de la foto: va al detalle manual con el encabezado precargado. */
+function continuarSinFoto(){
+  fillStep2(WIZ.prefillEnc||{}, []);
+  document.getElementById('wizStep1').classList.add('hidden');
+  document.getElementById('wizStep2').classList.remove('hidden');
+  setStep(2);
 }
 
 /* ===== Importar cirugías desde el Excel del INS ===== */
