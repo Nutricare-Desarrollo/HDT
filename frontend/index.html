@@ -620,11 +620,14 @@ function normEquipo(v){ return String(v==null?'':v).replace(/\s+/g,'').replace(/
 function equipoValido(v){ const c=normEquipo(v); if(!c) return false; if(!equipoReady()) return true; return EQUIPOS.has(c); }
 function equipoNombre(v){ if(!equipoReady()) return ''; const o=EQUIPOS.get(normEquipo(v)); return o?(o.nombre||''):''; }
 function equipoColor(v){ if(!equipoReady()) return ''; const o=EQUIPOS.get(normEquipo(v)); return o?(o.color||''):''; }
+// Forma canónica para mostrar/guardar el "N° equipo": siempre con prefijo NUT- (ej. "10129" -> "NUT-10129").
+// normEquipo ya quita espacios y cualquier "NUT-" previo, así que es idempotente. Vacío queda vacío.
+function equipoDemarcado(v){ const c=normEquipo(v); return c ? ('NUT-'+c) : ''; }
 async function loadEquipos(){
   try{
     const arr=await api('GET','/equipos');
     const m=new Map();
-    (arr||[]).forEach(e=>{ const c=normEquipo(e.codigo!=null?e.codigo:e.demarcado); if(c) m.set(c, {nombre:e.nombre||'', color:e.color||''}); });
+    (arr||[]).forEach(e=>{ const c=normEquipo(e.codigo!=null?e.codigo:e.demarcado); if(c) m.set(c, {nombre:e.nombre||'', color:e.color||'', demarcado:e.demarcado||''}); });
     EQUIPOS=m;
   }catch(e){ EQUIPOS=null; }
 }
@@ -729,6 +732,18 @@ function markDetRow(bodySel, i, d){
   setCellState(eEl, equipoCellCls(d), COMBO_MSG);
   paintEquipoCell(eEl, d);
 }
+// Al salir del campo "N° equipo": lo deja en forma canónica NUT-xxxx y revalida la línea.
+// Sirve tanto para la creación/edición (#detBody -> WIZ.detalle) como para Bodega (#verDetBody -> VER_DET).
+function equipoBlur(el, bodySel){
+  const i=+el.dataset.i;
+  const arr = (bodySel==='#detBody') ? (typeof WIZ!=='undefined' && WIZ ? WIZ.detalle : null) : VER_DET;
+  if(!arr || !arr[i]) return;
+  const canon=equipoDemarcado(el.value);
+  if(canon!==el.value) el.value=canon;
+  arr[i].numero_equipo=el.value;
+  markDetRow(bodySel, i, arr[i]);
+  if(bodySel==='#detBody') updateEnviarState();
+}
 
 // Carga manual de catálogos (productos + lotes). Informa cantidades o el error exacto.
 async function recargarProductos(){
@@ -798,7 +813,7 @@ function acShow(input){
     // Filtra por el código de la misma línea: solo equipos que contienen ese código.
     const tr=input.closest('tr'); const codEl=tr?tr.querySelector('input[data-k="codigo"]'):null;
     const cod=codEl?codEl.value:'';
-    items=equipoSearch(input.value, 40, cod).map(it=>({label:it.code, sub:it.nombre}));
+    items=equipoSearch(input.value, 40, cod).map(it=>({label:equipoDemarcado(it.code), sub:it.nombre}));
     vacio = normCod(cod) ? 'Ningún equipo del listado contiene ese código' : 'Sin coincidencias en equipos';
   } else {
     if(!catReady()) return;                          // aún no cargó el catálogo
@@ -1116,7 +1131,7 @@ function renderVerReadonly(h){
   html+='</div>';
   html+='<div class="section-title">Detalle ('+(h.detalle?h.detalle.length:0)+' líneas)</div>';
   html+='<div class="tbl-wrap"><table><thead><tr>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
-  (h.detalle||[]).forEach(d=>{ html+='<tr>'+DET_COLS.map(c=>`<td>${esc(d[c.k])}</td>`).join('')+'</tr>'; });
+  (h.detalle||[]).forEach(d=>{ html+='<tr>'+DET_COLS.map(c=>{ const v = c.k==='numero_equipo' ? equipoDemarcado(d.numero_equipo) : d[c.k]; return `<td>${esc(v)}</td>`; }).join('')+'</tr>'; });
   html+='</tbody></table></div>';
   html+='<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">';
   if(h.imagen_base64){ html+=`<button class="btn-ghost" onclick="verImagenGuardada()">🖼️ Ver hoja de consumo</button>`; }
@@ -1129,7 +1144,7 @@ function renderVerReadonly(h){
 /* Vista de un reemplazo/corrección: detalle + referencia a la original + botón resolver (Bodega). */
 function renderReemplazoView(h){
   showOnly('viewVer'); setTab(canBodega()?'reemplazos':'hojas');
-  CUR_VER=h; VER_DET=(h.detalle||[]).map(d=>Object.assign({},d));
+  CUR_VER=h; VER_DET=(h.detalle||[]).map(d=>Object.assign({},d,{numero_equipo:equipoDemarcado(d.numero_equipo)}));
   document.getElementById('verSub').innerHTML=`Reemplazo / corrección · N° ${esc(h.numero_hoja||'—')} · ${esc(estadoTxt(h.estado))}`;
   let html='<div class="section-title" style="margin-top:0">Encabezado</div><div class="kv">';
   ENC.forEach(f=>{ html+=`<div class="k">${f.l}</div><div>${esc(h[f.k])}</div>`; });
@@ -1140,7 +1155,7 @@ function renderReemplazoView(h){
   else { html+='<div>—</div>'; }
   html+='<div class="section-title">Detalle ('+(h.detalle?h.detalle.length:0)+' líneas)</div>';
   html+='<div class="tbl-wrap"><table><thead><tr>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
-  (h.detalle||[]).forEach(d=>{ html+='<tr>'+DET_COLS.map(c=>{ const v = c.derived ? (d.descripcion_nutricare||catDesc(d.codigo)) : d[c.k]; return `<td>${esc(v)}</td>`; }).join('')+'</tr>'; });
+  (h.detalle||[]).forEach(d=>{ html+='<tr>'+DET_COLS.map(c=>{ const v = c.derived ? (d.descripcion_nutricare||catDesc(d.codigo)) : (c.k==='numero_equipo' ? equipoDemarcado(d.numero_equipo) : d[c.k]); return `<td>${esc(v)}</td>`; }).join('')+'</tr>'; });
   html+='</tbody></table></div>';
   html+='<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">';
   html+=`<button class="btn-ghost" onclick="imprimirHoja()">🖨️ Imprimir</button>`;
@@ -1152,7 +1167,7 @@ function renderReemplazoView(h){
 /* Vista editable (Bodega/Administrador): encabezado + detalle con columna Lote. */
 function renderVerEdit(h){
   const cols=detColsVer();
-  VER_DET = (h.detalle && h.detalle.length) ? h.detalle.map(d=>Object.assign({},d)) : [{}];
+  VER_DET = (h.detalle && h.detalle.length) ? h.detalle.map(d=>Object.assign({},d,{numero_equipo:equipoDemarcado(d.numero_equipo)})) : [{}];
   let html='<div class="section-title" style="margin-top:0">Encabezado</div><div class="form-grid">';
   ENC.forEach(f=>{
     const val=h[f.k]!=null?h[f.k]:'';
@@ -1197,6 +1212,7 @@ function renderVerDet(){
       if(isEquipo) stateCls=equipoCellCls(d);
       const cls = (stateCls+(isCode?' code-input':'')+(isLote?' lote-input':'')+(isEquipo?' equipo-input':'')).trim();
       let extra = (isCode||isLote||isEquipo) ? ' autocomplete="off"' : '';
+      if(isEquipo) extra += ` onblur="equipoBlur(this,'#verDetBody')"`;
       if(stateCls==='combo-invalid') extra += ` title="${COMBO_MSG}"`;
       if(isEquipo){ const st=(normEquipo(d.numero_equipo)&&equipoValido(d.numero_equipo))?equipoColorStyle(equipoColor(d.numero_equipo)):null; if(st) extra += ` style="background:${st.background};color:${st.color};${st.shadow?('text-shadow:'+st.shadow+';'):''}"`; }
       return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onVerDet(this)"></td>`;
@@ -1231,7 +1247,7 @@ function imprimirHoja(){
   const src = document.getElementById('verDetBody') ? (VER_DET||[]) : (h.detalle||[]);
   const filas=src.filter(noVacia).map(d=>({
     codigo: d.codigo||'',
-    equipo: d.numero_equipo||'',
+    equipo: equipoDemarcado(d.numero_equipo),
     // En Bodega la DESCRIPCIÓN oficial es la Descripción Nutricare (del catálogo).
     desc: catDesc(d.codigo) || d.descripcion_nutricare || d.descripcion || '',
     und: (d.und==null?'':d.und),
@@ -1327,7 +1343,7 @@ function imprimirWizard(){
   const enc={}; ENC.forEach(f=>{ const el=document.getElementById('enc_'+f.k); enc[f.k]= el ? el.value.trim() : ''; });
   const noVacia=(d)=> ['codigo','numero_equipo','und','reposicion_anaquel'].some(k=> String(d[k]==null?'':d[k]).trim()!=='');
   const filas=(WIZ.detalle||[]).filter(noVacia).map(d=>({
-    codigo:d.codigo||'', equipo:d.numero_equipo||'',
+    codigo:d.codigo||'', equipo:equipoDemarcado(d.numero_equipo),
     desc: catDesc(d.codigo) || d.descripcion_nutricare || '',
     und:(d.und==null?'':d.und), rep:(d.reposicion_anaquel==null?'':d.reposicion_anaquel)
   }));
@@ -1813,7 +1829,7 @@ function fillStep2(enc, det){
     c.appendChild(w);
   });
   document.getElementById('detHead').innerHTML='<tr>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'<th></th></tr>';
-  WIZ.detalle = det.length? det.slice() : [{}];
+  WIZ.detalle = det.length? det.map(d=>Object.assign({}, d, {numero_equipo:equipoDemarcado(d.numero_equipo)})) : [{}];
   renderDet();
 }
 function renderDet(){
@@ -1831,6 +1847,7 @@ function renderDet(){
       if(isEquipo) stateCls=equipoCellCls(d);
       const cls = (stateCls+(isCode?' code-input':'')+(isEquipo?' equipo-input':'')).trim();
       let extra = (isCode||isEquipo) ? ' autocomplete="off"' : '';
+      if(isEquipo) extra += ` onblur="equipoBlur(this,'#detBody')"`;
       if(stateCls==='combo-invalid') extra += ` title="${COMBO_MSG}"`;
       if(isEquipo){ const st=(normEquipo(d.numero_equipo)&&equipoValido(d.numero_equipo))?equipoColorStyle(equipoColor(d.numero_equipo)):null; if(st) extra += ` style="background:${st.background};color:${st.color};${st.shadow?('text-shadow:'+st.shadow+';'):''}"`; }
       return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onDet(this)"></td>`;

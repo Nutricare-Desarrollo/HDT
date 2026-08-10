@@ -246,6 +246,13 @@ const DATE_KEYS = new Set(['fecha_accidente', 'fecha_cirugia', 'fecha_hoja']);
 // Formato de fecha/hora local (Costa Rica) para los listados.
 const FECHA_LOCAL = `to_char((FechaCreacion AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica', 'YYYY-MM-DD HH24:MI')`;
 
+// N° de equipo canónico: siempre con prefijo NUT- (ej. "10129" -> "NUT-10129").
+// Quita espacios y cualquier "NUT-" previo para no duplicarlo (idempotente). Vacío -> null.
+function equipoConPrefijo(v) {
+  const c = String(v == null ? '' : v).replace(/\s+/g, '').replace(/^nut-?/i, '').toUpperCase();
+  return c ? ('NUT-' + c) : null;
+}
+
 /* Crear hoja (encabezado + detalle + imagen base64). Estado inicial = 'Enviado'. */
 app.http('hoja-create', {
   methods: ['POST'], authLevel: 'anonymous', route: 'hojas',
@@ -305,7 +312,7 @@ app.http('hoja-create', {
         await client.query(
           `INSERT INTO dbo.HojaConsumoDetalle (HojaConsumoId, Linea, Codigo, NumeroEquipo, Descripcion, DescripcionNutricare, Und, ReposicionAnaquel)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [id, d.linea || linea, d.codigo || null, d.numero_equipo || null, d.descripcion || null,
+          [id, d.linea || linea, d.codigo || null, equipoConPrefijo(d.numero_equipo), d.descripcion || null,
             descNutricare(mapa, d), toInt(d.und), toInt(d.reposicion_anaquel)]);
       }
       await client.query('COMMIT');
@@ -451,7 +458,7 @@ app.http('hoja-update', {
         await client.query(
           `INSERT INTO dbo.HojaConsumoDetalle (HojaConsumoId, Linea, Codigo, NumeroEquipo, Descripcion, DescripcionNutricare, Und, ReposicionAnaquel, NumeroLote)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-          [id, d.linea || linea, d.codigo || null, d.numero_equipo || null, d.descripcion || null,
+          [id, d.linea || linea, d.codigo || null, equipoConPrefijo(d.numero_equipo), d.descripcion || null,
             descNutricare(mapa, d), toInt(d.und), toInt(d.reposicion_anaquel),
             (d.numero_lote === undefined || d.numero_lote === '') ? null : d.numero_lote]);
       }
