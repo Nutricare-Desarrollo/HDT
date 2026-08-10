@@ -480,6 +480,18 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
   </div>
 </div>
 
+<!-- MODAL de confirmación genérico -->
+<div id="confirmModal" class="overlay hidden">
+  <div class="modal sm">
+    <div class="modal-head"><h3 id="confirmTitle">Confirmar</h3><button class="x" onclick="closeConfirm()">×</button></div>
+    <div class="modal-body"><p id="confirmMsg" style="margin:0;font-size:14px"></p></div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="closeConfirm()">No</button>
+      <button class="btn-primary" id="confirmOkBtn">Confirmar</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL programar/editar cirugía -->
 <div id="cirModal" class="overlay hidden">
   <div class="modal">
@@ -1767,24 +1779,40 @@ function aplicarEnvio(){
   }
   closeEnvio(); renderEnviosGrid();
 }
-// Guardar: persiste en la BD el conjunto de líneas Pendientes (altas/ediciones/bajas). Quedan 'Pendiente'.
+// Modal de confirmación genérico (reemplaza al confirm nativo).
+let CONFIRM_CB=null;
+function askConfirm(title, msg, okLabel, onOk){
+  document.getElementById('confirmTitle').textContent=title||'Confirmar';
+  document.getElementById('confirmMsg').textContent=msg||'';
+  const btn=document.getElementById('confirmOkBtn');
+  btn.textContent=okLabel||'Confirmar';
+  CONFIRM_CB=onOk||null;
+  btn.onclick=function(){ closeConfirm(); if(CONFIRM_CB){ const cb=CONFIRM_CB; CONFIRM_CB=null; cb(); } };
+  document.getElementById('confirmModal').classList.remove('hidden');
+}
+function closeConfirm(){ document.getElementById('confirmModal').classList.add('hidden'); CONFIRM_CB=null; }
+
+// Guardar: persiste directo (sin modal) las líneas Pendientes en la BD y vuelve al listado.
 async function guardarPedido(){
   if(!CUR_PED) return;
   const pend=PED_ENVIOS.filter(e=>e.estado==='Pendiente').map(e=>({ id:e.id||undefined, cantidad:e.cantidad, lote:e.lote }));
   try{
     await api('PUT','/pedidos/'+CUR_PED.id+'/envios',{envios:pend});
     toast('Cambios guardados');
-    verPedido(CUR_PED.id);
+    showPedidos();   // vuelve al listado de pedidos pendientes
   }catch(e){ toast('No se pudo guardar: '+e.message); }
 }
-// Cancelar: borra las líneas Pendientes de la BD y vuelve el formulario a su estado anterior.
-async function cancelarPedido(){
+// Cancelar: confirma, borra las líneas Pendientes de la BD y vuelve al listado de pedidos.
+function cancelarPedido(){
   if(!CUR_PED) return;
-  if(!confirm('¿Cancelar? Se eliminarán las líneas en estado Pendiente de este pedido.')) return;
+  askConfirm('Cancelar','¿Seguro que desea cancelar? Se eliminarán las líneas en estado Pendiente de este pedido.','Sí, cancelar', doCancelarPedido);
+}
+async function doCancelarPedido(){
+  if(!CUR_PED) return;
   try{
     await api('DELETE','/pedidos/'+CUR_PED.id+'/envios/pendientes');
     toast('Se cancelaron las líneas pendientes');
-    verPedido(CUR_PED.id);
+    showPedidos();   // vuelve al listado de pedidos pendientes
   }catch(e){ toast('No se pudo cancelar: '+e.message); }
 }
 // Copia el Código del producto al portapapeles.
