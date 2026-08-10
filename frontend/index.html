@@ -1592,6 +1592,7 @@ async function resolverReemplazo(id){
 /* ===== Pedido Pendiente ===== */
 let PED_ROWS=[], PED_COLF={}, CUR_PED=null, PED_ENVIOS=[], ENV_EDIT_IDX=null;
 const PED_COLS=[
+  {k:'hoja_id',l:'Hoja',link:true},
   {k:'ubicacion',l:'Bandeja'},
   {k:'id_producto',l:'Código'},
   {k:'descripcion',l:'Descripción'},
@@ -1630,7 +1631,11 @@ function renderPedidos(){
   foot.textContent = rows.length===1?'1 producto':(rows.length+' productos');
   if(!rows.length){ b.innerHTML=`<tr><td colspan="${PED_COLS.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
   rows.forEach(r=>{
-    const tds=PED_COLS.map(c=> c.k==='estado'?`<td>${estadoBadge(r.estado)}</td>`:`<td>${esc(r[c.k])}</td>`).join('');
+    const tds=PED_COLS.map(c=>{
+      if(c.k==='estado') return `<td>${estadoBadge(r.estado)}</td>`;
+      if(c.link) return `<td>${r.hoja_id!=null?`<span class="link-cell" onclick="verHoja(${r.hoja_id})" title="Abrir la hoja de consumo">${esc(r.hoja_id)}</span>`:''}</td>`;
+      return `<td>${esc(r[c.k])}</td>`;
+    }).join('');
     const tr=document.createElement('tr');
     tr.innerHTML=tds+`<td><button class="icon-btn" onclick="verPedido(${r.id})">✏️ Editar</button></td>`;
     b.appendChild(tr);
