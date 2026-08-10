@@ -1043,6 +1043,7 @@ function renderGrid(){
     const tds=GRID_COLS.map(c=>{
       if(c.estado) return `<td>${estadoBadge(r.estado)}</td>`;
       if(c.tag) return `<td><span class="tag">${esc(r[c.k])}</span></td>`;
+      if(c.k==='diagnostico') return celdaDiag(r[c.k]);
       return `<td>${esc(r[c.k])}</td>`;
     }).join('');
     const tr=document.createElement('tr');
@@ -1057,6 +1058,14 @@ function filtered(){
   }));
 }
 function onFilter(k,v){ COLF[k]=v; renderGrid(); }
+// Acorta el "Diagnóstico" en los listados: recorta a DIAG_MAX caracteres y agrega "…".
+// El texto completo queda disponible en el tooltip (title) al pasar el mouse.
+const DIAG_MAX=45;
+function celdaDiag(v){
+  const s=String(v==null?'':v);
+  if(s.length<=DIAG_MAX) return `<td>${esc(s)}</td>`;
+  return `<td title="${attr(s)}">${esc(s.slice(0,DIAG_MAX).trimEnd())}…</td>`;
+}
 function estadoBadge(e){ const v=e||'Enviado'; const cls=v.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s/g,''); return `<span class="badge b-${cls}">${esc(v)}</span>`; }
 
 /* ===== PENDIENTES DE REPOSICIÓN (Hospital / Administrador) ===== */
@@ -1093,7 +1102,7 @@ function renderPendientes(){
   foot.textContent = rows.length===1?'1 hoja':(rows.length+' hojas');
   if(!rows.length){ b.innerHTML=`<tr><td colspan="${cols.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
   rows.forEach(r=>{
-    const tds=cols.map(c=> c.tag?`<td><span class="tag">${esc(r[c.k])}</span></td>`:`<td>${esc(r[c.k])}</td>`).join('');
+    const tds=cols.map(c=> c.tag?`<td><span class="tag">${esc(r[c.k])}</span></td>`:(c.k==='diagnostico'?celdaDiag(r[c.k]):`<td>${esc(r[c.k])}</td>`)).join('');
     const tr=document.createElement('tr');
     tr.innerHTML=tds+`<td><button class="icon-btn" onclick="openEditarPendiente(${r.id})">✎ Completar y enviar</button></td>`;
     b.appendChild(tr);
@@ -1545,6 +1554,7 @@ function renderReemplazos(){
     const tds=REM_COLS.map(c=>{
       if(c.estado) return `<td>${estadoBadge(r.estado)}</td>`;
       if(c.tag) return `<td><span class="tag">${esc(r[c.k])}</span></td>`;
+      if(c.k==='diagnostico') return celdaDiag(r[c.k]);
       return `<td>${esc(r[c.k])}</td>`;
     }).join('');
     const tr=document.createElement('tr');
