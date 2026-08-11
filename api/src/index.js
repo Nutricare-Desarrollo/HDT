@@ -1098,7 +1098,7 @@ app.http('pedido-dynamics', {
         Lote: e.lote || '',
         CantidadTotal: (cab.cantidad_total == null ? 0 : cab.cantidad_total),  // = "Cantidad" del encabezado
         ReposicionAnaquel: (e.cantidad == null ? 0 : e.cantidad),
-        Ubicacion: cab.ubicacion || '',
+        Ubicacion: '',
         Descripcion: cab.descripcion || ''
       }));
 
