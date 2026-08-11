@@ -1074,7 +1074,7 @@ app.http('pedido-dynamics', {
       // Encabezado del pedido (producto).
       const p = await query(
         `SELECT p.Id AS id, p.HojaConsumoId AS hoja_id, p.IdProducto AS id_producto,
-                p.Ubicacion AS ubicacion, p.Descripcion AS descripcion
+                p.Ubicacion AS ubicacion, p.Descripcion AS descripcion, p.CantidadTotal AS cantidad_total
            FROM dbo.PedidoPendiente p WHERE p.Id=$1`, [id]);
       if (!p.rows.length) return json(404, { error: 'Pedido no encontrado' });
       const cab = p.rows[0];
@@ -1094,6 +1094,7 @@ app.http('pedido-dynamics', {
       const Detalle = pend.rows.map(e => ({
         IdProducto: cab.id_producto || '',
         Lote: e.lote || '',
+        CantidadTotal: (cab.cantidad_total == null ? 0 : cab.cantidad_total),  // = "Cantidad" del encabezado
         ReposicionAnaquel: (e.cantidad == null ? 0 : e.cantidad),
         Ubicacion: cab.ubicacion || '',
         Descripcion: cab.descripcion || ''
