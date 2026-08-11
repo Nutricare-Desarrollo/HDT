@@ -29,6 +29,8 @@
 
     "DYNAMICS_API_URL": "https://...powerplatform.com/.../invoke?...&sig=... (flujo 'Crear Trabajos en Dynamics' por hoja de consumo)",
     "DYNAMICS_PP_API_URL": "https://...powerplatform.com/.../invoke?...&sig=... (flujo 'Nutricare al Anaquel - Pedido Pendiente' — Crear trabajo desde Pedido Pendiente)",
-    "DYNAMICS_TIMEOUT_MS": "220000"
+    "DYNAMICS_TIMEOUT_MS": "220000",
+
+    "CIRUGIAS_INGEST_KEY": "una-clave-larga-y-secreta (la envia Power Automate en el header x-api-key para POST /api/cirugias/ingest)"
   }
 }

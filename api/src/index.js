@@ -673,6 +673,73 @@ app.http('cirugias-importar', {
   }
 });
 
+/* POST /api/cirugias/ingest -> alta/actualización de cirugías desde un sistema EXTERNO
+   (ej. Power Automate). NO usa el login AAD: se autentica con una clave en el header
+   'x-api-key' que debe coincidir con la App Setting CIRUGIAS_INGEST_KEY. La ruta está
+   habilitada como anónima en staticwebapp.config.json (solo esta), la seguridad la da
+   la clave. Devuelve 403 (no 401) en clave inválida para que el SWA no lo redirija al login.
+   Body admitido: un objeto de cirugía, o { "cirugias": [ ... ] }, o un array [ ... ].
+   Campos por registro (snake_case): fecha_cirugia (YYYY-MM-DD, obligatoria), hora_inicio,
+   hora_fin, tiempo, ubicacion, identificacion, paciente, regimen, fecha_accidente,
+   numero_caso, cirugia, cirujano, observacion, requerimiento, estado.
+   Deduplica por numero_caso (si viene y ya existe, ACTUALIZA; si no, INSERTA). */
+app.http('cirugias-ingest', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'cirugias/ingest',
+  handler: async (request, context) => {
+    const key = process.env.CIRUGIAS_INGEST_KEY;
+    if (!key) return json(500, { error: 'Falta configurar CIRUGIAS_INGEST_KEY en el servidor (Application settings del Static Web App).' });
+    const sent = request.headers.get('x-api-key') || '';
+    if (sent !== key) return json(403, { error: 'Clave de acceso inválida o ausente (header x-api-key).' });
+
+    let body;
+    try { body = await request.json(); } catch { return json(400, { error: 'El cuerpo no es JSON válido.' }); }
+    let arr;
+    if (Array.isArray(body)) arr = body;
+    else if (body && Array.isArray(body.cirugias)) arr = body.cirugias;
+    else if (body && typeof body === 'object') arr = [body];
+    else arr = [];
+
+    const okDate = (s) => s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    let creadas = 0, actualizadas = 0, omitidas = 0;
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      for (const c of arr) {
+        const fecha = okDate(c.fecha_cirugia) ? c.fecha_cirugia : null;
+        if (!fecha) { omitidas++; continue; }  // sin fecha válida no entra al calendario
+        const facc = okDate(c.fecha_accidente) ? c.fecha_accidente : null;
+        const caso = (c.numero_caso != null && String(c.numero_caso).trim() !== '') ? String(c.numero_caso).trim() : null;
+        const estado = CIR_ESTADOS.includes(c.estado) ? c.estado : 'Programada';
+        const vals = [fecha, c.hora_inicio || null, c.tiempo || null, c.ubicacion || null, c.identificacion || null,
+          c.paciente || null, c.regimen || null, facc, caso, c.cirugia || null, c.cirujano || null,
+          c.observacion || null, c.requerimiento || null];
+        let upd = null;
+        if (caso) {
+          upd = await client.query(
+            `UPDATE dbo.Cirugia SET FechaCirugia=$1,HoraInicio=$2,Tiempo=$3,Ubicacion=$4,Identificacion=$5,
+               Paciente=$6,Regimen=$7,FechaAccidente=$8,Cirugia=$10,Cirujano=$11,Observacion=$12,RequerimientoQuirurgico=$13
+             WHERE NumeroCaso=$9`, vals);
+        }
+        if (upd && upd.rowCount) { actualizadas += upd.rowCount; continue; }
+        await client.query(
+          `INSERT INTO dbo.Cirugia (FechaCirugia,HoraInicio,Tiempo,Ubicacion,Identificacion,Paciente,Regimen,
+             FechaAccidente,NumeroCaso,Cirugia,Cirujano,Observacion,RequerimientoQuirurgico,Estado,CreadoPor,CreadoPorEmail)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'PowerAutomate','powerautomate')`,
+          [...vals, estado]);
+        creadas++;
+      }
+      await client.query('COMMIT');
+      return json(200, { ok: true, creadas, actualizadas, omitidas });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      context.error(e);
+      return json(500, { error: 'No se pudo ingestar las cirugías', detail: e.message });
+    } finally {
+      client.release();
+    }
+  }
+});
+
 /* ============================================================
    Configuración (ubicaciones Origen/Destino) — solo Bodega/Administrador
    ============================================================ */

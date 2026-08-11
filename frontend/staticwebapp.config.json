@@ -11,6 +11,7 @@
     }
   },
   "routes": [
+    { "route": "/api/cirugias/ingest", "allowedRoles": ["anonymous"] },
     { "route": "/api/*", "allowedRoles": ["authenticated"] },
     { "route": "/index.html", "allowedRoles": ["authenticated"] },
     { "route": "/", "allowedRoles": ["authenticated"] }
