@@ -1073,9 +1073,11 @@ app.http('pedido-dynamics', {
     try {
       // Encabezado del pedido (producto).
       const p = await query(
-        `SELECT p.Id AS id, p.HojaConsumoId AS hoja_id, p.IdProducto AS id_producto,
-                p.Ubicacion AS ubicacion, p.Descripcion AS descripcion, p.CantidadTotal AS cantidad_total
-           FROM dbo.PedidoPendiente p WHERE p.Id=$1`, [id]);
+        `SELECT p.Id AS id, p.HojaConsumoId AS hoja_id, h.Consecutivo AS consecutivo,
+                p.IdProducto AS id_producto, p.Ubicacion AS ubicacion,
+                p.Descripcion AS descripcion, p.CantidadTotal AS cantidad_total
+           FROM dbo.PedidoPendiente p JOIN dbo.HojaConsumo h ON h.Id = p.HojaConsumoId
+          WHERE p.Id=$1`, [id]);
       if (!p.rows.length) return json(404, { error: 'Pedido no encontrado' });
       const cab = p.rows[0];
 
@@ -1100,7 +1102,9 @@ app.http('pedido-dynamics', {
         Descripcion: cab.descripcion || ''
       }));
 
-      const payload = { Consecutivo: `${cab.hoja_id}-${cab.id}`, Configuracion, Detalle };
+      // Consecutivo = "{Consecutivo de negocio de la hoja}-{Id del pedido}" (ej. 3019-5).
+      const consecHoja = (cab.consecutivo != null) ? cab.consecutivo : cab.hoja_id;
+      const payload = { Consecutivo: `${consecHoja}-${cab.id}`, Configuracion, Detalle };
 
       // Dispara el flujo. Usa la App Setting DYNAMICS_PP_API_URL (URL completa con firma SAS).
       const r = await iniciarDynamics(payload, 'DYNAMICS_PP_API_URL');
