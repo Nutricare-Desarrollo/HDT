@@ -1096,7 +1096,7 @@ app.http('pedido-dynamics', {
       const Detalle = pend.rows.map(e => ({
         IdProducto: cab.id_producto || '',
         Lote: e.lote || '',
-        CantidadTotal: (cab.cantidad_total == null ? 0 : cab.cantidad_total),  // = "Cantidad" del encabezado
+        CantidadTotal: (e.cantidad == null ? 0 : e.cantidad),  // = "Cantidad" que el usuario puso en la línea del grid
         ReposicionAnaquel: (e.cantidad == null ? 0 : e.cantidad),
         Ubicacion: '',
         Descripcion: cab.descripcion || ''
