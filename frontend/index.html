@@ -34,23 +34,46 @@ label{display:block;font-weight:600;margin-bottom:5px;font-size:13px;color:var(-
 .ms-logo span:nth-child(1){background:#f25022}.ms-logo span:nth-child(2){background:#7fba00}
 .ms-logo span:nth-child(3){background:#00a4ef}.ms-logo span:nth-child(4){background:#ffb900}
 
-/* TOPBAR */
-header.topbar{position:sticky;top:0;z-index:30;background:var(--brand-d);color:#fff;padding:0 16px;height:56px;display:flex;align-items:center;justify-content:space-between;box-shadow:var(--shadow)}
-.topbar .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px}
-.topbar .brand .mk{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--brand),var(--accent));display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
-.topbar .right{display:flex;align-items:center;gap:10px;font-size:13px}
-.role-badge{background:rgba(255,255,255,.16);padding:5px 10px;border-radius:20px;font-weight:700;font-size:12px}
-.role-select{background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.45);padding:5px 28px 5px 12px;border-radius:20px;font-weight:700;font-size:12px;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='white'><path d='M7 10l5 5 5-5z'/></svg>");background-repeat:no-repeat;background-position:right 8px center}
+/* SIDEBAR */
+.sidebar{width:264px;background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;position:fixed;top:0;left:0;height:100vh;z-index:40}
+.sidebar .brand{display:flex;align-items:center;gap:12px;padding:18px 16px 10px}
+.sidebar .brand-tag{padding:0 16px 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);font-weight:600}
+.sidebar .brand .mk{width:44px;height:44px;flex:0 0 44px;border-radius:50%;background:linear-gradient(135deg,var(--brand),var(--accent));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:15px}
+.sidebar .brand .bt{font-weight:800;font-size:15.5px;color:var(--brand-d);line-height:1.15}
+.sidebar .brand .bt .g{color:var(--ok)}
+.sidebar .brand .bs{font-size:10px;letter-spacing:.09em;color:var(--muted);font-weight:700;margin-top:3px}
+.side-nav{flex:1;overflow-y:auto;padding:8px 12px}
+.nav-group{margin-top:12px}
+.nav-group .gh{font-size:11px;letter-spacing:.09em;color:var(--muted);font-weight:700;padding:6px 10px 4px}
+.nav-item{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:none;color:var(--txt);padding:11px 12px;border-radius:10px;font-size:14.5px;font-weight:600;margin:2px 0}
+.nav-item:hover{background:#f1f5f9}
+.nav-item.active{background:#e8f1fb;color:var(--brand-d)}
+.nav-item .ic{font-size:17px;width:22px;flex:0 0 22px;text-align:center}
+.side-foot{border-top:1px solid var(--line);padding:14px 16px 18px}
+.side-foot .un{font-weight:700;font-size:13px;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.side-foot .ue{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+.side-foot .rl{font-size:11px;letter-spacing:.09em;color:var(--muted);font-weight:700;margin:14px 0 7px}
+.role-badge{display:inline-block;background:#e8f1fb;color:var(--brand-d);padding:5px 12px;border-radius:8px;font-weight:700;font-size:12px}
+.role-select{background:#fff;color:var(--txt);border:1px solid var(--line);width:100%;margin-top:8px;padding:9px 30px 9px 12px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%236b7d8a'><path d='M7 10l5 5 5-5z'/></svg>");background-repeat:no-repeat;background-position:right 10px center}
 .role-select option{color:#111}
+.sim-cap{font-size:11px;color:var(--warn);margin:7px 0 0;line-height:1.3}
 .sim-note{background:#fff6e5;border:1px solid #f0c36d;color:#7a5300;padding:6px 12px;border-radius:8px;font-size:13px;margin:0 0 12px;font-weight:600}
-.topbar .logout{background:rgba(255,255,255,.15);color:#fff;padding:7px 11px}
-.topbar .logout:hover{background:rgba(255,255,255,.28)}
-.who{max-width:38vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.logout{width:100%;background:#fff;color:var(--brand);border:1px solid var(--line);padding:10px;margin-top:12px;font-weight:700}
+.logout:hover{border-color:var(--brand);background:#f6fafc}
 
-/* NAV (tabs) */
-nav.tabs{background:#fff;border-bottom:1px solid var(--line);display:flex;gap:4px;padding:0 10px;overflow-x:auto;position:sticky;top:56px;z-index:20}
-nav.tabs button{background:none;color:var(--muted);padding:14px 14px;border-radius:0;border-bottom:3px solid transparent;white-space:nowrap;font-size:14px}
-nav.tabs button.active{color:var(--brand-d);border-bottom-color:var(--accent)}
+/* CONTENT + MOBILE TOP BAR */
+.content{margin-left:264px;min-height:100vh;display:flex;flex-direction:column}
+.mtop{display:none}
+.overlay{display:none}
+@media(max-width:900px){
+  .sidebar{transform:translateX(-100%);transition:transform .22s ease;box-shadow:0 18px 50px rgba(0,0,0,.28)}
+  .sidebar.open{transform:translateX(0)}
+  .content{margin-left:0}
+  .mtop{display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:35;background:var(--brand-d);color:#fff;height:54px;padding:0 14px;box-shadow:var(--shadow)}
+  .mtop .hb{background:rgba(255,255,255,.16);color:#fff;width:38px;height:38px;flex:0 0 38px;border-radius:8px;font-size:18px;display:flex;align-items:center;justify-content:center}
+  .mtop .mt-brand{font-weight:700;font-size:15px}
+  .overlay.show{display:block;position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:39}
+}
 
 main{max-width:1200px;margin:0 auto;padding:18px 14px 40px}
 .page-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
@@ -217,19 +240,34 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
 
 <!-- APP -->
 <div id="app" class="hidden">
-  <header class="topbar">
-    <div class="brand"><span class="mk">HDT</span> Hojas de Consumo</div>
-    <div class="right">
-      <span class="who" id="userName">Usuario</span>
+  <div class="overlay" id="ovl" onclick="closeSidebar()"></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="mk">HDT</span>
+      <div>
+        <div class="bt">Corporación <span class="g">Nutricare</span></div>
+        <div class="bs">HDT · Hojas de Consumo</div>
+      </div>
+    </div>
+    <div class="brand-tag">Registro de insumos en cirugías</div>
+    <nav class="side-nav" id="navTabs"></nav>
+    <div class="side-foot">
+      <div class="un" id="userName">Usuario</div>
+      <div class="ue" id="userEmail"></div>
+      <div class="rl">ROL</div>
       <span class="role-badge" id="roleBadge">—</span>
       <select class="role-select hidden" id="roleSelect" onchange="changeRole(this.value)" title="Ver la app como otro rol (simulación)"></select>
+      <div class="sim-cap hidden" id="simCap">Vista de prueba; cambie el rol para verificar los permisos.</div>
       <button class="logout" onclick="logout()">Salir</button>
     </div>
-  </header>
-  <nav class="tabs" id="navTabs"></nav>
-  <div id="simBanner" class="sim-note hidden" style="margin:12px 16px 0"></div>
-
-  <main>
+  </aside>
+  <div class="content">
+    <div class="mtop">
+      <button class="hb" onclick="toggleSidebar()" aria-label="Abrir menú">☰</button>
+      <span class="mt-brand">Corporación Nutricare</span>
+    </div>
+    <div id="simBanner" class="sim-note hidden" style="margin:12px 16px 0"></div>
+    <main>
     <!-- INICIO -->
     <section id="viewInicio" class="hidden">
       <div class="page-head"><div><h2>Inicio</h2><div class="sub" id="inicioSub"></div></div></div>
@@ -427,6 +465,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       <div id="cirCal"></div>
     </section>
   </main>
+  </div>
 </div>
 
 <!-- MODAL cargando -->
@@ -897,6 +936,7 @@ async function init(){
     ROL=(USER&&USER.rol)||'Hospital';
     REAL_ROL=ROL;
     document.getElementById('userName').textContent=(USER&&USER.name)||'Usuario';
+    document.getElementById('userEmail').textContent=(USER&&USER.email)||'';
     document.getElementById('roleBadge').textContent=ROL;
     setupRoleSwitcher();
     document.getElementById('login').classList.add('hidden');
@@ -916,16 +956,18 @@ async function init(){
 function setupRoleSwitcher(){
   const sel=document.getElementById('roleSelect');
   const badge=document.getElementById('roleBadge');
-  if(REAL_ROL!=='Administrador'){ sel.classList.add('hidden'); badge.classList.remove('hidden'); return; }
-  // Admin: mostrar selector de simulación en vez de la insignia estática
+  const cap=document.getElementById('simCap');
+  badge.textContent=ROL; badge.classList.remove('hidden');
+  if(REAL_ROL!=='Administrador'){ sel.classList.add('hidden'); cap.classList.add('hidden'); return; }
+  // Admin: insignia del rol actual + selector para simular otros roles
   sel.innerHTML='';
   ROLES.forEach(r=>{ const o=document.createElement('option'); o.value=r; o.textContent=r; if(r===ROL)o.selected=true; sel.appendChild(o); });
-  sel.classList.remove('hidden');
-  badge.classList.add('hidden');
+  sel.classList.remove('hidden'); cap.classList.remove('hidden');
 }
 function changeRole(val){
   if(REAL_ROL!=='Administrador') return; // solo el admin puede simular
   ROL=val;
+  document.getElementById('roleBadge').textContent=ROL;
   const banner=document.getElementById('simBanner');
   if(ROL!==REAL_ROL){ banner.textContent='👁️ Estás viendo la app como “'+ROL+'” (simulación). Tu rol real sigue siendo Administrador. Volvé a “Administrador” o recargá para salir.'; banner.classList.remove('hidden'); }
   else { banner.classList.add('hidden'); }
@@ -934,18 +976,27 @@ function changeRole(val){
 }
 function buildNav(){
   const n=document.getElementById('navTabs'); n.innerHTML='';
-  const items=[{id:'inicio',l:'🏠 Inicio',fn:showInicio},{id:'hojas',l:'📋 Hojas de consumo',fn:showHojas}];
-  // Pendientes de reposición: Hospital y Administrador.
-  if(canSubir()) items.push({id:'pendientes',l:'🕒 Pendientes de reposición',fn:showPendientes});
-  if(canSubir()) items.push({id:'cirugias',l:'📅 Cirugías',fn:showCirugias});
-  // Configuración e Histórico Dynamics: solo Bodega y Administrador.
-  if(canBodega()) items.push({id:'config',l:'⚙️ Configuración',fn:showConfig});
-  if(canBodega()) items.push({id:'trabajos',l:'🧾 Histórico Dynamics',fn:showTrabajos});
-  if(canBodega()) items.push({id:'pedidos',l:'📦 Pedido Pendiente',fn:showPedidos});
-  // Reemplazos/Correcciones: solo Bodega y Administrador.
-  if(canBodega()) items.push({id:'reemplazos',l:'🔁 Reemplazos / Correcciones',fn:showReemplazos});
-  items.forEach(it=>{ const b=document.createElement('button'); b.id='tab-'+it.id; b.textContent=it.l; b.onclick=it.fn; n.appendChild(b); });
+  const items=[
+    {id:'inicio',ic:'🏠',l:'Inicio',fn:showInicio},
+    {id:'hojas',ic:'📋',l:'Hojas de consumo',fn:showHojas},
+  ];
+  // Pendientes de reposición y Cirugías: Hospital y Administrador.
+  if(canSubir()) items.push({id:'pendientes',ic:'🕒',l:'Pendientes de reposición',fn:showPendientes});
+  if(canSubir()) items.push({id:'cirugias',ic:'📅',l:'Cirugías',fn:showCirugias});
+  // Pedido Pendiente, Reemplazos, Histórico y Configuración: solo Bodega y Administrador.
+  if(canBodega()) items.push({id:'pedidos',ic:'📦',l:'Pedido Pendiente',fn:showPedidos});
+  if(canBodega()) items.push({id:'reemplazos',ic:'🔁',l:'Reemplazos / Correcciones',fn:showReemplazos});
+  if(canBodega()) items.push({id:'trabajos',ic:'🧾',l:'Histórico Dynamics',fn:showTrabajos});
+  if(canBodega()) items.push({id:'config',ic:'⚙️',l:'Configuración',fn:showConfig});
+  items.forEach(it=>{
+    const b=document.createElement('button'); b.id='tab-'+it.id; b.className='nav-item';
+    b.innerHTML='<span class="ic">'+it.ic+'</span><span>'+it.l+'</span>';
+    b.onclick=()=>{ it.fn(); closeSidebar(); };
+    n.appendChild(b);
+  });
 }
+function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('ovl').classList.toggle('show'); }
+function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('ovl').classList.remove('show'); }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
 const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
