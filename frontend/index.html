@@ -1857,7 +1857,7 @@ function askConfirm(title, msg, okLabel, onOk){
   const btn=document.getElementById('confirmOkBtn');
   btn.textContent=okLabel||'Confirmar';
   CONFIRM_CB=onOk||null;
-  btn.onclick=function(){ closeConfirm(); if(CONFIRM_CB){ const cb=CONFIRM_CB; CONFIRM_CB=null; cb(); } };
+  btn.onclick=function(){ const cb=CONFIRM_CB; CONFIRM_CB=null; closeConfirm(); if(cb) cb(); };
   document.getElementById('confirmModal').classList.remove('hidden');
 }
 function closeConfirm(){ document.getElementById('confirmModal').classList.add('hidden'); CONFIRM_CB=null; }
