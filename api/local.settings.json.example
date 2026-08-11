@@ -25,6 +25,10 @@
     "LOTES_API_METHOD": "GET",
     "LOTES_API_BODY": "{}",
     "LOTES_API_KEY": "",
-    "LOTES_CACHE_MS": "600000"
+    "LOTES_CACHE_MS": "600000",
+
+    "DYNAMICS_API_URL": "https://...powerplatform.com/.../invoke?...&sig=... (flujo 'Crear Trabajos en Dynamics' por hoja de consumo)",
+    "DYNAMICS_PP_API_URL": "https://...powerplatform.com/.../invoke?...&sig=... (flujo 'Nutricare al Anaquel - Pedido Pendiente' — Crear trabajo desde Pedido Pendiente)",
+    "DYNAMICS_TIMEOUT_MS": "220000"
   }
 }

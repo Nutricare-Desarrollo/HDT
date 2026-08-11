@@ -47,9 +47,10 @@ async function interpretar(res) {
 }
 
 // POST inicial al flujo con el payload {Consecutivo, Detalle, Configuracion}.
-async function iniciarDynamics(payload) {
-  const url = process.env.DYNAMICS_API_URL;
-  if (!url) throw new Error('Falta configurar DYNAMICS_API_URL en el servidor (Application settings del Static Web App).');
+// envName permite usar distintas App Settings según el flujo (hoja vs. pedido pendiente).
+async function iniciarDynamics(payload, envName = 'DYNAMICS_API_URL') {
+  const url = process.env[envName];
+  if (!url) throw new Error(`Falta configurar ${envName} en el servidor (Application settings del Static Web App).`);
   const res = await fetchConTimeout(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },

@@ -975,7 +975,7 @@ app.http('pedido-envios-guardar', {
       const cantidad = toInt(e && e.cantidad);
       const lote = String((e && e.lote != null) ? e.lote : '').trim();
       if (!cantidad || cantidad <= 0) return json(400, { error: 'La cantidad de cada línea debe ser un entero mayor a cero' });
-      if (!lote) return json(400, { error: 'El Lote es obligatorio en cada línea de envío' });
+      // El Lote es OPCIONAL: si no viene, se guarda vacío.
       limpias.push({ id: (e && e.id) ? parseInt(e.id, 10) : null, cantidad, lote });
     }
 
@@ -1051,6 +1051,90 @@ app.http('pedido-envios-cancelar', {
       return json(500, { error: 'No se pudo cancelar', detail: e.message });
     } finally {
       client.release();
+    }
+  }
+});
+
+/* POST /api/pedidos/{id}/dynamics -> crea el trabajo en Dynamics (flujo "Nutricare al
+   Anaquel - Pedido Pendiente") con las líneas del grid en estado 'Pendiente'.
+   Consecutivo = "{HojaConsumoId}-{PedidoId}". Detalle: una línea por cada envío
+   'Pendiente' (Lote tal cual, puede ir vacío; ReposicionAnaquel = cantidad de esa línea;
+   IdProducto/Ubicacion/Descripcion del encabezado del producto).
+   Con la respuesta: NumeroTR = IdProceso del primer registro y Estado = 'Procesado' si el
+   flujo devolvió "Trabajo Creado", o 'Error' en cualquier otro caso. */
+app.http('pedido-dynamics', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'pedidos/{id}/dynamics',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para crear trabajos en Dynamics' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    try {
+      // Encabezado del pedido (producto).
+      const p = await query(
+        `SELECT p.Id AS id, p.HojaConsumoId AS hoja_id, p.IdProducto AS id_producto,
+                p.Ubicacion AS ubicacion, p.Descripcion AS descripcion
+           FROM dbo.PedidoPendiente p WHERE p.Id=$1`, [id]);
+      if (!p.rows.length) return json(404, { error: 'Pedido no encontrado' });
+      const cab = p.rows[0];
+
+      // Líneas del grid en estado 'Pendiente' (de aquí salen Lote y ReposicionAnaquel).
+      const pend = await query(
+        `SELECT Id AS id, CantidadEnviada AS cantidad, Lote AS lote
+           FROM dbo.PedidoPendienteEnvio
+          WHERE PedidoPendienteId=$1 AND Estado='Pendiente' ORDER BY Id`, [id]);
+      if (!pend.rows.length) return json(400, { error: 'No hay líneas en estado Pendiente para crear el trabajo' });
+
+      // Configuración (áreas / origen / destino).
+      const cfg = await query(`SELECT Area AS area, Origen AS origen, Destino AS destino FROM dbo.Configuracion ORDER BY Area`);
+      const Configuracion = cfg.rows.map(c => ({ area: c.area, origen: c.origen || '', destino: c.destino || '' }));
+
+      // Detalle: una línea por cada envío Pendiente.
+      const Detalle = pend.rows.map(e => ({
+        IdProducto: cab.id_producto || '',
+        Lote: e.lote || '',
+        ReposicionAnaquel: (e.cantidad == null ? 0 : e.cantidad),
+        Ubicacion: cab.ubicacion || '',
+        Descripcion: cab.descripcion || ''
+      }));
+
+      const payload = { Consecutivo: `${cab.hoja_id}-${cab.id}`, Configuracion, Detalle };
+
+      // Dispara el flujo. Usa la App Setting DYNAMICS_PP_API_URL (URL completa con firma SAS).
+      const r = await iniciarDynamics(payload, 'DYNAMICS_PP_API_URL');
+      if (r.estado === 'en_proceso') {
+        // El flujo sigue trabajando (patrón asíncrono 202). Las líneas quedan 'Pendiente';
+        // se informa al cliente para reintentar cuando el flujo termine.
+        return json(202, { done: false });
+      }
+
+      const arr = Array.isArray(r.data) ? r.data : [];
+      const first = arr[0] || {};
+      const idProceso = (first.IdProceso != null) ? String(first.IdProceso) : null;
+      const estadoResp = String(first.Estado || '');
+      const nuevoEstado = /trabajo\s*creado/i.test(estadoResp) ? 'Procesado' : 'Error';
+
+      // Actualiza las líneas Pendientes de este pedido con el N° TR y el nuevo estado.
+      const client = await getClient();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `UPDATE dbo.PedidoPendienteEnvio SET NumeroTR=$2, Estado=$3
+            WHERE PedidoPendienteId=$1 AND Estado='Pendiente'`, [id, idProceso, nuevoEstado]);
+        await recalcCantidadEnviada(client, id);
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw e;
+      } finally {
+        client.release();
+      }
+
+      return json(200, { ok: true, estado: nuevoEstado, idProceso, proceso: first.Proceso || null, estadoResp });
+    } catch (e) {
+      context.error(e);
+      return json(502, { error: 'No se pudo crear el trabajo en Dynamics', detail: e.message });
     }
   }
 });

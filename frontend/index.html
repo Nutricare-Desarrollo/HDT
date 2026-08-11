@@ -507,7 +507,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <input id="envioCant" type="number" min="1" step="1" autocomplete="off" oninput="onEnvioInput()">
       </div>
       <div class="field" style="margin-top:10px">
-        <label>Lote <span class="req">*</span></label>
+        <label>Lote <span style="color:var(--muted);font-weight:400">(opcional)</span></label>
         <input id="envioLote" type="text" autocomplete="off" oninput="onEnvioInput()">
       </div>
       <p id="envioQueda" style="color:var(--muted);font-size:13px;margin:8px 0 0"></p>
@@ -1744,6 +1744,7 @@ function renderPedProducto(p){
   html+='<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">'
       +'<button class="btn-primary" onclick="guardarPedido()">💾 Guardar</button>'
       +'<button class="btn-ghost" onclick="cancelarPedido()">✖ Cancelar</button>'
+      +'<button class="btn-primary" id="pedTrBtn" style="background:var(--accent)" onclick="crearTrabajoDynamics()" disabled title="Requiere al menos una línea en estado Pendiente">🔧 Crear trabajo en Dynamics</button>'
       +'</div>';
   document.getElementById('pedDetBody').innerHTML=html;
 }
@@ -1782,6 +1783,13 @@ function actualizarDisp(){
   el.textContent=`Disponible por enviar: ${disp} de ${CUR_PED.cantidad_total||0}.`;
   const addBtn=document.getElementById('pedAddBtn');
   if(addBtn){ const sin=disp<=0; addBtn.disabled=sin; addBtn.title=sin?'No queda cantidad disponible por enviar':''; }
+  // "Crear trabajo en Dynamics": habilitado solo si hay al menos una línea Pendiente en el grid.
+  const trBtn=document.getElementById('pedTrBtn');
+  if(trBtn){
+    const hayPend=PED_ENVIOS.some(e=>e.estado==='Pendiente');
+    trBtn.disabled=!hayPend;
+    trBtn.title=hayPend?'Crea el trabajo en Dynamics con las líneas pendientes':'Requiere al menos una línea en estado Pendiente';
+  }
 }
 /* --- Modal: agregar o editar una línea (borrador; se persiste con Guardar) --- */
 function openEnvio(){
@@ -1830,7 +1838,7 @@ function aplicarEnvio(){
   const lote=String(document.getElementById('envioLote').value||'').trim();
   if(!v||v<=0){ toast('La cantidad a enviar debe ser un entero mayor a cero'); return; }
   if(v>disp){ toast(`La cantidad no puede superar el disponible (${disp})`); return; }
-  if(!lote){ toast('El Lote es obligatorio'); return; }
+  // El Lote es OPCIONAL: si el usuario no lo agrega, se envía vacío.
   if(ENV_EDIT_IDX!=null && PED_ENVIOS[ENV_EDIT_IDX]){
     PED_ENVIOS[ENV_EDIT_IDX].cantidad=v; PED_ENVIOS[ENV_EDIT_IDX].lote=lote;
   } else {
@@ -1861,6 +1869,37 @@ async function guardarPedido(){
     toast('Cambios guardados');
     showPedidos();   // vuelve al listado de pedidos pendientes
   }catch(e){ toast('No se pudo guardar: '+e.message); }
+}
+/* --- Crear trabajo en Dynamics para este pedido pendiente ---
+   Persiste primero las líneas Pendientes (para que el backend arme el Detalle con
+   ellas) y luego dispara el flujo. El backend actualiza el N° TR y el estado
+   (Procesado / Error) de esas líneas según la respuesta del flujo. */
+function crearTrabajoDynamics(){
+  if(!CUR_PED) return;
+  if(!PED_ENVIOS.some(e=>e.estado==='Pendiente')){ toast('No hay líneas Pendientes para crear el trabajo'); return; }
+  askConfirm('Crear trabajo en Dynamics',
+    'Se crearán los trabajos en Dynamics con las líneas Pendientes de este pedido. ¿Desea continuar?',
+    'Sí, crear', doCrearTrabajoDynamics);
+}
+async function doCrearTrabajoDynamics(){
+  if(!CUR_PED) return;
+  const pend=PED_ENVIOS.filter(e=>e.estado==='Pendiente').map(e=>({ id:e.id||undefined, cantidad:e.cantidad, lote:e.lote }));
+  const btn=document.getElementById('pedTrBtn');
+  if(btn){ btn.disabled=true; btn.textContent='Creando trabajo…'; }
+  try{
+    // 1) Guardar el borrador de líneas Pendientes en la BD.
+    await api('PUT','/pedidos/'+CUR_PED.id+'/envios',{envios:pend});
+    // 2) Disparar la creación del trabajo en Dynamics.
+    const r=await api('POST','/pedidos/'+CUR_PED.id+'/dynamics');
+    if(r && r.estado==='Procesado') toast('Trabajo creado en Dynamics'+(r.idProceso?': '+r.idProceso:''));
+    else if(r && r.estado==='Error') toast('Dynamics devolvió un error para el trabajo. Revise el detalle.');
+    else if(r && r.done===false) toast('El trabajo se está creando en Dynamics; vuelva a abrir el pedido en unos momentos.');
+    else toast('Proceso enviado a Dynamics.');
+    await verPedido(CUR_PED.id);   // recargar para ver N° TR y estados actualizados
+  }catch(e){
+    toast('No se pudo crear el trabajo: '+e.message);
+    if(btn){ btn.disabled=false; btn.textContent='🔧 Crear trabajo en Dynamics'; }
+  }
 }
 // Cancelar: confirma, borra las líneas Pendientes de la BD y vuelve al listado de pedidos.
 function cancelarPedido(){
