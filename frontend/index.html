@@ -75,7 +75,7 @@ label{display:block;font-weight:600;margin-bottom:5px;font-size:13px;color:var(-
   .nav-scrim.show{display:block;position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:39}
 }
 
-main{max-width:1200px;margin:0 auto;padding:18px 14px 40px}
+main{max-width:1200px;width:100%;margin:0 auto;padding:18px 14px 40px}
 .page-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
 .page-head h2{margin:0;font-size:20px;color:var(--brand-d)}
 .page-head .sub{color:var(--muted);font-size:13px;margin-top:3px}
@@ -98,6 +98,7 @@ main{max-width:1200px;margin:0 auto;padding:18px 14px 40px}
 table{width:100%;border-collapse:collapse;font-size:14px;white-space:nowrap}
 thead th{background:var(--brand-d);color:#fff;text-align:left;padding:11px 12px;font-weight:600;font-size:12.5px;position:sticky;top:0}
 tbody td{padding:10px 12px;border-bottom:1px solid var(--line)}
+tbody td.clip{max-width:150px;overflow:hidden;text-overflow:ellipsis}
 tbody tr:hover{background:#f5fafc}
 .tag{background:#e8f4fb;color:var(--brand-d);padding:3px 9px;border-radius:20px;font-size:12px;font-weight:600}
 thead tr.filter-row th{background:#0d5478;padding:6px 8px}
@@ -247,7 +248,6 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       <div>
         <div class="bt">Corporación <span class="g">Nutricare</span></div>
         <div class="bd">Registro de insumos en cirugías</div>
-        <div class="bs">HDT · Hojas de Consumo</div>
       </div>
     </div>
     <nav class="side-nav" id="navTabs"></nav>
@@ -595,7 +595,7 @@ const BODEGA_DET_COLS = [
 const BODEGA_DET_REQ = [{k:'codigo'},{k:'numero_equipo'},{k:'und'},{k:'reposicion_anaquel'}];
 const GRID_COLS = [
   {k:'fecha',l:'Fecha y hora'},{k:'usuario',l:'Usuario'},{k:'numero_hoja',l:'N°',tag:true},
-  {k:'regimen',l:'Régimen'},{k:'cirujano',l:'Cirujano'},{k:'instrumentista',l:'Instrumentista'},
+  {k:'regimen',l:'Régimen'},{k:'cirujano',l:'Cirujano',clip:true},{k:'instrumentista',l:'Instrumentista'},
   {k:'diagnostico',l:'Diagnóstico'},{k:'cantidad_lineas',l:'Artículos'},{k:'estado',l:'Estado',estado:true}
 ];
 const ESTADOS = ['Enviado','En revisión','Creando TR','Finalizada','Error'];
@@ -1115,6 +1115,7 @@ function renderGrid(){
       if(c.estado) return `<td>${estadoBadge(r.estado)}</td>`;
       if(c.tag) return `<td><span class="tag">${esc(r[c.k])}</span></td>`;
       if(c.k==='diagnostico') return celdaDiag(r[c.k]);
+      if(c.clip) return `<td class="clip" title="${attr(r[c.k])}">${esc(r[c.k])}</td>`;
       return `<td>${esc(r[c.k])}</td>`;
     }).join('');
     const tr=document.createElement('tr');
@@ -1626,6 +1627,7 @@ function renderReemplazos(){
       if(c.estado) return `<td>${estadoBadge(r.estado)}</td>`;
       if(c.tag) return `<td><span class="tag">${esc(r[c.k])}</span></td>`;
       if(c.k==='diagnostico') return celdaDiag(r[c.k]);
+      if(c.clip) return `<td class="clip" title="${attr(r[c.k])}">${esc(r[c.k])}</td>`;
       return `<td>${esc(r[c.k])}</td>`;
     }).join('');
     const tr=document.createElement('tr');
