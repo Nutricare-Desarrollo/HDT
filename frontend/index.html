@@ -1497,7 +1497,9 @@ async function guardarVer(){
 /* ===== Crear Trabajos en Dynamics (proceso largo con progreso + polling) ===== */
 let DYN_POLL=null, DYN_T0=0, DYN_TIMER=null;
 function dynElapsedTxt(){ const s=Math.floor((Date.now()-DYN_T0)/1000); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
-function dynShow(){
+function dynShow(title, msg){
+  if(title) document.getElementById('dynTitle').textContent=title;
+  if(msg) document.getElementById('dynMsg').textContent=msg;
   DYN_T0=Date.now();
   document.getElementById('dynElapsed').textContent='Tiempo transcurrido: 0:00';
   document.getElementById('dynModal').classList.remove('hidden');
@@ -1510,7 +1512,7 @@ async function crearTrabajosDynamics(){
   if(!CUR_VER || dynJustSaved!==CUR_VER.id){ toast('Primero guardá los cambios para habilitar el botón'); return; }
   const hojaId=CUR_VER.id;
   const btn=document.getElementById('verDynBtn'); if(btn) btn.disabled=true;
-  dynShow();
+  dynShow('Creando trabajos en Dynamics','Enviando la información a Dynamics. Este proceso puede tardar varios minutos; por favor no cierres esta ventana…');
   try{
     const r=await api('POST','/dynamics/'+hojaId);
     if(r && r.done){ dynDone(); return; }
@@ -1884,21 +1886,24 @@ function crearTrabajoDynamics(){
 async function doCrearTrabajoDynamics(){
   if(!CUR_PED) return;
   const pend=PED_ENVIOS.filter(e=>e.estado==='Pendiente').map(e=>({ id:e.id||undefined, cantidad:e.cantidad, lote:e.lote }));
-  const btn=document.getElementById('pedTrBtn');
-  if(btn){ btn.disabled=true; btn.textContent='Creando trabajo…'; }
+  const btn=document.getElementById('pedTrBtn'); if(btn) btn.disabled=true;
+  dynShow('Creando trabajo en Dynamics','Enviando la información del pedido a Dynamics. Por favor no cierres esta ventana…');
   try{
     // 1) Guardar el borrador de líneas Pendientes en la BD.
     await api('PUT','/pedidos/'+CUR_PED.id+'/envios',{envios:pend});
     // 2) Disparar la creación del trabajo en Dynamics.
     const r=await api('POST','/pedidos/'+CUR_PED.id+'/dynamics');
+    dynHide();
     if(r && r.estado==='Procesado') toast('Trabajo creado en Dynamics'+(r.idProceso?': '+r.idProceso:''));
-    else if(r && r.estado==='Error') toast('Dynamics devolvió un error para el trabajo. Revise el detalle.');
+    else if(r && r.estado==='Error') toast('Dynamics devolvió estado Error. Revise el N° TR / estado en el grid.');
     else if(r && r.done===false) toast('El trabajo se está creando en Dynamics; vuelva a abrir el pedido en unos momentos.');
     else toast('Proceso enviado a Dynamics.');
     await verPedido(CUR_PED.id);   // recargar para ver N° TR y estados actualizados
   }catch(e){
-    toast('No se pudo crear el trabajo: '+e.message);
-    if(btn){ btn.disabled=false; btn.textContent='🔧 Crear trabajo en Dynamics'; }
+    dynHide();
+    // Mensaje persistente (no solo toast) para no perder el error del backend.
+    askConfirm('No se pudo crear el trabajo', String(e.message||e), 'Entendido', null);
+    if(btn) btn.disabled=false;
   }
 }
 // Cancelar: confirma, borra las líneas Pendientes de la BD y vuelve al listado de pedidos.
