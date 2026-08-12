@@ -970,7 +970,8 @@ const PP_SELECT = `
          p.Ubicacion AS ubicacion, p.IdProducto AS id_producto, p.Lote AS lote,
          p.Descripcion AS descripcion, p.CantidadTotal AS cantidad_total,
          p.ReposicionAnaquel AS reposicion_anaquel, p.CantidadEnviada AS cantidad_enviada,
-         (p.CantidadTotal - p.CantidadEnviada) AS pendiente, p.Estado AS estado
+         (p.CantidadTotal - p.CantidadEnviada) AS pendiente, p.Estado AS estado,
+         EXISTS(SELECT 1 FROM dbo.PedidoPendienteEnvio e WHERE e.PedidoPendienteId = p.Id AND e.Estado = 'Pendiente') AS tiene_pendientes
   FROM dbo.PedidoPendiente p JOIN dbo.HojaConsumo h ON h.Id = p.HojaConsumoId`;
 
 /* GET /api/pedidos -> listado para el grid principal. */

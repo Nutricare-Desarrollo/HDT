@@ -1677,6 +1677,9 @@ async function showPedidos(){
 async function loadPedidos(){
   try{ PED_ROWS=await api('GET','/pedidos'); }
   catch(e){ PED_ROWS=[]; toast('Error al cargar: '+e.message); }
+  // La leyenda "Por enviar" solo aplica si el pedido tiene artículos en estado Pendiente;
+  // si no, la columna Estado queda en blanco (así también queda consistente el filtro).
+  PED_ROWS.forEach(r=>{ r.estado = r.tiene_pendientes ? 'Por enviar' : ''; });
   renderPedidos();
 }
 function pedFiltered(){
@@ -1700,7 +1703,7 @@ function renderPedidos(){
   if(!rows.length){ b.innerHTML=`<tr><td colspan="${PED_COLS.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
   rows.forEach(r=>{
     const tds=PED_COLS.map(c=>{
-      if(c.k==='estado') return `<td>${estadoBadge(r.estado)}</td>`;
+      if(c.k==='estado') return `<td>${r.estado ? estadoBadge(r.estado) : ''}</td>`;
       if(c.link){ const txt=(r.consecutivo!=null&&r.consecutivo!=='')?r.consecutivo:(r.hoja_id!=null?r.hoja_id:''); return `<td>${r.hoja_id!=null?`<span class="link-cell" onclick="verHoja(${r.hoja_id})" title="Abrir la hoja de consumo">${esc(txt)}</span>`:esc(txt)}</td>`; }
       return `<td>${esc(r[c.k])}</td>`;
     }).join('');
