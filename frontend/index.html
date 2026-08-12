@@ -208,6 +208,8 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
 .cir-pill{background:#e3f0fb;color:#0a5c8a;border-radius:5px;padding:2px 6px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;display:inline-block;max-width:100%}
 .cir-pill.Realizada{background:#d9f2e4;color:#12724a}
 .cir-pill.Cancelada{background:#fbeae8;color:#a02b1f;text-decoration:line-through}
+.mes-mas{background:#eef2f6;color:var(--brand-d);border:1px dashed var(--line);border-radius:5px;padding:2px 6px;font-size:11px;font-weight:600;text-align:center;cursor:pointer}
+.mes-mas:hover{background:#e3f0fb}
 .sem-list{display:flex;flex-direction:column;gap:10px}
 .sem-day{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .sem-day h4{margin:0;padding:8px 12px;background:var(--brand-d);color:#fff;font-size:13px}
@@ -565,6 +567,14 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
     <div class="modal-head"><h3>Cirugía</h3><button class="x" onclick="closeCirDet()">×</button></div>
     <div class="modal-body" id="cirDetBody"></div>
     <div class="modal-foot" id="cirDetFoot"></div>
+  </div>
+</div>
+
+<!-- MODAL cirugías del día (chip "Ver más" de la vista de mes) -->
+<div id="cirDiaModal" class="overlay hidden">
+  <div class="modal">
+    <div class="modal-head"><h3 id="cirDiaTitle">Cirugías del día</h3><button class="x" onclick="closeCirDia()">×</button></div>
+    <div class="modal-body" id="cirDiaBody"></div>
   </div>
 </div>
 
@@ -2238,6 +2248,7 @@ function closeImg(){ document.getElementById('imgModal').classList.add('hidden')
 
 /* ===== CIRUGÍAS (calendario) — Hospital / Administrador ===== */
 let CIR_VIEW='mes', CIR_REF=null, CIR_ROWS=[], CIR_EDIT=null, CUR_CIR=null;
+const CIR_MAX_DIA=5; // cirugías visibles por día en la vista de mes (el resto va en "Ver más")
 const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const DOW=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
 const CIR_FORM=[
@@ -2288,7 +2299,9 @@ function renderMes(){
   let html='<div class="mes-grid">'+DOW.map(d=>`<div class="dow">${d}</div>`).join('');
   for(let w=0;w<6;w++){ for(let d=0;d<7;d++){
     const ds=cirFmt(cur), otro=cur.getMonth()!==mesRef?' otro':'', esHoy=ds===hoy?' hoy':'';
-    const items=(byDay[ds]||[]).map(cirPill).join('');
+    const dia=(byDay[ds]||[]).slice().sort((a,b)=>String(a.hora_inicio||'').localeCompare(String(b.hora_inicio||'')));
+    let items=dia.slice(0,CIR_MAX_DIA).map(cirPill).join('');
+    if(dia.length>CIR_MAX_DIA) items+=`<div class="mes-mas" onclick="event.stopPropagation();openCirDia('${ds}')">Ver más (${dia.length-CIR_MAX_DIA})</div>`;
     html+=`<div class="mes-cell${otro}${esHoy}" onclick="openCirForm(null,'${ds}')"><span class="dnum">${cur.getDate()}</span>${items}</div>`;
     cur.setDate(cur.getDate()+1);
   } }
@@ -2308,6 +2321,19 @@ function renderSemana(){
   }
   html+='</div>'; document.getElementById('cirCal').innerHTML=html;
 }
+/* Modal con TODAS las cirugías de un día (desde el chip "Ver más" de la vista de mes). */
+function cirDiaLabel(ds){ const d=cirParse(ds); return DOW[(d.getDay()+6)%7]+' '+d.getDate()+' de '+MESES[d.getMonth()]; }
+function openCirDia(ds){
+  const items=(cirByDay()[ds]||[]).slice().sort((a,b)=>String(a.hora_inicio||'').localeCompare(String(b.hora_inicio||'')));
+  document.getElementById('cirDiaTitle').textContent='Cirugías · '+cirDiaLabel(ds)+' ('+items.length+')';
+  let html='<div class="sem-day" style="border:0">';
+  if(!items.length) html+='<div class="sem-empty">Sin cirugías.</div>';
+  else items.forEach(c=>{ html+=`<div class="srow" onclick="closeCirDia();openCirDet(${c.id})"><span class="hora">${esc((c.hora_inicio||'').slice(0,5)||'—')}</span><span class="cir-pill ${esc(c.estado)}">${esc(c.estado)}</span><span>${esc(c.cirugia||'Cirugía')} · ${esc(c.paciente||'')} · ${esc(c.cirujano||'')}</span></div>`; });
+  html+='</div>';
+  document.getElementById('cirDiaBody').innerHTML=html;
+  document.getElementById('cirDiaModal').classList.remove('hidden');
+}
+function closeCirDia(){ document.getElementById('cirDiaModal').classList.add('hidden'); }
 function openCirForm(id, presetDate){
   CIR_EDIT=id||null;
   document.getElementById('cirModalTitle').textContent=id?'Editar cirugía':'Programar cirugía';
