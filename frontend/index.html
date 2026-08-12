@@ -1594,14 +1594,26 @@ function renderTrabajos(){
         return `<td><span class="link-cell" onclick="verHoja(${r.hoja_id})" title="Abrir la hoja de consumo relacionada">${esc(txt)}</span></td>`;
       }
       if(c.k==='id_proceso'){
-        // Sin ícono de copiar cuando el proceso es "Pedido Pendiente".
+        // Pedido Pendiente: en vez del ícono de copiar, un ícono que lleva a la pantalla
+        // de Pedido Pendiente (filtrada por la hoja). Otros procesos: ícono de copiar.
         const esPP = String(r.proceso||'').trim().toLowerCase()==='pedido pendiente';
-        return `<td style="white-space:nowrap">${esc(r.id_proceso)} ${esPP?'':copyIcon(r.id_proceso,'IdProceso')}</td>`;
+        const extra = esPP
+          ? `<button class="icon-btn" title="Ir a Pedido Pendiente" onclick="irAPedidoPendiente(${attr(JSON.stringify(String(r.consecutivo==null?'':r.consecutivo)))})" style="padding:2px 6px;margin-left:6px">📦</button>`
+          : copyIcon(r.id_proceso,'IdProceso');
+        return `<td style="white-space:nowrap">${esc(r.id_proceso)} ${extra}</td>`;
       }
       return `<td>${esc(r[c.k])}</td>`;
     }).join('');
     const tr=document.createElement('tr'); tr.innerHTML=tds; b.appendChild(tr);
   });
+}
+// Desde el Histórico (proceso "Pedido Pendiente"): abre la pantalla de Pedido Pendiente
+// filtrada por el Consecutivo de la hoja relacionada.
+function irAPedidoPendiente(consecutivo){
+  PED_COLF = {};
+  const c=String(consecutivo==null?'':consecutivo).trim();
+  if(c) PED_COLF.consecutivo = c;
+  showPedidos();
 }
 
 /* ===== REEMPLAZOS / CORRECCIONES (Bodega / Administrador) ===== */
