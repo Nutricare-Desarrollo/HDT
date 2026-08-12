@@ -1049,17 +1049,18 @@ app.http('pedido-envios-guardar', {
     const client = await getClient();
     try {
       await client.query('BEGIN');
-      const p = await client.query(`SELECT CantidadTotal AS total FROM dbo.PedidoPendiente WHERE Id=$1 FOR UPDATE`, [id]);
+      const p = await client.query(`SELECT ReposicionAnaquel AS tope FROM dbo.PedidoPendiente WHERE Id=$1 FOR UPDATE`, [id]);
       if (!p.rows.length) { await client.query('ROLLBACK'); return json(404, { error: 'Pedido no encontrado' }); }
-      const total = p.rows[0].total;
-      // Lo ya 'Procesado' no se puede editar y sigue contando contra el total.
+      // El máximo a enviar es la Reposición al anaquel (no la Cantidad total consumida).
+      const tope = Number(p.rows[0].tope) || 0;
+      // Lo ya 'Procesado' no se puede editar y sigue contando contra el tope.
       const proc = await client.query(
         `SELECT COALESCE(SUM(CantidadEnviada),0) AS s FROM dbo.PedidoPendienteEnvio WHERE PedidoPendienteId=$1 AND Estado='Procesado'`, [id]);
       const yaProcesado = Number(proc.rows[0].s) || 0;
       const sumaPendientes = limpias.reduce((a, x) => a + x.cantidad, 0);
-      if (yaProcesado + sumaPendientes > total) {
+      if (yaProcesado + sumaPendientes > tope) {
         await client.query('ROLLBACK');
-        return json(400, { error: `El total a enviar (${yaProcesado + sumaPendientes}) supera la cantidad del pedido (${total}).` });
+        return json(400, { error: `El total a enviar (${yaProcesado + sumaPendientes}) supera la reposición del pedido (${tope}).` });
       }
 
       // Reemplaza el conjunto Pendiente.

@@ -1789,11 +1789,12 @@ function envUsados(exclIdx){
   return PED_ENVIOS.reduce((a,e,i)=> (i===exclIdx) ? a
     : a + ((e.estado==='Pendiente'||e.estado==='Procesado') ? (parseInt(e.cantidad,10)||0) : 0), 0);
 }
-function envDisponible(exclIdx){ return (CUR_PED?(CUR_PED.cantidad_total||0):0) - envUsados(exclIdx); }
+// El máximo a enviar es la Reposición al anaquel (no la Cantidad total consumida).
+function envDisponible(exclIdx){ return (CUR_PED?(CUR_PED.reposicion_anaquel||0):0) - envUsados(exclIdx); }
 function actualizarDisp(){
   const el=document.getElementById('envDisp'); if(!el||!CUR_PED) return;
   const disp=envDisponible(null);
-  el.textContent=`Disponible por enviar: ${disp} de ${CUR_PED.cantidad_total||0}.`;
+  el.textContent=`Disponible por enviar: ${disp} de ${CUR_PED.reposicion_anaquel||0}.`;
   const addBtn=document.getElementById('pedAddBtn');
   if(addBtn){ const sin=disp<=0; addBtn.disabled=sin; addBtn.title=sin?'No queda cantidad disponible por enviar':''; }
   // "Crear trabajo en Dynamics": habilitado solo si hay al menos una línea Pendiente en el grid.
@@ -1825,6 +1826,7 @@ function abrirEnvioModal(e){
   document.getElementById('envioInfo').innerHTML=
      `<div class="k">Producto</div><div>${esc(CUR_PED.id_producto)} — ${esc(CUR_PED.descripcion)}</div>`
     +`<div class="k">Cantidad total</div><div>${esc(CUR_PED.cantidad_total)}</div>`
+    +`<div class="k">Reposición (máx. a enviar)</div><div>${esc(CUR_PED.reposicion_anaquel)}</div>`
     +`<div class="k">Disponible por enviar</div><div><b>${disp}</b></div>`;
   const inpC=document.getElementById('envioCant'); inpC.value=e?e.cantidad:''; inpC.max=disp;
   const inpL=document.getElementById('envioLote'); inpL.value=e?(e.lote||''):'';
