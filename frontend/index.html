@@ -2248,7 +2248,7 @@ function closeImg(){ document.getElementById('imgModal').classList.add('hidden')
 
 /* ===== CIRUGÍAS (calendario) — Hospital / Administrador ===== */
 let CIR_VIEW='mes', CIR_REF=null, CIR_ROWS=[], CIR_EDIT=null, CUR_CIR=null;
-const CIR_MAX_DIA=5; // cirugías visibles por día en la vista de mes (el resto va en "Ver más")
+const CIR_MAX_DIA=5; // cirugías visibles por día en las vistas de mes y semana (el resto va en "Ver más")
 const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const DOW=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
 const CIR_FORM=[
@@ -2314,9 +2314,13 @@ function renderSemana(){
   for(let d=0;d<7;d++){
     const ds=cirFmt(cur);
     const items=(byDay[ds]||[]).slice().sort((a,b)=>String(a.hora_inicio||'').localeCompare(String(b.hora_inicio||'')));
-    html+=`<div class="sem-day"><h4>${DOW[d]} ${cur.getDate()} de ${MESES[cur.getMonth()]}${ds===hoy?' · hoy':''} <button class="btn-ghost" style="float:right;padding:2px 8px;font-size:12px" onclick="openCirForm(null,'${ds}')">＋</button></h4>`;
+    const cnt=items.length?` (${items.length})`:'';
+    html+=`<div class="sem-day"><h4>${DOW[d]} ${cur.getDate()} de ${MESES[cur.getMonth()]}${cnt}${ds===hoy?' · hoy':''} <button class="btn-ghost" style="float:right;padding:2px 8px;font-size:12px" onclick="openCirForm(null,'${ds}')">＋</button></h4>`;
     if(!items.length) html+='<div class="sem-empty">Sin cirugías.</div>';
-    else items.forEach(c=>{ html+=`<div class="srow" onclick="openCirDet(${c.id})"><span class="hora">${esc((c.hora_inicio||'').slice(0,5)||'—')}</span><span class="cir-pill ${esc(c.estado)}">${esc(c.estado)}</span><span>${esc(c.cirugia||'Cirugía')} · ${esc(c.paciente||'')} · ${esc(c.cirujano||'')}</span></div>`; });
+    else {
+      items.slice(0,CIR_MAX_DIA).forEach(c=>{ html+=`<div class="srow" onclick="openCirDet(${c.id})"><span class="hora">${esc((c.hora_inicio||'').slice(0,5)||'—')}</span><span class="cir-pill ${esc(c.estado)}">${esc(c.estado)}</span><span>${esc(c.cirugia||'Cirugía')} · ${esc(c.paciente||'')} · ${esc(c.cirujano||'')}</span></div>`; });
+      if(items.length>CIR_MAX_DIA) html+=`<div class="srow" style="justify-content:center;cursor:pointer" onclick="openCirDia('${ds}')"><span class="mes-mas">Ver más (${items.length-CIR_MAX_DIA})</span></div>`;
+    }
     html+='</div>'; cur.setDate(cur.getDate()+1);
   }
   html+='</div>'; document.getElementById('cirCal').innerHTML=html;
