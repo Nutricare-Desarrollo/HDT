@@ -1593,6 +1593,11 @@ function renderTrabajos(){
         const txt=(r.id_hoja_consumo!=null && r.id_hoja_consumo!=='')?r.id_hoja_consumo:(r.consecutivo!=null?r.consecutivo:'');
         return `<td><span class="link-cell" onclick="verHoja(${r.hoja_id})" title="Abrir la hoja de consumo relacionada">${esc(txt)}</span></td>`;
       }
+      if(c.k==='id_proceso'){
+        // Sin ícono de copiar cuando el proceso es "Pedido Pendiente".
+        const esPP = String(r.proceso||'').trim().toLowerCase()==='pedido pendiente';
+        return `<td style="white-space:nowrap">${esc(r.id_proceso)} ${esPP?'':copyIcon(r.id_proceso,'IdProceso')}</td>`;
+      }
       return `<td>${esc(r[c.k])}</td>`;
     }).join('');
     const tr=document.createElement('tr'); tr.innerHTML=tds; b.appendChild(tr);
@@ -1780,7 +1785,7 @@ function renderEnviosGrid(){
         +`<td>${esc(e.cantidad)}</td>`
         +`<td>${esc(e.lote||'')}</td>`
         +`<td>${estadoBadge(e.estado)}</td>`
-        +`<td>${esc(e.numero_tr||'')}</td>`
+        +`<td style="white-space:nowrap">${esc(e.numero_tr||'')} ${copyIcon(e.numero_tr,'TR')}</td>`
         +`<td style="white-space:nowrap">${acc}</td>`
         +'</tr>';
     }).join('');
@@ -1945,6 +1950,18 @@ function copiarCodigo(){
 function fallbackCopy(t,ok){
   try{ const ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); ok&&ok(); }
   catch(e){ toast('No se pudo copiar el código'); }
+}
+// Copia genérica de un valor arbitrario (para íconos 📋 en celdas de grids).
+function copiarValor(texto, etiqueta){
+  const t=String(texto==null?'':texto);
+  const ok=()=>toast((etiqueta||'Valor')+' copiado');
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(t).then(ok).catch(()=>fallbackCopy(t,ok)); }
+  else fallbackCopy(t,ok);
+}
+// Devuelve el botón 📋 para copiar 'texto'; cadena vacía si no hay valor (no se dibuja el ícono).
+function copyIcon(texto, etiqueta){
+  const t=String(texto==null?'':texto); if(!t) return '';
+  return `<button class="icon-btn" title="Copiar ${etiqueta||''}" onclick="copiarValor(${attr(JSON.stringify(t))},'${etiqueta||''}')" style="padding:2px 6px;margin-left:6px">📋</button>`;
 }
 
 function verImagenGuardada(){ if(CUR_VER&&CUR_VER.imagen_base64) openImg(`data:${CUR_VER.imagen_tipo||'image/jpeg'};base64,${CUR_VER.imagen_base64}`); }
