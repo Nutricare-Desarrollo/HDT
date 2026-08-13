@@ -358,7 +358,7 @@ app.http('hojas-list', {
         where = 'WHERE ' + conds.join(' AND ');
       }
       const r = await query(
-        `SELECT h.Id AS id, h.NumeroHoja AS numero_hoja, h.NumeroDocumento AS numero_documento,
+        `SELECT h.Id AS id, h.Consecutivo AS consecutivo, h.NumeroHoja AS numero_hoja, h.NumeroDocumento AS numero_documento,
                 h.Regimen AS regimen, h.Cirujano AS cirujano, h.Instrumentista AS instrumentista,
                 h.Diagnostico AS diagnostico, h.Estado AS estado, h.CreadoPor AS usuario,
                 h.CreadoPorEmail AS usuario_email,
@@ -1054,10 +1054,10 @@ app.http('pedido-envios-guardar', {
     const client = await getClient();
     try {
       await client.query('BEGIN');
-      const p = await client.query(`SELECT ReposicionAnaquel AS tope FROM dbo.PedidoPendiente WHERE Id=$1 FOR UPDATE`, [id]);
+      const p = await client.query(`SELECT CantidadTotal AS cantidad_total, ReposicionAnaquel AS reposicion FROM dbo.PedidoPendiente WHERE Id=$1 FOR UPDATE`, [id]);
       if (!p.rows.length) { await client.query('ROLLBACK'); return json(404, { error: 'Pedido no encontrado' }); }
-      // El máximo a enviar es la Reposición al anaquel (no la Cantidad total consumida).
-      const tope = Number(p.rows[0].tope) || 0;
+      // El máximo a enviar es lo consumido menos lo que ya repone el anaquel: CantidadTotal - ReposicionAnaquel.
+      const tope = Math.max(0, (Number(p.rows[0].cantidad_total) || 0) - (Number(p.rows[0].reposicion) || 0));
       // Lo ya 'Procesado' no se puede editar y sigue contando contra el tope.
       const proc = await client.query(
         `SELECT COALESCE(SUM(CantidadEnviada),0) AS s FROM dbo.PedidoPendienteEnvio WHERE PedidoPendienteId=$1 AND Estado='Procesado'`, [id]);
@@ -1065,7 +1065,7 @@ app.http('pedido-envios-guardar', {
       const sumaPendientes = limpias.reduce((a, x) => a + x.cantidad, 0);
       if (yaProcesado + sumaPendientes > tope) {
         await client.query('ROLLBACK');
-        return json(400, { error: `El total a enviar (${yaProcesado + sumaPendientes}) supera la reposición del pedido (${tope}).` });
+        return json(400, { error: `El total a enviar (${yaProcesado + sumaPendientes}) supera el máximo por enviar del pedido (${tope}).` });
       }
 
       // Reemplaza el conjunto Pendiente.

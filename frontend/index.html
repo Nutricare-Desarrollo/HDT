@@ -622,7 +622,7 @@ const BODEGA_DET_COLS = [
 ];
 const BODEGA_DET_REQ = [{k:'codigo'},{k:'numero_equipo'},{k:'und'},{k:'reposicion_anaquel'}];
 const GRID_COLS = [
-  {k:'id',l:'ID',link:true},
+  {k:'consecutivo',l:'Consecutivo',link:true},
   {k:'fecha',l:'Fecha y hora'},{k:'usuario',l:'Usuario'},{k:'numero_hoja',l:'N°',tag:true},
   {k:'regimen',l:'Régimen'},{k:'cirujano',l:'Cirujano',clip:true},{k:'instrumentista',l:'Instrumentista'},
   {k:'diagnostico',l:'Diagnóstico'},{k:'cantidad_lineas',l:'Artículos'},{k:'estado',l:'Estado',estado:true}
@@ -1143,7 +1143,7 @@ function renderGrid(){
   if(!rows.length){ b.innerHTML=`<tr><td colspan="${GRID_COLS.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
   rows.forEach(r=>{
     const tds=GRID_COLS.map(c=>{
-      if(c.link) return `<td><span class="link-cell" onclick="verHoja(${r.id})" title="Abrir la hoja de consumo">${esc(r[c.k])}</span></td>`;
+      if(c.link){ const txt=(r[c.k]!=null&&r[c.k]!=='')?r[c.k]:r.id; return `<td><span class="link-cell" onclick="verHoja(${r.id})" title="Abrir la hoja de consumo">${esc(txt)}</span></td>`; }
       if(c.estado) return `<td>${estadoBadge(r.estado)}</td>`;
       if(c.tag) return `<td><span class="tag">${esc(r[c.k])}</span></td>`;
       if(c.k==='diagnostico') return celdaDiag(r[c.k]);
@@ -1846,8 +1846,7 @@ function renderPedProducto(p){
     ['Código', `${esc(p.id_producto)} <button class="icon-btn" title="Copiar código" onclick="copiarCodigo()" style="padding:2px 8px;margin-left:6px">📋 Copiar</button>`],
     ['Descripción', esc(p.descripcion)],
     ['Cantidad', esc(p.cantidad_total)],
-    ['Reposición', esc(p.reposicion_anaquel)],
-    ['Estado', esc(p.estado)]
+    ['Reposición', esc(p.reposicion_anaquel)]
   ];
   let html='<div class="section-title" style="margin-top:0">Producto</div><div class="kv">';
   campos.forEach(([k,v])=>{ html+=`<div class="k">${k}</div><div>${v}</div>`; });
@@ -1894,12 +1893,13 @@ function envUsados(exclIdx){
   return PED_ENVIOS.reduce((a,e,i)=> (i===exclIdx) ? a
     : a + ((e.estado==='Pendiente'||e.estado==='Procesado') ? (parseInt(e.cantidad,10)||0) : 0), 0);
 }
-// El máximo a enviar es la Reposición al anaquel (no la Cantidad total consumida).
-function envDisponible(exclIdx){ return (CUR_PED?(CUR_PED.reposicion_anaquel||0):0) - envUsados(exclIdx); }
+// El máximo a enviar es lo consumido menos lo que repone el anaquel: Cantidad total - Reposición.
+function envTope(){ return CUR_PED ? Math.max(0,(CUR_PED.cantidad_total||0)-(CUR_PED.reposicion_anaquel||0)) : 0; }
+function envDisponible(exclIdx){ return envTope() - envUsados(exclIdx); }
 function actualizarDisp(){
   const el=document.getElementById('envDisp'); if(!el||!CUR_PED) return;
   const disp=envDisponible(null);
-  el.textContent=`Disponible por enviar: ${disp} de ${CUR_PED.reposicion_anaquel||0}.`;
+  el.textContent=`Disponible por enviar: ${disp} de ${envTope()}.`;
   const addBtn=document.getElementById('pedAddBtn');
   if(addBtn){ const sin=disp<=0; addBtn.disabled=sin; addBtn.title=sin?'No queda cantidad disponible por enviar':''; }
   // "Crear trabajo en Dynamics": habilitado solo si hay al menos una línea Pendiente en el grid.
@@ -1931,7 +1931,8 @@ function abrirEnvioModal(e){
   document.getElementById('envioInfo').innerHTML=
      `<div class="k">Producto</div><div>${esc(CUR_PED.id_producto)} — ${esc(CUR_PED.descripcion)}</div>`
     +`<div class="k">Cantidad total</div><div>${esc(CUR_PED.cantidad_total)}</div>`
-    +`<div class="k">Reposición (máx. a enviar)</div><div>${esc(CUR_PED.reposicion_anaquel)}</div>`
+    +`<div class="k">Reposición al anaquel</div><div>${esc(CUR_PED.reposicion_anaquel)}</div>`
+    +`<div class="k">Máximo a enviar</div><div>${esc(envTope())}</div>`
     +`<div class="k">Disponible por enviar</div><div><b>${disp}</b></div>`;
   const inpC=document.getElementById('envioCant'); inpC.value=e?e.cantidad:''; inpC.max=disp;
   const inpL=document.getElementById('envioLote'); inpL.value=e?(e.lote||''):'';
