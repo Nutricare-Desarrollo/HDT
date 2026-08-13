@@ -89,6 +89,9 @@ main{max-width:1200px;width:100%;margin:0 auto;padding:18px 14px 40px}
 .btn-dyn:hover{background:#652f8c}
 .btn-dyn:disabled{opacity:.5;cursor:not-allowed}
 .link-cell{color:var(--brand);font-weight:700;cursor:pointer;text-decoration:underline}
+.usr-rol{background:#fff;color:var(--txt);border:1px solid var(--line);padding:7px 30px 7px 10px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%236b7d8a'><path d='M7 10l5 5 5-5z'/></svg>");background-repeat:no-repeat;background-position:right 10px center}
+.usr-rol:hover{border-color:var(--brand)}
+.usr-lock{color:var(--muted);font-size:12px;font-weight:600;margin-left:6px}
 .progress-track{height:10px;border-radius:6px;background:#eee;overflow:hidden;margin:14px 0 6px}
 .progress-bar{height:100%;width:35%;background:#7a3ea8;border-radius:6px;animation:indet 1.3s ease-in-out infinite}
 @keyframes indet{0%{margin-left:-35%}100%{margin-left:100%}}
@@ -396,6 +399,19 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       </div>
     </section>
 
+    <!-- USUARIOS Y ROLES (solo Administrador) -->
+    <section id="viewUsuarios" class="hidden">
+      <div class="page-head">
+        <div><h2>Usuarios y roles</h2><div class="sub" id="usrSub">Asigná el rol de cada usuario registrado</div></div>
+        <button class="btn-ghost" onclick="loadUsuarios()">🔄 Actualizar</button>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap"><table id="usrGrid"><thead id="usrHead"></thead><tbody id="usrBody"></tbody></table></div>
+        <div id="usrEmpty" class="empty hidden"><div class="big">👥</div><div>No hay usuarios registrados.</div></div>
+        <div class="grid-foot" id="usrFoot"></div>
+      </div>
+    </section>
+
     <!-- HISTÓRICO DE TRABAJOS EN DYNAMICS (solo Bodega / Administrador) -->
     <section id="viewTrabajos" class="hidden">
       <div class="page-head">
@@ -606,6 +622,7 @@ const BODEGA_DET_COLS = [
 ];
 const BODEGA_DET_REQ = [{k:'codigo'},{k:'numero_equipo'},{k:'und'},{k:'reposicion_anaquel'}];
 const GRID_COLS = [
+  {k:'id',l:'ID',link:true},
   {k:'fecha',l:'Fecha y hora'},{k:'usuario',l:'Usuario'},{k:'numero_hoja',l:'N°',tag:true},
   {k:'regimen',l:'Régimen'},{k:'cirujano',l:'Cirujano',clip:true},{k:'instrumentista',l:'Instrumentista'},
   {k:'diagnostico',l:'Diagnóstico'},{k:'cantidad_lineas',l:'Artículos'},{k:'estado',l:'Estado',estado:true}
@@ -1000,6 +1017,8 @@ function buildNav(){
   if(canBodega()) items.push({id:'reemplazos',ic:'🔁',l:'Reemplazos / Correcciones',fn:showReemplazos});
   if(canBodega()) items.push({id:'trabajos',ic:'🧾',l:'Histórico Dynamics',fn:showTrabajos});
   if(canBodega()) items.push({id:'config',ic:'⚙️',l:'Configuración',fn:showConfig});
+  // Usuarios y roles: solo Administrador (se oculta al simular otro rol).
+  if(ROL==='Administrador') items.push({id:'usuarios',ic:'👥',l:'Usuarios y roles',fn:showUsuarios});
   items.forEach(it=>{
     const b=document.createElement('button'); b.id='tab-'+it.id; b.className='nav-item';
     b.innerHTML='<span class="ic">'+it.ic+'</span><span>'+it.l+'</span>';
@@ -1010,7 +1029,7 @@ function buildNav(){
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('ovl').classList.toggle('show'); }
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('ovl').classList.remove('show'); }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias'];
+const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
 
 /* ===== INICIO ===== */
@@ -1124,6 +1143,7 @@ function renderGrid(){
   if(!rows.length){ b.innerHTML=`<tr><td colspan="${GRID_COLS.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
   rows.forEach(r=>{
     const tds=GRID_COLS.map(c=>{
+      if(c.link) return `<td><span class="link-cell" onclick="verHoja(${r.id})" title="Abrir la hoja de consumo">${esc(r[c.k])}</span></td>`;
       if(c.estado) return `<td>${estadoBadge(r.estado)}</td>`;
       if(c.tag) return `<td><span class="tag">${esc(r[c.k])}</span></td>`;
       if(c.k==='diagnostico') return celdaDiag(r[c.k]);
@@ -1152,6 +1172,70 @@ function celdaDiag(v){
 }
 function estadoBadge(e){ const v=e||'Enviado'; const cls=v.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s/g,''); return `<span class="badge b-${cls}">${esc(v)}</span>`; }
 
+/* ===== USUARIOS Y ROLES (solo Administrador) ===== */
+let USR_ROWS=[], USR_COLF={};
+const USR_COLS=[{k:'email',l:'Correo'},{k:'nombre',l:'Nombre'},{k:'rol',l:'Rol'},{k:'ultimo_acceso',l:'Último acceso'}];
+async function showUsuarios(){
+  if(ROL!=='Administrador'){ toast('Solo el Administrador puede gestionar usuarios'); showInicio(); return; }
+  setTab('usuarios'); showOnly('viewUsuarios');
+  await loadUsuarios();
+}
+async function loadUsuarios(){
+  try{ USR_ROWS=await api('GET','/usuarios'); }
+  catch(e){ USR_ROWS=[]; toast('Error al cargar usuarios: '+e.message); }
+  renderUsuarios();
+}
+function usrFiltered(){
+  return USR_ROWS.filter(r=> Object.keys(USR_COLF).every(k=>{
+    const f=(USR_COLF[k]||'').trim().toLowerCase(); if(!f) return true;
+    return String(r[k]==null?'':r[k]).toLowerCase().includes(f);
+  }));
+}
+function onUsrFilter(k,v){ USR_COLF[k]=v; renderUsuarios(); }
+function renderUsuarios(){
+  const head=document.getElementById('usrHead');
+  head.innerHTML=`<tr>${USR_COLS.map(c=>`<th>${c.l}</th>`).join('')}</tr>`
+    +`<tr class="filter-row">${USR_COLS.map(c=> c.k==='rol'?'<th></th>':`<th><input placeholder="Filtrar…" oninput="onUsrFilter('${c.k}',this.value)" value="${attr(USR_COLF[c.k])}"></th>`).join('')}</tr>`;
+  const rows=usrFiltered();
+  const b=document.getElementById('usrBody'); b.innerHTML='';
+  document.getElementById('usrEmpty').classList.toggle('hidden', USR_ROWS.length>0);
+  document.getElementById('usrGrid').classList.toggle('hidden', USR_ROWS.length===0);
+  const foot=document.getElementById('usrFoot');
+  if(!USR_ROWS.length){ foot.textContent=''; return; }
+  foot.textContent = rows.length===1?'1 usuario':(rows.length+' usuarios');
+  if(!rows.length){ b.innerHTML=`<tr><td colspan="${USR_COLS.length}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  rows.forEach(r=>{
+    let rolCell;
+    if(r.protegido){
+      // Usuario protegido: rol de solo lectura (también bloqueado en el backend).
+      rolCell=`<td>🔒 <b>${esc(r.rol)}</b><span class="usr-lock">(protegido)</span></td>`;
+    }else{
+      const opts=ROLES.map(x=>`<option value="${esc(x)}"${x===r.rol?' selected':''}>${esc(x)}</option>`).join('');
+      rolCell=`<td><select class="usr-rol" data-prev="${attr(r.rol)}" onchange="cambiarRol('${encodeURIComponent(r.email)}',this.value,this)">${opts}</select></td>`;
+    }
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${esc(r.email)}</td><td>${esc(r.nombre)}</td>${rolCell}<td>${esc(r.ultimo_acceso)}</td>`;
+    b.appendChild(tr);
+  });
+}
+async function cambiarRol(emailEnc, rol, sel){
+  const email=decodeURIComponent(emailEnc);
+  const prev=sel.getAttribute('data-prev')||rol;
+  if(rol===prev) return;
+  sel.disabled=true;
+  try{
+    await api('PUT','/usuarios/'+emailEnc, {rol});
+    sel.setAttribute('data-prev', rol);
+    const row=USR_ROWS.find(u=>u.email===email); if(row) row.rol=rol; // refleja el cambio en el estado local
+    toast('Rol actualizado: '+email+' → '+rol);
+  }catch(e){
+    sel.value=prev;               // revierte el selector al valor previo
+    toast('No se pudo cambiar el rol: '+e.message);
+  }finally{
+    sel.disabled=false;
+  }
+}
+
 /* ===== PENDIENTES DE REPOSICIÓN (Hospital / Administrador) ===== */
 let PEND_ROWS=[], PEND_COLF={};
 async function showPendientes(){
@@ -1172,8 +1256,8 @@ function pendFiltered(){
 }
 function onPendFilter(k,v){ PEND_COLF[k]=v; renderPendientes(); }
 function renderPendientes(){
-  // Mismas columnas que el grid principal, sin la de Estado (todas están 'Pendiente reposición').
-  const cols=GRID_COLS.filter(c=>!c.estado);
+  // Mismas columnas que el grid principal, sin la de Estado (todas están 'Pendiente reposición') ni la de ID (link).
+  const cols=GRID_COLS.filter(c=>!c.estado && !c.link);
   const head=document.getElementById('pendHead');
   head.innerHTML=`<tr>${cols.map(c=>`<th>${c.l}</th>`).join('')}<th></th></tr>`
     +`<tr class="filter-row">${cols.map(c=>`<th><input placeholder="Filtrar…" oninput="onPendFilter('${c.k}',this.value)" value="${attr(PEND_COLF[c.k])}"></th>`).join('')}<th></th></tr>`;

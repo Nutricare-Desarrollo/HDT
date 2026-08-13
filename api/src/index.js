@@ -44,6 +44,10 @@ function getUser(request) {
 
 const ROLES = ['Hospital', 'Bodega', 'Administrador'];
 
+// Usuarios cuyo rol NO se puede cambiar (protegidos). Comparación en minúsculas.
+const EMAILS_PROTEGIDOS = new Set(['desarrollo@nutricare.co.cr']);
+const esProtegido = (email) => EMAILS_PROTEGIDOS.has(String(email || '').trim().toLowerCase());
+
 // Registra/actualiza al usuario y devuelve su rol. Un usuario nuevo entra como 'Hospital'.
 async function ensureUserRole(user) {
   if (!user || !user.email) return 'Hospital';
@@ -1228,7 +1232,9 @@ app.http('usuarios-list', {
                 to_char(u.UltimoAcceso,'YYYY-MM-DD HH24:MI') AS ultimo_acceso
          FROM dbo.UsuarioRol u JOIN cat.Rol rol ON rol.Id=u.RolId
          ORDER BY u.UltimoAcceso DESC NULLS LAST, u.Email`);
-      return json(200, r.rows);
+      // Marca los usuarios protegidos para que el frontend bloquee el cambio de rol.
+      const rows = r.rows.map(x => ({ ...x, protegido: esProtegido(x.email) }));
+      return json(200, rows);
     } catch (e) { context.error(e); return json(500, { error: 'Error al listar usuarios', detail: e.message }); }
   }
 });
@@ -1240,6 +1246,8 @@ app.http('usuario-set-rol', {
     try {
       if ((await getRole(user)) !== 'Administrador') return json(403, { error: 'Solo Administrador' });
       const email = decodeURIComponent(request.params.email).trim().toLowerCase();
+      // Usuario protegido: su rol no se puede cambiar (defensa en profundidad, además del bloqueo en el frontend).
+      if (esProtegido(email)) return json(403, { error: 'Este usuario está protegido: su rol no se puede cambiar.' });
       const body = await request.json();
       const rol = (body.rol || '').trim();
       if (!ROLES.includes(rol)) return json(400, { error: 'Rol inválido' });
