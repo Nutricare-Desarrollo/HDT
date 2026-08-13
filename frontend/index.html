@@ -1845,7 +1845,7 @@ function renderPedProducto(p){
     ['Bandeja', esc(p.ubicacion)],
     ['Código', `${esc(p.id_producto)} <button class="icon-btn" title="Copiar código" onclick="copiarCodigo()" style="padding:2px 8px;margin-left:6px">📋 Copiar</button>`],
     ['Descripción', esc(p.descripcion)],
-    ['Reposición', esc(p.reposicion_anaquel)]
+    ['Disponible por enviar', '<b><span id="envDisp"></span></b>']
   ];
   let html='<div class="section-title" style="margin-top:0">Producto</div><div class="kv">';
   campos.forEach(([k,v])=>{ html+=`<div class="k">${k}</div><div>${v}</div>`; });
@@ -1856,7 +1856,6 @@ function renderPedProducto(p){
   html+='<div class="tbl-wrap"><table id="envGrid"><thead><tr>'
       +'<th>Usuario</th><th>Fecha y hora</th><th>Cantidad</th><th>Lote</th><th>Estado</th><th>TR</th><th></th>'
       +'</tr></thead><tbody id="envBody"></tbody></table></div>';
-  html+='<p id="envDisp" style="color:var(--muted);font-size:13px;margin:8px 0 0"></p>';
   html+='<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">'
       +'<button class="btn-primary" onclick="guardarPedido()">💾 Guardar</button>'
       +'<button class="btn-ghost" onclick="cancelarPedido()">✖ Cancelar</button>'
@@ -1898,7 +1897,7 @@ function envDisponible(exclIdx){ return envTope() - envUsados(exclIdx); }
 function actualizarDisp(){
   const el=document.getElementById('envDisp'); if(!el||!CUR_PED) return;
   const disp=envDisponible(null);
-  el.textContent=`Disponible por enviar: ${disp} de ${envTope()}.`;
+  el.textContent=`${disp} de ${envTope()}`;
   const addBtn=document.getElementById('pedAddBtn');
   if(addBtn){ const sin=disp<=0; addBtn.disabled=sin; addBtn.title=sin?'No queda cantidad disponible por enviar':''; }
   // "Crear trabajo en Dynamics": habilitado solo si hay al menos una línea Pendiente en el grid.
