@@ -375,7 +375,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
     <!-- CONFIGURACIÓN (solo Bodega / Administrador) -->
     <section id="viewConfig" class="hidden">
       <div class="page-head">
-        <div><h2>Configuración</h2><div class="sub">Ubicaciones de origen y destino por área</div></div>
+        <div><h2>Configuración</h2><div class="sub">Ubicaciones por área y numeración de documentos</div></div>
       </div>
       <div class="cfg-panels">
         <div class="card pad">
@@ -397,6 +397,21 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
           <div class="cfg-grid">
             <div class="field"><label>Origen <span class="req">*</span></label><input id="cfg_facturacion_origen" type="text" autocomplete="off"></div>
             <div class="field"><label>Destino <span class="req">*</span></label><input id="cfg_facturacion_destino" type="text" autocomplete="off"></div>
+          </div>
+        </div>
+        <div class="card pad">
+          <div class="section-title" style="margin-top:0">Consecutivo Hojas de consumo</div>
+          <div class="cfg-grid">
+            <div class="field">
+              <label>Prefijo <span class="req">*</span></label>
+              <input id="cfg_consecutivo_prefijo" type="text" maxlength="20" autocomplete="off"
+                     placeholder="Solo letras y n&uacute;meros" oninput="cfgSoloAlfanum(this)">
+            </div>
+            <div class="field">
+              <label>Consecutivo <span class="req">*</span></label>
+              <input id="cfg_consecutivo_consecutivo" type="text" maxlength="18" autocomplete="off"
+                     inputmode="numeric" placeholder="Solo n&uacute;meros" oninput="cfgSoloDigitos(this)">
+            </div>
           </div>
         </div>
       </div>
@@ -1185,6 +1200,11 @@ async function showConfig(){
   setTab('config'); showOnly('viewConfig');
   await loadConfig();
 }
+// Filtros de tecleo del panel Consecutivo: descartan lo que no corresponde
+// sin mover el cursor al final cuando el texto no cambia.
+function cfgSoloAlfanum(el){ const v=el.value.replace(/[^A-Za-z0-9]/g,''); if(v!==el.value) el.value=v; }
+function cfgSoloDigitos(el){ const v=el.value.replace(/\D/g,''); if(v!==el.value) el.value=v; }
+
 async function loadConfig(){
   try{
     const cfg=await api('GET','/configuracion');
@@ -1193,6 +1213,11 @@ async function loadConfig(){
       if(o) o.value=(cfg[a]&&cfg[a].origen)||'';
       if(d) d.value=(cfg[a]&&cfg[a].destino)||'';
     });
+    const c=cfg.consecutivo||{};
+    const p=document.getElementById('cfg_consecutivo_prefijo');
+    const n=document.getElementById('cfg_consecutivo_consecutivo');
+    if(p) p.value=c.prefijo||'';
+    if(n) n.value=(c.consecutivo!=null?String(c.consecutivo):'');
   }catch(e){ toast('No se pudo cargar la configuración: '+e.message); }
 }
 const CFG_LABELS={anaquel:'Anaquel',nutricare:'Nutricare',facturacion:'Facturación'};
@@ -1205,6 +1230,10 @@ async function guardarConfig(){
       destino:(document.getElementById('cfg_'+a+'_destino').value||'').trim()
     };
   });
+  cfg.consecutivo={
+    prefijo:(document.getElementById('cfg_consecutivo_prefijo').value||'').trim(),
+    consecutivo:(document.getElementById('cfg_consecutivo_consecutivo').value||'').trim()
+  };
 
   // Todos los campos son requeridos.
   document.querySelectorAll('#viewConfig .invalid').forEach(el=>el.classList.remove('invalid'));
@@ -1217,7 +1246,23 @@ async function guardarConfig(){
       }
     });
   });
+  // Panel Consecutivo: requeridos + formato.
+  [['prefijo','Prefijo'],['consecutivo','Consecutivo']].forEach(([k,l])=>{
+    if(!cfg.consecutivo[k]){
+      faltan.push(l);
+      const el=document.getElementById('cfg_consecutivo_'+k); if(el) el.classList.add('invalid');
+    }
+  });
   if(faltan.length){ toast('Complete todos los campos: '+faltan.join(', ')+'.'); return; }
+
+  if(!/^[A-Za-z0-9]+$/.test(cfg.consecutivo.prefijo)){
+    document.getElementById('cfg_consecutivo_prefijo').classList.add('invalid');
+    toast('El prefijo solo admite letras y números, sin espacios ni símbolos.'); return;
+  }
+  if(!/^\d+$/.test(cfg.consecutivo.consecutivo)){
+    document.getElementById('cfg_consecutivo_consecutivo').classList.add('invalid');
+    toast('El consecutivo solo admite números enteros.'); return;
+  }
 
   const btn=document.getElementById('cfgSaveBtn'); btn.disabled=true; btn.textContent='Guardando…';
   try{
@@ -2215,6 +2260,18 @@ function abrirImagenNuevaPestana(){
   setTimeout(()=>URL.revokeObjectURL(url), 60000);
 }
 
+/* ===== Consecutivo del N° de hoja (PREFIJO-NUMERO) ===== */
+/* Pide al servidor el siguiente consecutivo. Si falla (o no hay configuración),
+   devuelve '' y el campo queda vacío para que el usuario lo escriba. */
+async function siguienteNumeroHoja(){
+  try{ const r=await api('GET','/consecutivo/siguiente'); return (r&&r.numero)||''; }
+  catch(e){ return ''; }
+}
+/* Por si el usuario avanza antes de que llegue la respuesta del arranque. */
+async function asegurarNumeroSugerido(){
+  if(!WIZ.editId && !WIZ.numeroSugerido) WIZ.numeroSugerido = await siguienteNumeroHoja();
+}
+
 /* ===== WIZARD ===== */
 function openWizard(){
   if(!canSubir()){ toast('Su rol no puede subir hojas'); return; }
@@ -2235,6 +2292,7 @@ function openWizard(){
   document.getElementById('prevWrap').innerHTML='';
   document.getElementById('analizarBtn').disabled=true;
   setStep(1);
+  siguienteNumeroHoja().then(n=>{ WIZ.numeroSugerido=n; });   // listo para el paso 2
 }
 /* Crear hoja manualmente: va directo al formulario (encabezado + detalle), sin foto. */
 async function openManual(){
@@ -2250,6 +2308,7 @@ async function openManual(){
   document.getElementById('wizStep2').classList.remove('hidden');
   document.getElementById('enviarBtn').classList.add('hidden');    // en creación solo se Guarda
   document.getElementById('guardarBtn').classList.remove('hidden');
+  WIZ.numeroSugerido = await siguienteNumeroHoja();
   fillStep2({}, []);                 // render inmediato (encabezado vacío + 1 línea)
   // El catálogo se carga al entrar al sitio (init) o con el botón "Cargar productos".
 }
@@ -2289,6 +2348,7 @@ async function openReemplazo(id){
     document.getElementById('wizStep2').classList.remove('hidden');
     document.getElementById('enviarBtn').classList.remove('hidden');  // el reemplazo se corrige y se envía
     document.getElementById('guardarBtn').classList.remove('hidden');
+    WIZ.numeroSugerido = await siguienteNumeroHoja();   // el reemplazo es una hoja nueva: consecutivo propio
     fillStep2(h, h.detalle||[]);
   }catch(e){ toast('No se pudo crear el reemplazo: '+e.message); }
 }
@@ -2317,6 +2377,7 @@ async function analizar(){
     // Solo se conservan las líneas leídas que traen Código; las vacías (p. ej. de un
     // sello o texto suelto en la foto) se descartan para no ensuciar el detalle.
     const detLeido=(out.detalle||[]).filter(d=> String((d&&d.codigo!=null)?d.codigo:'').trim()!=='');
+    await asegurarNumeroSugerido();
     fillStep2(mergeEnc(out.encabezado||{}, WIZ.prefillEnc), detLeido);
     document.getElementById('wizStep1').classList.add('hidden');
     document.getElementById('wizStep2').classList.remove('hidden');
@@ -2328,6 +2389,9 @@ function showLoading(){ document.getElementById('loadModal').classList.remove('h
 function hideLoading(){ document.getElementById('loadModal').classList.add('hidden'); }
 function mergeEnc(base, over){ const o=Object.assign({}, base||{}); if(over) Object.keys(over).forEach(k=>{ if(over[k]!=null && over[k]!=='') o[k]=over[k]; }); return o; }
 function fillStep2(enc, det){
+  // Al CREAR (no al completar una pendiente), el N° de hoja se prellena con el
+  // consecutivo sugerido. El usuario lo puede cambiar; al guardar se valida.
+  if(!WIZ.editId && WIZ.numeroSugerido) enc=Object.assign({}, enc||{}, {numero_hoja:WIZ.numeroSugerido});
   const c=document.getElementById('encFields'); c.innerHTML='';
   ENC.forEach(f=>{
     const w=document.createElement('div'); w.className='field'+(f.full?' full':'');
@@ -2645,6 +2709,7 @@ function crearHojaDeCirugia(){
   closeCirDet();
   // Igual que "Subir hoja": permite foto (OCR) o ingreso sin foto; el encabezado viene precargado de la cirugía.
   WIZ={dataUrl:'',base64:'',tipo:'',detalle:[],manual:false,editId:null,esReemplazo:false,origenId:null,cirugiaId:c.id,prefillEnc:cirEnc(c)};
+  siguienteNumeroHoja().then(n=>{ WIZ.numeroSugerido=n; });
   showOnly('viewWizard'); setTab('cirugias');
   document.getElementById('wizTitle').textContent='Crear hoja de consumo (cirugía)';
   document.getElementById('wizSub').textContent=(c.paciente||'')+' · '+(c.cirugia||'');
@@ -2662,7 +2727,8 @@ function crearHojaDeCirugia(){
   setStep(1);
 }
 /* Salta el paso de la foto: va al detalle manual con el encabezado precargado. */
-function continuarSinFoto(){
+async function continuarSinFoto(){
+  await asegurarNumeroSugerido();
   fillStep2(WIZ.prefillEnc||{}, []);
   document.getElementById('wizStep1').classList.add('hidden');
   document.getElementById('wizStep2').classList.remove('hidden');

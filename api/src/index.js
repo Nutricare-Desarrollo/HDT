@@ -335,6 +335,95 @@ function equipoConPrefijo(v) {
 }
 
 /* Crear hoja (encabezado + detalle + imagen base64). Estado inicial = 'Enviado'. */
+/* ============================================================
+   Consecutivo del N° de hoja (PREFIJO-NUMERO)
+   ============================================================ */
+
+// Clave de comparación: mismo criterio que el índice único de la base.
+const numeroHojaKey = (v) => String(v == null ? '' : v).trim().toUpperCase();
+
+// Lee el prefijo y el último consecutivo usado de la pantalla Configuración.
+async function getConfigConsecutivo() {
+  const r = await query(
+    `SELECT Prefijo AS prefijo, Consecutivo AS consecutivo FROM dbo.ConfiguracionConsecutivo WHERE Id = 1`);
+  if (!r.rows.length) return { prefijo: '', ultimo: 0 };
+  return {
+    prefijo: (r.rows[0].prefijo || '').trim(),
+    ultimo: r.rows[0].consecutivo != null ? Number(r.rows[0].consecutivo) : 0
+  };
+}
+
+// Arma el texto del consecutivo. Sin prefijo configurado, va solo el número.
+const armarNumero = (prefijo, n) => (prefijo ? (prefijo + '-' + n) : String(n));
+
+/* Extrae la parte numérica de un N° de hoja para guardarla como "último usado".
+   Devuelve null si el usuario escribió algo que no termina en número. */
+function parteNumerica(numero, prefijo) {
+  let resto = String(numero == null ? '' : numero).trim();
+  if (!resto) return null;
+  if (prefijo) {
+    const esc = prefijo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    resto = resto.replace(new RegExp('^' + esc + '\\s*-?\\s*', 'i'), '');
+  }
+  return /^\d+$/.test(resto) ? resto : null;
+}
+
+/* ¿Ese N° de hoja ya está usado? excluirId permite editar una hoja sin chocar
+   consigo misma. */
+async function numeroHojaEnUso(numero, excluirId) {
+  const key = numeroHojaKey(numero);
+  if (!key) return false;
+  const r = excluirId
+    ? await query(`SELECT 1 FROM dbo.HojaConsumo WHERE UPPER(TRIM(NumeroHoja)) = $1 AND Id <> $2 LIMIT 1`, [key, excluirId])
+    : await query(`SELECT 1 FROM dbo.HojaConsumo WHERE UPPER(TRIM(NumeroHoja)) = $1 LIMIT 1`, [key]);
+  return r.rows.length > 0;
+}
+
+/* Guarda el consecutivo recién usado como "último usado" en Configuración.
+   Best-effort: si falla, no tumba el guardado de la hoja. */
+async function actualizarUltimoConsecutivo(numero, prefijo, user, context) {
+  try {
+    const n = parteNumerica(numero, prefijo);
+    if (n === null) return;   // el usuario escribió un número libre, no numérico
+    await query(
+      `INSERT INTO dbo.ConfiguracionConsecutivo (Id, Consecutivo, ModificadoPor, FechaModificacion)
+       VALUES (1,$1,$2,(now() at time zone 'utc'))
+       ON CONFLICT (Id) DO UPDATE
+          SET Consecutivo=EXCLUDED.Consecutivo, ModificadoPor=EXCLUDED.ModificadoPor,
+              FechaModificacion=EXCLUDED.FechaModificacion`,
+      [n, (user && (user.name || user.email)) || null]);
+  } catch (e) {
+    if (context) context.warn('No se pudo actualizar el ultimo consecutivo: ' + e.message);
+  }
+}
+
+/* GET /api/consecutivo/siguiente -> { numero, prefijo, ultimo }
+   Ruta propia (no 'hojas/...') para que no compita con GET /api/hojas/{id}.
+   Sugiere el último usado + 1, y sigue subiendo mientras ese número ya exista
+   (por si alguien escribió uno a mano más adelante). */
+app.http('hoja-siguiente-numero', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'consecutivo/siguiente',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeSubir(await getRole(user))) return json(403, { error: 'No tiene permiso para crear hojas' });
+    try {
+      const { prefijo, ultimo } = await getConfigConsecutivo();
+      let n = (Number.isFinite(ultimo) ? ultimo : 0) + 1;
+      if (n < 1) n = 1;
+      // Salta los que ya estén ocupados (tope defensivo por si algo se descuadra).
+      for (let i = 0; i < 500; i++) {
+        if (!(await numeroHojaEnUso(armarNumero(prefijo, n)))) break;
+        n++;
+      }
+      return json(200, { numero: armarNumero(prefijo, n), prefijo, ultimo });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo calcular el siguiente consecutivo', detail: e.message });
+    }
+  }
+});
+
 app.http('hoja-create', {
   methods: ['POST'], authLevel: 'anonymous', route: 'hojas',
   handler: async (request, context) => {
@@ -350,6 +439,11 @@ app.http('hoja-create', {
     const mapa = await mapaCatalogo(context);
     const invalidos = codigosInvalidos(detalle, mapa);
     if (invalidos.length) return json(400, { error: 'Hay códigos que no existen en el catálogo: ' + invalidos.join(', ') });
+
+    // El N° de hoja es el consecutivo del documento: no se puede repetir.
+    const numHoja = String((enc.numero_hoja == null ? '' : enc.numero_hoja)).trim();
+    if (numHoja && await numeroHojaEnUso(numHoja))
+      return json(400, { error: 'El consecutivo ' + numHoja + ' ya existe. Cambie el N\u00b0 de hoja.' });
 
     // Una cirugía admite una sola hoja "real"; los reemplazos sí se permiten.
     const cirugiaIdChk = parseInt(body.cirugia_id, 10);
@@ -397,9 +491,15 @@ app.http('hoja-create', {
             descNutricare(mapa, d), toInt(d.und), toInt(d.reposicion_anaquel)]);
       }
       await client.query('COMMIT');
+      // El consecutivo recién usado pasa a ser el "último usado" de Configuración.
+      const cfgCons = await getConfigConsecutivo();
+      await actualizarUltimoConsecutivo(numHoja, cfgCons.prefijo, user, context);
       return json(201, { ok: true, id });
     } catch (e) {
       await client.query('ROLLBACK').catch(() => {});
+      // Carrera entre dos usuarios: el índice único de la base es la última barrera.
+      if (e.code === '23505' && String(e.constraint || '').toLowerCase().indexOf('numerohoja') >= 0)
+        return json(400, { error: 'El consecutivo ' + numHoja + ' ya existe. Cambie el N\u00b0 de hoja.' });
       context.error(e);
       return json(500, { error: 'No se pudo guardar la hoja de consumo', detail: e.message });
     } finally {
@@ -508,6 +608,11 @@ app.http('hoja-update', {
     let nuevoEstado = null;
     if (esPendiente && (body.estado === 'Pendiente reposición' || body.estado === 'Enviado')) nuevoEstado = body.estado;
 
+    // El N° de hoja es el consecutivo: no puede chocar con OTRA hoja.
+    const numHojaUp = String((enc.numero_hoja == null ? '' : enc.numero_hoja)).trim();
+    if (numHojaUp && await numeroHojaEnUso(numHojaUp, id))
+      return json(400, { error: 'El consecutivo ' + numHojaUp + ' ya existe. Cambie el N\u00b0 de hoja.' });
+
     // Validación de códigos contra el catálogo (no bloquea si el catálogo no responde).
     const mapa = await mapaCatalogo(context);
     const invalidos = codigosInvalidos(detalle, mapa);
@@ -544,9 +649,14 @@ app.http('hoja-update', {
             (d.numero_lote === undefined || d.numero_lote === '') ? null : d.numero_lote]);
       }
       await client.query('COMMIT');
+      // Si el usuario corrigió el consecutivo, ese pasa a ser el "último usado".
+      const cfgConsUp = await getConfigConsecutivo();
+      await actualizarUltimoConsecutivo(numHojaUp, cfgConsUp.prefijo, user, context);
       return json(200, { ok: true, id });
     } catch (e) {
       await client.query('ROLLBACK').catch(() => {});
+      if (e.code === '23505' && String(e.constraint || '').toLowerCase().indexOf('numerohoja') >= 0)
+        return json(400, { error: 'El consecutivo ' + numHojaUp + ' ya existe. Cambie el N\u00b0 de hoja.' });
       context.error(e);
       return json(500, { error: 'No se pudo actualizar la hoja de consumo', detail: e.message });
     } finally {
@@ -874,6 +984,12 @@ app.http('config-get', {
       const out = {};
       CONFIG_AREAS.forEach(a => { out[a] = { origen: '', destino: '' }; });
       r.rows.forEach(x => { if (out[x.area]) out[x.area] = { origen: x.origen || '', destino: x.destino || '' }; });
+      // Panel Prefijo / Consecutivo (fila única).
+      const c = await query(
+        `SELECT Prefijo AS prefijo, Consecutivo AS consecutivo FROM dbo.ConfiguracionConsecutivo WHERE Id = 1`);
+      out.consecutivo = c.rows.length
+        ? { prefijo: c.rows[0].prefijo || '', consecutivo: (c.rows[0].consecutivo != null ? String(c.rows[0].consecutivo) : '') }
+        : { prefijo: '', consecutivo: '' };
       return json(200, out);
     } catch (e) { context.error(e); return json(500, { error: 'Error al obtener la configuración', detail: e.message }); }
   }
@@ -890,6 +1006,20 @@ app.http('config-save', {
     const body = await request.json();
     const norm = v => (v === undefined || v === null || String(v).trim() === '') ? null : String(v).trim();
 
+    // Panel Prefijo / Consecutivo: prefijo alfanumérico, consecutivo solo dígitos.
+    const cons = body.consecutivo || {};
+    const prefijo = norm(cons.prefijo);
+    const consecStr = norm(cons.consecutivo);
+    if (prefijo !== null && !/^[A-Za-z0-9]+$/.test(prefijo))
+      return json(400, { error: 'El prefijo solo admite letras y n\u00fameros, sin espacios ni s\u00edmbolos' });
+    if (prefijo !== null && prefijo.length > 20)
+      return json(400, { error: 'El prefijo no puede superar los 20 caracteres' });
+    if (consecStr !== null && !/^\d+$/.test(consecStr))
+      return json(400, { error: 'El consecutivo solo admite n\u00fameros enteros' });
+    if (consecStr !== null && consecStr.length > 18)
+      return json(400, { error: 'El consecutivo es demasiado grande' });
+    const consecutivo = (consecStr === null) ? null : consecStr;
+
     const client = await getClient();
     try {
       await client.query('BEGIN');
@@ -903,6 +1033,13 @@ app.http('config-save', {
                   ModificadoPor=EXCLUDED.ModificadoPor, FechaModificacion=EXCLUDED.FechaModificacion`,
           [a, norm(area.origen), norm(area.destino), user.name || user.email]);
       }
+      await client.query(
+        `INSERT INTO dbo.ConfiguracionConsecutivo (Id, Prefijo, Consecutivo, ModificadoPor, FechaModificacion)
+         VALUES (1,$1,$2,$3,(now() at time zone 'utc'))
+         ON CONFLICT (Id) DO UPDATE
+            SET Prefijo=EXCLUDED.Prefijo, Consecutivo=EXCLUDED.Consecutivo,
+                ModificadoPor=EXCLUDED.ModificadoPor, FechaModificacion=EXCLUDED.FechaModificacion`,
+        [prefijo, consecutivo, user.name || user.email]);
       await client.query('COMMIT');
       return json(200, { ok: true });
     } catch (e) {
