@@ -142,6 +142,10 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .cfg-panels{display:flex;flex-direction:column;gap:16px}
 .cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .field.full{grid-column:1/-1}
+.field-row{display:flex;gap:8px;align-items:center}
+.field-row select{flex:1;min-width:0}
+.btn-add{flex:0 0 auto;width:43px;height:43px;padding:0;border-radius:8px;background:var(--accent);color:#fff;font-size:22px;font-weight:400;line-height:1;display:flex;align-items:center;justify-content:center}
+.btn-add:hover{background:#0e8b99}
 .kv{display:grid;grid-template-columns:180px 1fr;gap:6px 14px;font-size:14px}
 .kv .k{color:var(--muted)}
 .pad{padding:18px}
@@ -542,6 +546,26 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
 </div>
 
 <!-- MODAL de confirmación genérico -->
+<!-- MODAL agregar / editar cirujano -->
+<div id="cirujModal" class="overlay hidden">
+  <div class="modal sm">
+    <div class="modal-head"><h3 id="cirujTitle">Agregar cirujano</h3><button class="x" onclick="closeCiruj()">&times;</button></div>
+    <div class="modal-body">
+      <div class="field full">
+        <label>Nombre del cirujano <span class="req">*</span></label>
+        <input id="cirujNombre" type="text" maxlength="200" placeholder="Ej. Dr. Juan P&eacute;rez">
+      </div>
+      <p id="cirujHint" style="margin:10px 0 0;font-size:12.5px;color:var(--muted)"></p>
+      <p id="cirujErr" style="margin:8px 0 0;font-size:13px;color:var(--danger)"></p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="cirujNuevoBtn" onclick="cirujModoNuevo()" style="margin-right:auto">&#43; Agregar uno nuevo</button>
+      <button class="btn-ghost" onclick="closeCiruj()">Cancelar</button>
+      <button class="btn-primary" id="cirujOkBtn" onclick="guardarCirujano()">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <div id="confirmModal" class="overlay hidden">
   <div class="modal sm">
     <div class="modal-head"><h3 id="confirmTitle">Confirmar</h3><button class="x" onclick="closeConfirm()">×</button></div>
@@ -604,7 +628,7 @@ const ENC = [
   {k:'numero_hoja',l:'N° de hoja',req:true},{k:'numero_documento',l:'N° de documento'},{k:'regimen',l:'Régimen',req:true},
   {k:'paciente',l:'Paciente'},{k:'identificacion',l:'Identificación'},{k:'tipo',l:'Tipo'},
   {k:'fecha_accidente',l:'Fecha de accidente',t:'date'},{k:'fecha_cirugia',l:'Fecha de cirugía',t:'date'},{k:'fecha_hoja',l:'Fecha de la hoja',t:'date',req:true},
-  {k:'cirujano',l:'Cirujano',req:true},{k:'instrumentista',l:'Instrumentista',req:true},
+  {k:'cirujano',l:'Cirujano',req:true,cat:'cirujano'},{k:'instrumentista',l:'Instrumentista',req:true},
   {k:'diagnostico',l:'Diagnóstico',full:true,area:true,req:true},{k:'procedimiento',l:'Procedimiento',full:true,area:true}
 ];
 // Columnas para Hospital: la "Descripción" es SIEMPRE la del catálogo (por código),
@@ -697,6 +721,93 @@ function loteSearch(codigo, q, limit){
   const res=[];
   for(const l of arr){ if(!qt || l.toLowerCase().indexOf(qt)>=0){ res.push(l); if(res.length>=limit) break; } }
   return res;
+}
+
+/* ===== Catálogo de cirujanos (lista desplegable del encabezado) ===== */
+let CIRUJANOS=[];               // [{id, nombre}] activos, ordenados por nombre
+let CIRUJ_CTX=null;             // id del <select> que abrió el modal ('enc_cirujano' / 'ver_cirujano')
+let CIRUJ_EDIT=null;            // id del cirujano en edición; null = agregar nuevo
+
+async function loadCirujanos(){
+  try{ CIRUJANOS = await api('GET','/cirujanos') || []; }
+  catch(e){ CIRUJANOS = []; }
+}
+// <option>s del select. 'val' es el valor actual: si no está en el catálogo
+// (p. ej. viene del OCR), se agrega como opción para no perderlo.
+function cirujOptions(val){
+  const v = String(val==null?'':val).trim();
+  const enCat = CIRUJANOS.some(c=>c.nombre.toLowerCase()===v.toLowerCase());
+  let html = `<option value="">— Seleccione —</option>`;
+  if(v && !enCat) html += `<option value="${attr(v)}" selected>${esc(v)} (sin registrar)</option>`;
+  CIRUJANOS.forEach(c=>{
+    const sel = (c.nombre.toLowerCase()===v.toLowerCase()) ? ' selected' : '';
+    html += `<option value="${attr(c.nombre)}"${sel}>${esc(c.nombre)}</option>`;
+  });
+  return html;
+}
+// Campo completo: <select> + botón "+" para agregar/editar.
+function cirujField(idSel, val){
+  return `<div class="field-row"><select id="${idSel}">${cirujOptions(val)}</select>`
+       + `<button type="button" class="btn-add" title="Agregar o editar cirujano" onclick="openCiruj('${idSel}')">+</button></div>`;
+}
+// Refresca las opciones de un select conservando (o fijando) el valor elegido.
+function cirujRefresh(idSel, val){
+  const el=document.getElementById(idSel); if(!el) return;
+  const v = (val!=null) ? val : el.value;
+  el.innerHTML = cirujOptions(v);
+  el.value = v || '';
+}
+
+/* Modal: agregar un cirujano nuevo o corregir el nombre del que está seleccionado. */
+function openCiruj(idSel){
+  CIRUJ_CTX = idSel;
+  const el = document.getElementById(idSel);
+  const actual = el ? String(el.value||'').trim() : '';
+  const cat = CIRUJANOS.find(c=>c.nombre.toLowerCase()===actual.toLowerCase());
+  if(cat) cirujModoEditar(cat); else cirujModoNuevo(actual);
+  document.getElementById('cirujErr').textContent='';
+  document.getElementById('cirujModal').classList.remove('hidden');
+  setTimeout(()=>{ const i=document.getElementById('cirujNombre'); if(i){ i.focus(); i.select(); } },50);
+}
+function cirujModoNuevo(nombre){
+  CIRUJ_EDIT=null;
+  document.getElementById('cirujTitle').textContent='Agregar cirujano';
+  document.getElementById('cirujNombre').value = (typeof nombre==='string') ? nombre : '';
+  document.getElementById('cirujOkBtn').textContent='Agregar';
+  document.getElementById('cirujNuevoBtn').classList.add('hidden');
+  document.getElementById('cirujHint').textContent='Se agregará al catálogo y quedará seleccionado en la hoja.';
+  document.getElementById('cirujErr').textContent='';
+  const i=document.getElementById('cirujNombre'); if(i) i.focus();
+}
+function cirujModoEditar(cat){
+  CIRUJ_EDIT=cat.id;
+  document.getElementById('cirujTitle').textContent='Editar cirujano';
+  document.getElementById('cirujNombre').value=cat.nombre;
+  document.getElementById('cirujOkBtn').textContent='Guardar cambios';
+  document.getElementById('cirujNuevoBtn').classList.remove('hidden');
+  document.getElementById('cirujHint').textContent='Corregir el nombre no cambia las hojas de consumo ya creadas.';
+}
+function closeCiruj(){
+  document.getElementById('cirujModal').classList.add('hidden');
+  CIRUJ_CTX=null; CIRUJ_EDIT=null;
+}
+async function guardarCirujano(){
+  const nombre=String(document.getElementById('cirujNombre').value||'').replace(/\s+/g,' ').trim();
+  const err=document.getElementById('cirujErr');
+  if(!nombre){ err.textContent='Escriba el nombre del cirujano.'; return; }
+  const btn=document.getElementById('cirujOkBtn'); const txt=btn.textContent;
+  btn.disabled=true; btn.textContent='Guardando…'; err.textContent='';
+  try{
+    const editando = !!CIRUJ_EDIT;
+    const r = editando ? await api('PUT','/cirujanos/'+CIRUJ_EDIT,{nombre})
+                       : await api('POST','/cirujanos',{nombre});
+    const ctx=CIRUJ_CTX;
+    await loadCirujanos();
+    closeCiruj();
+    if(ctx) cirujRefresh(ctx, (r&&r.nombre)||nombre);
+    toast(editando?'Cirujano actualizado':'Cirujano agregado');
+  }catch(e){ err.textContent=e.message; }
+  finally{ btn.disabled=false; btn.textContent=txt; }
 }
 
 /* ===== Catálogo de equipos (Anexo #2) para validar "N° equipo" ===== */
@@ -975,6 +1086,7 @@ async function init(){
     loadCatalogo(); // catálogo de productos en segundo plano
     loadLotes();    // catálogo de lotes por producto en segundo plano
     loadEquipos();  // catálogo de equipos (Anexo #2) en segundo plano
+    loadCirujanos(); // catálogo de cirujanos (lista del encabezado) en segundo plano
     loadEquipoProd(); // relación equipo<->producto en segundo plano
     acInit();       // buscador de código / lote (autocompletado)
     buildNav();
@@ -2222,6 +2334,7 @@ function fillStep2(enc, det){
     const val=enc[f.k]!=null?enc[f.k]:'';
     const lbl=`${f.l}${f.req?' <span class="req">*</span>':''}`;
     if(f.area) w.innerHTML=`<label>${lbl}</label><textarea id="enc_${f.k}" rows="2">${attr(val)}</textarea>`;
+    else if(f.cat==='cirujano') w.innerHTML=`<label>${lbl}</label>`+cirujField('enc_'+f.k, val);
     else w.innerHTML=`<label>${lbl}</label><input id="enc_${f.k}" type="${f.t||'text'}" value="${attr(val)}">`;
     c.appendChild(w);
   });

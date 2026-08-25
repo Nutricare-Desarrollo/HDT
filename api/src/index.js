@@ -157,6 +157,83 @@ app.http('lotes-list', {
 /* ============================================================
    /api/equipos  -> catálogo de equipos (Anexo #2) para validar "N° equipo"
    ============================================================ */
+/* ============================================================
+   Catálogo de cirujanos (lista desplegable del encabezado)
+   ============================================================ */
+
+// Normaliza el nombre: colapsa espacios y recorta. Vacío -> ''.
+const normNombre = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+
+/* GET /api/cirujanos -> lista de cirujanos activos (cualquier usuario autenticado). */
+app.http('cirujanos-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'cirujanos',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    try {
+      const r = await query(
+        `SELECT Id AS id, Nombre AS nombre FROM cat.Cirujano WHERE Activo = TRUE ORDER BY Nombre`);
+      return json(200, r.rows);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener el cat\u00e1logo de cirujanos', detail: e.message });
+    }
+  }
+});
+
+/* POST /api/cirujanos -> agrega un cirujano (Hospital/Administrador). Body: { nombre } */
+app.http('cirujano-create', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'cirujanos',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeSubir(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el cat\u00e1logo de cirujanos' });
+    const body = await request.json();
+    const nombre = normNombre(body && body.nombre);
+    if (!nombre) return json(400, { error: 'El nombre del cirujano es obligatorio' });
+    if (nombre.length > 200) return json(400, { error: 'El nombre no puede superar los 200 caracteres' });
+    try {
+      const r = await query(
+        `INSERT INTO cat.Cirujano (Nombre, CreadoPor) VALUES ($1, $2) RETURNING Id AS id, Nombre AS nombre`,
+        [nombre, user.name || user.email]);
+      return json(201, r.rows[0]);
+    } catch (e) {
+      if (e.code === '23505') return json(400, { error: 'Ese cirujano ya existe en el cat\u00e1logo' });
+      context.error(e);
+      return json(500, { error: 'No se pudo agregar el cirujano', detail: e.message });
+    }
+  }
+});
+
+/* PUT /api/cirujanos/{id} -> corrige el nombre (Hospital/Administrador). Body: { nombre }
+   No modifica las hojas ya creadas: ahí el nombre queda como se guardó. */
+app.http('cirujano-update', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'cirujanos/{id}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeSubir(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el cat\u00e1logo de cirujanos' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inv\u00e1lido' });
+    const body = await request.json();
+    const nombre = normNombre(body && body.nombre);
+    if (!nombre) return json(400, { error: 'El nombre del cirujano es obligatorio' });
+    if (nombre.length > 200) return json(400, { error: 'El nombre no puede superar los 200 caracteres' });
+    try {
+      const r = await query(
+        `UPDATE cat.Cirujano SET Nombre=$1, ActualizadoPor=$2, FechaActualizacion=(now() at time zone 'utc')
+          WHERE Id=$3 AND Activo = TRUE RETURNING Id AS id, Nombre AS nombre`,
+        [nombre, user.name || user.email, id]);
+      if (!r.rowCount) return json(404, { error: 'El cirujano no existe' });
+      return json(200, r.rows[0]);
+    } catch (e) {
+      if (e.code === '23505') return json(400, { error: 'Ya hay otro cirujano con ese nombre' });
+      context.error(e);
+      return json(500, { error: 'No se pudo actualizar el cirujano', detail: e.message });
+    }
+  }
+});
+
 app.http('equipos-list', {
   methods: ['GET'], authLevel: 'anonymous', route: 'equipos',
   handler: async (request, context) => {
