@@ -111,6 +111,8 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .grid-foot{padding:11px 14px;color:var(--muted);font-size:13px;font-weight:600;text-align:right}
 .icon-btn{padding:7px 12px;border-radius:7px;background:#e8f4fb;color:var(--brand);font-size:13px}
 .icon-btn:hover{background:#d3ebf8}
+.icon-btn.danger{background:#fbeae8;color:var(--danger)}
+.icon-btn.danger:hover{background:#f6d8d4}
 
 .badge{padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:700;white-space:nowrap;display:inline-block}
 .b-Enviado{background:#e3f0fb;color:#0a5c8a}
@@ -1272,9 +1274,27 @@ function renderPendientes(){
   rows.forEach(r=>{
     const tds=cols.map(c=> c.tag?`<td><span class="tag">${esc(r[c.k])}</span></td>`:(c.k==='diagnostico'?celdaDiag(r[c.k]):`<td>${esc(r[c.k])}</td>`)).join('');
     const tr=document.createElement('tr');
-    tr.innerHTML=tds+`<td><button class="icon-btn" onclick="openEditarPendiente(${r.id})">✎ Completar y enviar</button></td>`;
+    tr.innerHTML=tds+`<td style="white-space:nowrap">`
+      +`<button class="icon-btn" onclick="openEditarPendiente(${r.id})">✎ Completar y enviar</button> `
+      +`<button class="icon-btn danger" onclick="eliminarPendiente(${r.id})">🗑 Eliminar</button></td>`;
     b.appendChild(tr);
   });
+}
+
+/* Eliminar una hoja pendiente de reposición (con confirmación). */
+function eliminarPendiente(id){
+  const r=(PEND_ROWS||[]).find(x=>x.id===id);
+  const ref=r&&r.numero_hoja?('N° '+r.numero_hoja):('ID '+id);
+  askConfirm('Eliminar hoja de consumo',
+    'Se eliminará la hoja '+ref+' y todo su detalle. Esta acción no se puede deshacer.',
+    'Sí, eliminar',
+    async function(){
+      try{
+        await api('DELETE','/hojas/'+id);
+        toast('Hoja eliminada');
+        await loadPendientes();
+      }catch(e){ toast('No se pudo eliminar: '+e.message); }
+    });
 }
 
 /* ===== VER — solo lectura (Hospital) / editable (Bodega, Administrador) ===== */

@@ -478,6 +478,42 @@ app.http('hoja-update', {
   }
 });
 
+/* Eliminar una hoja en estado 'Pendiente reposición' (Hospital/Administrador).
+   Solo se permite en ese estado: una hoja ya enviada no se borra.
+   El detalle cae por ON DELETE CASCADE. */
+app.http('hoja-delete', {
+  methods: ['DELETE'], authLevel: 'anonymous', route: 'hojas/{id}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const rol = await getRole(user);
+    if (!puedeSubir(rol)) return json(403, { error: 'No tiene permiso para eliminar hojas' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inv\u00e1lido' });
+    try {
+      const cur = await query(
+        `SELECT Estado AS estado, CreadoPorEmail AS email FROM dbo.HojaConsumo WHERE Id=$1`, [id]);
+      if (!cur.rows.length) return json(404, { error: 'La hoja no existe' });
+      if (cur.rows[0].estado !== 'Pendiente reposici\u00f3n')
+        return json(400, { error: 'Solo se pueden eliminar hojas pendientes de reposici\u00f3n' });
+      // Hospital elimina solo las suyas; Administrador puede eliminar cualquiera.
+      if (rol !== 'Administrador' && String(cur.rows[0].email || '').toLowerCase() !== user.email)
+        return json(403, { error: 'Solo puede eliminar las hojas que usted cre\u00f3' });
+
+      const r = await query(
+        `DELETE FROM dbo.HojaConsumo WHERE Id=$1 AND Estado='Pendiente reposici\u00f3n' RETURNING Id`, [id]);
+      if (!r.rowCount) return json(400, { error: 'La hoja ya no est\u00e1 pendiente de reposici\u00f3n' });
+      return json(200, { ok: true, id });
+    } catch (e) {
+      context.error(e);
+      // FK_HojaConsumo_Origen: otra hoja la referencia como origen del reemplazo.
+      if (e.code === '23503')
+        return json(400, { error: 'No se puede eliminar: otra hoja la referencia como origen.' });
+      return json(500, { error: 'No se pudo eliminar la hoja', detail: e.message });
+    }
+  }
+});
+
 /* Marcar un reemplazo/corrección como 'Resuelto' (Bodega/Administrador). */
 app.http('hoja-resolver', {
   methods: ['POST'], authLevel: 'anonymous', route: 'hojas/{id}/resolver',
