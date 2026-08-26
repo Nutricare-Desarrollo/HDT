@@ -652,6 +652,9 @@ app.http('hoja-get', {
                 Procedimiento AS procedimiento, ImagenBase64 AS imagen_base64, ImagenTipo AS imagen_tipo,
                 Estado AS estado, CreadoPor AS usuario, CreadoPorEmail AS usuario_email,
                 EsReemplazo AS es_reemplazo, HojaOrigenId AS hoja_origen_id, CirugiaId AS cirugia_id,
+                ObservacionResolucion AS observacion_resolucion, ResueltoPor AS resuelto_por,
+                to_char((FechaResolucion AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica',
+                        'YYYY-MM-DD HH24:MI') AS fecha_resolucion,
                 (SELECT o.NumeroHoja FROM dbo.HojaConsumo o WHERE o.Id = HojaConsumo.HojaOrigenId) AS origen_numero_hoja,
                 ${FECHA_LOCAL} AS fecha, ResultadoTR AS resultado_tr
          FROM dbo.HojaConsumo WHERE Id=$1`, [id]);
@@ -1162,8 +1165,22 @@ app.http('hoja-resolver', {
     if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para resolver reemplazos' });
     const id = parseInt(request.params.id, 10);
     if (!id) return json(400, { error: 'Id inválido' });
+
+    /* La observación es obligatoria. Se valida acá y no solo en la pantalla:
+       resolver es el cierre del reemplazo y sin el motivo escrito el registro
+       no dice nada de por qué se cerró. */
+    const body = await request.json().catch(() => ({}));
+    const obs = String((body && body.observacion) || '').trim();
+    if (!obs) return json(400, { error: 'Escriba la observación para poder marcar el reemplazo como resuelto' });
+    if (obs.length > 2000) return json(400, { error: 'La observación no puede superar los 2000 caracteres' });
+
     try {
-      const r = await query(`UPDATE dbo.HojaConsumo SET Estado='Resuelto' WHERE Id=$1 AND EsReemplazo=TRUE RETURNING Id`, [id]);
+      const r = await query(
+        `UPDATE dbo.HojaConsumo
+            SET Estado='Resuelto', ObservacionResolucion=$2, ResueltoPor=$3,
+                FechaResolucion=(now() at time zone 'utc')
+          WHERE Id=$1 AND EsReemplazo=TRUE RETURNING Id`,
+        [id, obs, user.name || user.email]);
       if (!r.rowCount) return json(400, { error: 'La hoja no existe o no es un reemplazo/corrección' });
       return json(200, { ok: true });
     } catch (e) { context.error(e); return json(500, { error: 'No se pudo resolver', detail: e.message }); }

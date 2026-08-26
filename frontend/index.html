@@ -1604,9 +1604,26 @@ function renderReemplazoView(h){
   html+='<div class="section-title" style="margin-top:22px">Diferencias con la hoja original</div>';
   html+='<div class="sub" style="margin:-4px 0 10px">Qué cambió respecto de la hoja de la que salió este reemplazo.</div>';
   html+='<div id="difPanel"><div class="empty" style="padding:18px">Cargando…</div></div>';
+
+  /* Observaciones: obligatoria para poder marcar el reemplazo como resuelto.
+     Una vez resuelto se muestra el texto guardado, con quién lo resolvió y
+     cuándo — ya no se edita. */
+  const resuelto = h.estado==='Resuelto';
+  html+='<div class="section-title" style="margin-top:22px">Observaciones'+(resuelto?'':' <span class="req">*</span>')+'</div>';
+  if(resuelto){
+    const pie=[h.resuelto_por, h.fecha_resolucion].filter(Boolean).join(' · ');
+    html+=`<div class="kv" style="grid-template-columns:1fr"><div>${esc(h.observacion_resolucion)}</div></div>`;
+    if(pie) html+=`<div class="sub" style="margin-top:6px">Resuelto por ${esc(pie)}</div>`;
+  }else if(canBodega()){
+    html+=`<div class="field full"><textarea id="reemObs" rows="3" maxlength="2000" placeholder="Indique qué se hizo con este reemplazo / corrección."></textarea>
+      <p class="hidden" id="reemObsErr" style="margin:6px 0 0;font-size:12.5px;color:var(--danger)">Escriba la observación para poder marcar el reemplazo como resuelto.</p></div>`;
+  }else{
+    html+='<div class="sub">Pendiente de resolver por Bodega.</div>';
+  }
+
   html+='<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">';
   html+=`<button class="btn-ghost" onclick="imprimirHoja()">🖨️ Imprimir</button>`;
-  if(canBodega() && h.estado!=='Resuelto'){ html+=`<button class="btn-primary" onclick="resolverReemplazo(${h.id})">✔️ Marcar como resuelto</button>`; }
+  if(canBodega() && !resuelto){ html+=`<button class="btn-primary" onclick="resolverReemplazo(${h.id})">✔️ Marcar como resuelto</button>`; }
   html+='</div>';
   document.getElementById('verBody').innerHTML=html;
   loadDiferencias(h.id);   // en segundo plano
@@ -2298,8 +2315,20 @@ function renderReemplazos(){
 }
 async function resolverReemplazo(id){
   if(!canBodega()){ toast('Su rol no puede resolver'); return; }
+  const ta=document.getElementById('reemObs');
+  const obs=ta?String(ta.value||'').trim():'';
+  const err=document.getElementById('reemObsErr');
+  if(!obs){
+    if(ta) ta.classList.add('invalid');
+    if(err) err.classList.remove('hidden');
+    if(ta) ta.focus();
+    toast('La observación es obligatoria para marcar el reemplazo como resuelto');
+    return;
+  }
+  if(ta) ta.classList.remove('invalid');
+  if(err) err.classList.add('hidden');
   try{
-    await api('POST','/hojas/'+id+'/resolver');
+    await api('POST','/hojas/'+id+'/resolver',{observacion:obs});
     toast('Reemplazo marcado como resuelto');
     showReemplazos();
   }catch(e){ toast('No se pudo resolver: '+e.message); }
