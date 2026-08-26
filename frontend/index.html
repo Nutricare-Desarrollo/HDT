@@ -1661,7 +1661,13 @@ function imprimirDoc(enc, filas){
   let rows='';
   for(let i=0;i<total;i++){
     const r=filas[i]||{};
-    rows+=`<tr><td class="cod">${esc(r.codigo||'')}</td><td class="eq">${esc(r.equipo||'')}</td><td class="ds">${esc(r.desc||'')}</td><td class="un">${esc(r.und===''?'':r.und)}</td><td class="rp">${esc(r.rep===''?'':r.rep)}</td></tr>`;
+    const und=String(r.und==null?'':r.und).trim();
+    const rep=String(r.rep==null?'':r.rep).trim();
+    // REPOSICIÓN ANAQUEL: si la fila trae datos (Und con valor) y la reposición
+    // viene vacía, la celda va EN BLANCO. El guion se reserva para las filas de
+    // relleno, donde sí indica que la línea no tiene nada.
+    const rpTxt = rep!=='' ? esc(rep) : (und!=='' ? '' : esc(''));
+    rows+=`<tr><td class="cod">${esc(r.codigo||'')}</td><td class="eq">${esc(r.equipo||'')}</td><td class="ds">${esc(r.desc||'')}</td><td class="un">${esc(und)}</td><td class="rp">${rpTxt}</td></tr>`;
   }
   const doc=`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Hoja de consumo ${esc(enc.numero_hoja||'')}</title>
 <style>
@@ -2449,6 +2455,20 @@ function fillStep2(enc, det){
   document.getElementById('detHead').innerHTML='<tr>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'<th></th></tr>';
   WIZ.detalle = det.length? det.map(d=>Object.assign({}, d, {numero_equipo:equipoDemarcado(d.numero_equipo)})) : [{}];
   renderDet();
+  syncWizPrintBtn();
+}
+/* El botón Imprimir del wizard se habilita solo cuando la hoja YA está guardada
+   (WIZ.editId con valor). Antes se podía imprimir un borrador que la base nunca
+   vio, así que circulaba una hoja de consumo sin registro detrás. En una hoja
+   nueva queda deshabilitado hasta el primer Guardar; después se imprime desde la
+   hoja abierta (Pendientes de reposición o el listado), que sí existe en la base. */
+function syncWizPrintBtn(){
+  const b=document.getElementById('wizPrintBtn'); if(!b) return;
+  const guardada = !!WIZ.editId;
+  b.disabled = !guardada;
+  b.title = guardada
+    ? 'Imprimir la hoja de consumo'
+    : 'Primero guarde la hoja: solo se puede imprimir una hoja ya registrada.';
 }
 function renderDet(){
   const b=document.getElementById('detBody'); b.innerHTML='';

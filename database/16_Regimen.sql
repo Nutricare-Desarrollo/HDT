@@ -31,33 +31,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS UX_Regimen_Nombre
 CREATE INDEX IF NOT EXISTS IX_Regimen_Activo ON cat.Regimen (Activo, Nombre);
 
 /* ----------------------------------------------------------------------------
-   Siembra: los regímenes que ya aparecen en las hojas de consumo y en las
-   cirugías programadas. Se toma la primera variante de cada valor y se omiten
-   los que ya existan en el catálogo.
+   SIN SIEMBRA — a propósito.
+
+   La versión anterior de este script copiaba al catálogo los regímenes que ya
+   estaban en dbo.HojaConsumo y dbo.Cirugia. En la práctica eso trae la basura
+   del OCR ("1NS", "INS ", "PRIVAD0") y deja la lista desplegable inservible,
+   igual que pasó con cat.Cirujano (ver 13b_LimpiarCirujanos.sql).
+
+   Así que la tabla se crea VACÍA: la lista arranca en «— Seleccione —» y Bodega
+   agrega los regímenes buenos desde la app, con el botón + del campo Régimen.
+   Correr este archivo de nuevo NO reinserta nada.
+
+   Las hojas ya creadas no se ven afectadas: guardan el régimen como texto en
+   dbo.HojaConsumo.Regimen, no el Id del catálogo.
    ---------------------------------------------------------------------------- */
-INSERT INTO cat.Regimen (Nombre, CreadoPor)
-SELECT nombre, 'migracion 16_Regimen.sql'
-FROM (
-    SELECT DISTINCT ON (LOWER(TRIM(nombre))) TRIM(nombre) AS nombre
-    FROM (
-        SELECT Regimen AS nombre FROM dbo.HojaConsumo
-        UNION ALL
-        SELECT Regimen AS nombre FROM dbo.Cirugia
-    ) t
-    WHERE nombre IS NOT NULL AND TRIM(nombre) <> ''
-    ORDER BY LOWER(TRIM(nombre)), TRIM(nombre)
-) s
-WHERE NOT EXISTS (
-    SELECT 1 FROM cat.Regimen c WHERE LOWER(TRIM(c.Nombre)) = LOWER(TRIM(s.nombre))
-);
 
 /* ============================================================================
    FIN. Verificación:
      SELECT COUNT(*) AS regimenes_en_catalogo FROM cat.Regimen;
      SELECT Id, Nombre FROM cat.Regimen ORDER BY Nombre;
 
-   Si la siembra trae basura del OCR (p. ej. "INS " y "1NS"), se limpia con:
-     UPDATE cat.Regimen SET Activo = FALSE WHERE Id = <id>;
-   Desactivar no borra: las hojas que ya usaban ese texto lo conservan.
+   Para vaciar el catálogo si quedó con valores que no sirven:
+     DELETE FROM cat.Regimen;
+   Eso no toca ninguna hoja: el régimen se guarda como texto en la hoja.
    ============================================================================ */
 SELECT COUNT(*) AS regimenes_en_catalogo FROM cat.Regimen;
