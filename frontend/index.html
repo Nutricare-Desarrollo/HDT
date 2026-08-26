@@ -147,6 +147,14 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .btn-add{flex:0 0 auto;width:43px;height:43px;padding:0;border-radius:8px;background:var(--accent);color:#fff;font-size:22px;font-weight:400;line-height:1;display:flex;align-items:center;justify-content:center}
 .btn-add:hover{background:#0e8b99}
 .cat-hint{margin:6px 0 0;font-size:12.5px;line-height:1.4;color:#8c5c05}
+.locked-note{display:flex;gap:10px;align-items:flex-start;background:#f7fafc;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:10px;padding:12px 14px;margin:0 0 16px;font-size:13.5px;line-height:1.5;color:#41525e}
+.locked-note .ic{font-size:18px;line-height:1.2}
+.locked-note b{color:var(--txt)}
+/* Un campo bloqueado tiene que LEERSE como bloqueado, no solo no responder. */
+input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7b;cursor:not-allowed}
+.sell-drop{border:1.5px dashed var(--line);border-radius:10px;padding:14px;background:#f7fafc;margin-bottom:12px}
+.sell-drop .hint{font-size:12.5px;color:var(--muted);margin:8px 0 0;line-height:1.45}
+.sell-thumb{width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:block}
 .kv{display:grid;grid-template-columns:180px 1fr;gap:6px 14px;font-size:14px}
 .kv .k{color:var(--muted)}
 .pad{padding:18px}
@@ -359,6 +367,11 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
           <div class="form-grid" id="encFields"></div>
           <div class="section-title">Detalle <button class="btn-ghost" style="padding:6px 12px;margin-left:8px" onclick="addDetRow()">＋ Agregar línea</button></div>
           <div class="tbl-wrap"><table class="det-table" id="detTable"><thead id="detHead"></thead><tbody id="detBody"></tbody></table></div>
+          <div id="wizSellWrap" class="hidden">
+            <div class="section-title">Fotos de la hoja sellada</div>
+            <div class="sub" style="margin:-4px 0 10px">Respaldo de la hoja física con los sellos del hospital. No se procesan: solo se guardan.</div>
+            <div id="wizSellBody"></div>
+          </div>
         </div>
         <div class="foot">
           <button class="btn-ghost" id="verImgBtn" onclick="verImagenActual()">🖼️ Ver hoja de consumo</button>
@@ -444,6 +457,19 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div class="tbl-wrap"><table id="trGrid"><thead id="trHead"></thead><tbody id="trBody"></tbody></table></div>
         <div id="trEmpty" class="empty hidden"><div class="big">🧾</div><div>Todavía no hay trabajos creados en Dynamics.</div></div>
         <div class="grid-foot" id="trFoot"></div>
+      </div>
+    </section>
+
+    <!-- AUDITORIA DE CAMBIOS — grid (solo Bodega / Administrador) -->
+    <section id="viewAuditoria" class="hidden">
+      <div class="page-head">
+        <div><h2>Auditoría de cambios</h2><div class="sub" id="audSub">Qué cambió en cada hoja de consumo, cuándo y quién lo hizo</div></div>
+        <button class="btn-ghost" onclick="loadAuditoria()">🔄 Actualizar</button>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap"><table id="audGrid"><thead id="audHead"></thead><tbody id="audBody"></tbody></table></div>
+        <div id="audEmpty" class="empty hidden"><div class="big">🕵️</div><div>Todavía no hay cambios registrados.</div></div>
+        <div class="grid-foot" id="audFoot"></div>
       </div>
     </section>
 
@@ -672,6 +698,12 @@ const GRID_COLS = [
 const ESTADOS = ['Enviado','En revisión','Creando TR','Finalizada','Error'];
 const ESTADO_COLOR = {'Enviado':'#0a5c8a','En revisión':'#e08e0b','Creando TR':'#7a3ea8','Finalizada':'#1e8f5a','Error':'#c0392b'};
 const PEND='Pendiente reposición'; // estado de una hoja guardada sin la reposición todavía
+/* Estados en los que la hoja queda bloqueada: ya se dispararon sus trabajos en
+   Dynamics. Tiene que coincidir con ESTADOS_BLOQUEADOS de la API — acá es para
+   que el usuario lo VEA; la regla que manda es la del servidor.
+   'Error' no bloquea: si el envío falló hay que poder corregir y reintentar. */
+const ESTADOS_BLOQUEADOS=['Creando TR','Finalizada'];
+const hojaBloqueada=(h)=> !!h && ESTADOS_BLOQUEADOS.includes(String(h.estado||''));
 
 let USER=null, ROL='Hospital', REAL_ROL='Hospital';
 const ROLES=['Administrador','Hospital','Bodega'];
@@ -785,11 +817,12 @@ function catOptions(key, val){
   return html;
 }
 // Campo completo: <select> + botón "+" (y el aviso, si se perdió el valor leído).
-function catField(key, idSel, val){
+function catField(key, idSel, val, deshabilitado){
   const c=CATS[key], v=String(val==null?'':val).trim();
-  const perdido = v && !c.conservar && !catEnCat(key,v);
-  return `<div class="field-row"><select id="${idSel}" onchange="catPicked('${idSel}')">${catOptions(key,v)}</select>`
-       + `<button type="button" class="btn-add" title="Agregar o editar ${esc(c.etiq)}" onclick="openCat('${key}','${idSel}')">+</button></div>`
+  const perdido = !deshabilitado && v && !c.conservar && !catEnCat(key,v);
+  const dis = deshabilitado ? ' disabled' : '';
+  return `<div class="field-row"><select id="${idSel}" onchange="catPicked('${idSel}')"${dis}>${catOptions(key,v)}</select>`
+       + `<button type="button" class="btn-add" title="Agregar o editar ${esc(c.etiq)}" onclick="openCat('${key}','${idSel}')"${dis}>+</button></div>`
        + (perdido ? `<p class="cat-hint" id="${idSel}_hint">La hoja decía «${esc(v)}», que no está en el catálogo. Elija uno de la lista o agréguelo con el botón ＋</p>` : '');
 }
 // Al elegir una opción, el aviso de "no está en el catálogo" ya no aplica.
@@ -1188,6 +1221,7 @@ function buildNav(){
   if(canBodega()) items.push({id:'pedidos',ic:'📦',l:'Pedido Pendiente',fn:showPedidos});
   if(canBodega()) items.push({id:'reemplazos',ic:'🔁',l:'Reemplazos / Correcciones',fn:showReemplazos});
   if(canBodega()) items.push({id:'trabajos',ic:'🧾',l:'Histórico Dynamics',fn:showTrabajos});
+  if(canBodega()) items.push({id:'auditoria',ic:'🕵️',l:'Auditoría de cambios',fn:showAuditoria});
   if(canBodega()) items.push({id:'config',ic:'⚙️',l:'Configuración',fn:showConfig});
   // Usuarios y roles: solo Administrador (se oculta al simular otro rol).
   if(ROL==='Administrador') items.push({id:'usuarios',ic:'👥',l:'Usuarios y roles',fn:showUsuarios});
@@ -1201,7 +1235,7 @@ function buildNav(){
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('ovl').classList.toggle('show'); }
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('ovl').classList.remove('show'); }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios'];
+const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
 
 /* ===== INICIO ===== */
@@ -1535,7 +1569,10 @@ function renderVerReadonly(h){
   html+=`<button class="btn-ghost" onclick="imprimirHoja()">🖨️ Imprimir</button>`;
   if(canSubir() && !h.es_reemplazo){ html+=`<button class="btn-ghost" onclick="openReemplazo(${h.id})">🔁 Crear reemplazo / corrección</button>`; }
   html+='</div>';
+  html+='<div class="section-title" style="margin-top:22px">Fotos de la hoja sellada</div>';
+  html+='<div id="verSellBody"></div>';
   document.getElementById('verBody').innerHTML=html;
+  sellCargar(h.id, 'verSellBody');
 }
 
 /* Vista de un reemplazo/corrección: detalle + referencia a la original + botón resolver (Bodega). */
@@ -1564,18 +1601,28 @@ function renderReemplazoView(h){
 /* Vista editable (Bodega/Administrador): encabezado + detalle con columna Lote. */
 function renderVerEdit(h){
   const cols=detColsVer();
+  const bloq=hojaBloqueada(h);
   VER_DET = (h.detalle && h.detalle.length) ? h.detalle.map(d=>Object.assign({},d,{numero_equipo:equipoDemarcado(d.numero_equipo)})) : [{}];
-  let html='<div class="section-title" style="margin-top:0">Encabezado</div><div class="form-grid">';
+  let html='';
+  if(bloq){
+    html+=`<div class="locked-note"><span class="ic">🔒</span><div><b>Esta hoja está bloqueada.</b> `
+        + `Sus trabajos ya se enviaron a Dynamics (estado <b>${esc(h.estado)}</b>), así que no admite más cambios. `
+        + `Si hay algo que corregir, cree un <b>reemplazo / corrección</b> con el botón de abajo.</div></div>`;
+  }
+  html+='<div class="section-title" style="margin-top:0">Encabezado</div><div class="form-grid">';
+  const dis = bloq ? ' disabled' : '';
   ENC.forEach(f=>{
     const val=h[f.k]!=null?h[f.k]:'';
     const cls='field'+(f.full?' full':'');
     const lbl=`${f.l}${f.req?' <span class="req">*</span>':''}`;
-    if(f.area) html+=`<div class="${cls}"><label>${lbl}</label><textarea id="ver_${f.k}" rows="2">${attr(val)}</textarea></div>`;
-    else if(f.cat) html+=`<div class="${cls}"><label>${lbl}</label>`+catField(f.cat, 'ver_'+f.k, val)+`</div>`;
-    else html+=`<div class="${cls}"><label>${lbl}</label><input id="ver_${f.k}" type="${f.t||'text'}" value="${attr(val)}"></div>`;
+    if(f.area) html+=`<div class="${cls}"><label>${lbl}</label><textarea id="ver_${f.k}" rows="2"${dis}>${attr(val)}</textarea></div>`;
+    else if(f.cat) html+=`<div class="${cls}"><label>${lbl}</label>`+catField(f.cat, 'ver_'+f.k, val, bloq)+`</div>`;
+    else html+=`<div class="${cls}"><label>${lbl}</label><input id="ver_${f.k}" type="${f.t||'text'}" value="${attr(val)}"${dis}></div>`;
   });
   html+='</div>';
-  html+='<div class="section-title">Detalle <button class="btn-ghost" style="padding:6px 12px;margin-left:8px" onclick="addVerDet()">＋ Agregar línea</button></div>';
+  html+='<div class="section-title">Detalle'
+      + (bloq ? '' : ' <button class="btn-ghost" style="padding:6px 12px;margin-left:8px" onclick="addVerDet()">＋ Agregar línea</button>')
+      + '</div>';
   html+='<div class="tbl-wrap"><table class="det-table"><thead id="verDetHead"></thead><tbody id="verDetBody"></tbody></table></div>';
   if(h.imagen_base64){ html+=`<div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn-ghost" onclick="verImagenGuardada()">🖼️ Ver hoja de consumo</button>
@@ -1584,17 +1631,24 @@ function renderVerEdit(h){
     </div>`; }
   const dynEnabled = (dynJustSaved===h.id);
   html+=`<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn-primary" id="verSaveBtn" onclick="guardarVer()">💾 Guardar cambios</button>
-      <button class="btn-dyn" id="verDynBtn" onclick="crearTrabajosDynamics()" ${dynEnabled?'':'disabled'} title="${dynEnabled?'Crear los trabajos en Dynamics':'Primero guardá los cambios (valida los códigos) para habilitar'}">🔗 Crear Trabajos en Dynamics</button>
+      ${bloq ? '' : `<button class="btn-primary" id="verSaveBtn" onclick="guardarVer()">💾 Guardar cambios</button>
+      <button class="btn-dyn" id="verDynBtn" onclick="crearTrabajosDynamics()" ${dynEnabled?'':'disabled'} title="${dynEnabled?'Crear los trabajos en Dynamics':'Primero guardá los cambios (valida los códigos) para habilitar'}">🔗 Crear Trabajos en Dynamics</button>`}
       <button class="btn-ghost" onclick="imprimirHoja()">🖨️ Imprimir</button>
       ${(canSubir() && !h.es_reemplazo) ? `<button class="btn-ghost" onclick="openReemplazo(${h.id})">🔁 Crear reemplazo / corrección</button>` : ''}
     </div>`;
+  html+='<div class="section-title" style="margin-top:22px">Fotos de la hoja sellada</div>';
+  html+='<div id="verSellBody"></div>';
+  html+='<div class="section-title" style="margin-top:22px">Historial de cambios</div>';
+  html+='<div class="tbl-wrap" id="audPanel"><div class="empty" style="padding:18px">Cargando…</div></div>';
   document.getElementById('verBody').innerHTML=html;
   document.getElementById('verDetHead').innerHTML='<tr>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'<th></th></tr>';
   renderVerDet();
+  sellCargar(h.id, 'verSellBody');   // en segundo plano
+  loadAudHoja(h.id);                 // en segundo plano: no demora la apertura de la hoja
 }
 function renderVerDet(){
   const cols=detColsVer();
+  const bloq=hojaBloqueada(CUR_VER);
   const b=document.getElementById('verDetBody'); b.innerHTML='';
   VER_DET.forEach((d,i)=>{
     const tds=cols.map(c=>{
@@ -1613,10 +1667,11 @@ function renderVerDet(){
       if(isEquipo) extra += ` onblur="equipoBlur(this,'#verDetBody')"`;
       if(stateCls==='combo-invalid') extra += ` title="${COMBO_MSG}"`;
       if(isEquipo){ const st=(normEquipo(d.numero_equipo)&&equipoValido(d.numero_equipo))?equipoColorStyle(equipoColor(d.numero_equipo)):null; if(st) extra += ` style="background:${st.background};color:${st.color};${st.shadow?('text-shadow:'+st.shadow+';'):''}"`; }
+      if(bloq) extra += ' disabled';
       return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onVerDet(this)"></td>`;
     }).join('');
     const tr=document.createElement('tr');
-    tr.innerHTML=tds+`<td><button class="rm-row" onclick="rmVerDet(${i})">✕</button></td>`;
+    tr.innerHTML=tds+(bloq ? '<td></td>' : `<td><button class="rm-row" onclick="rmVerDet(${i})">✕</button></td>`);
     b.appendChild(tr);
   });
 }
@@ -1756,6 +1811,7 @@ function imprimirWizard(){
 
 async function guardarVer(){
   if(!canBodega()){ toast('Su rol no puede editar hojas'); return; }
+  if(hojaBloqueada(CUR_VER)){ toast('La hoja está bloqueada: sus trabajos ya se enviaron a Dynamics.'); return; }
   const enc={}; ENC.forEach(f=>{ const el=document.getElementById('ver_'+f.k); enc[f.k]=el?el.value.trim():''; });
 
   document.querySelectorAll('#verBody .invalid, #verBody .combo-invalid').forEach(el=>{ el.classList.remove('invalid','combo-invalid'); el.title=''; });
@@ -1919,6 +1975,225 @@ function renderTrabajos(){
     const tr=document.createElement('tr'); tr.innerHTML=tds; b.appendChild(tr);
   });
 }
+/* ===== FOTOS DE LA HOJA SELLADA =====
+   Respaldo de la hoja física ya sellada por el hospital. NO se procesan por OCR:
+   la foto que se lee es la del wizard; estas solo se guardan y se ven.
+
+   Se suben ANTES de enviar la hoja (estado 'Pendiente reposición'). El flujo real
+   es: guardar → imprimir → sellar → fotografiar → subir → enviar. Después de
+   enviada, el resto de los roles solo puede verlas.
+
+   Quién puede subir y quién puede borrar cada foto lo decide la API y viene en la
+   respuesta del listado (puede_subir / puede_eliminar); acá solo se pinta. */
+const SELL_MAX_LADO=2000;   // px del lado largo tras reducir
+const SELL_CALIDAD=0.82;    // calidad del JPEG resultante
+let SELL_CTX={hojaId:null, contenedor:null, fotos:[], puedeSubir:false, maximo:10};
+
+/* Reduce y recomprime en el navegador. Una foto de celular pasa de ~5 MB a
+   ~400 KB sin que los sellos dejen de leerse. Devuelve {tipo, base64}. */
+function sellReducir(file){
+  return new Promise((resolve, reject)=>{
+    const fr=new FileReader();
+    fr.onerror=()=>reject(new Error('No se pudo leer el archivo'));
+    fr.onload=()=>{
+      const img=new Image();
+      img.onerror=()=>reject(new Error('El navegador no pudo abrir la imagen (¿formato no soportado, como HEIC?)'));
+      img.onload=()=>{
+        try{
+          const esc=Math.min(1, SELL_MAX_LADO/Math.max(img.width, img.height));
+          const w=Math.max(1, Math.round(img.width*esc)), h=Math.max(1, Math.round(img.height*esc));
+          const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+          const cx=cv.getContext('2d');
+          cx.fillStyle='#fff'; cx.fillRect(0,0,w,h);   // PNG con transparencia -> fondo blanco
+          cx.drawImage(img,0,0,w,h);
+          const url=cv.toDataURL('image/jpeg', SELL_CALIDAD);
+          const m=/^data:([^;]+);base64,(.*)$/s.exec(url);
+          if(!m) return reject(new Error('No se pudo convertir la imagen'));
+          resolve({tipo:m[1], base64:m[2]});
+        }catch(e){ reject(new Error('No se pudo procesar la imagen: '+e.message)); }
+      };
+      img.src=fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+/* Pinta la sección completa (zona de carga + grid) dentro de `contId`. */
+async function sellCargar(hojaId, contId){
+  SELL_CTX={hojaId, contenedor:contId, fotos:[], puedeSubir:false, maximo:10};
+  const cont=document.getElementById(contId); if(!cont) return;
+  cont.innerHTML='<div class="empty" style="padding:16px">Cargando…</div>';
+  try{
+    const r=await api('GET','/hojas/'+hojaId+'/selladas');
+    SELL_CTX.fotos=(r&&r.fotos)||[];
+    SELL_CTX.puedeSubir=!!(r&&r.puede_subir);
+    SELL_CTX.maximo=(r&&r.maximo)||10;
+    sellRender();
+  }catch(e){
+    cont.innerHTML=`<div class="empty" style="padding:16px;color:var(--danger)">No se pudieron cargar las fotos: ${esc(e.message)}</div>`;
+  }
+}
+function sellRender(){
+  const cont=document.getElementById(SELL_CTX.contenedor); if(!cont) return;
+  const n=SELL_CTX.fotos.length, lleno=n>=SELL_CTX.maximo;
+  let html='';
+  if(SELL_CTX.puedeSubir){
+    html+='<div class="sell-drop">';
+    if(lleno){
+      html+=`<div style="font-size:13.5px">Ya hay ${n} fotos, el máximo permitido. Elimine alguna si necesita subir otra.</div>`;
+    }else{
+      html+=`<input type="file" id="sellInput" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" multiple capture="environment" onchange="sellSubir(this)">`;
+      html+=`<p class="hint">Solo imágenes. Puede seleccionar varias a la vez si la hoja de consumo ocupó más de una página. `
+          + `Se reducen automáticamente antes de subir. ${n} de ${SELL_CTX.maximo} usadas.</p>`;
+    }
+    html+='<div id="sellProgreso" style="font-size:13px;margin-top:8px"></div>';
+    html+='</div>';
+  }
+  if(!n){
+    html+='<div class="empty" style="padding:18px"><div>Todavía no hay fotos de la hoja sellada.</div></div>';
+    cont.innerHTML=html; return;
+  }
+  html+='<div class="tbl-wrap"><table><thead><tr><th style="width:60px"></th><th>Archivo</th><th>Tamaño</th><th>Usuario</th><th>Fecha y hora</th><th></th></tr></thead><tbody>';
+  SELL_CTX.fotos.forEach(f=>{
+    const kb=f.bytes?Math.max(1,Math.round(f.bytes/1024))+' KB':'—';
+    html+=`<tr><td><div id="sellThumb_${f.id}" style="width:46px;height:46px;border-radius:6px;background:#eef3f7"></div></td>`
+        + `<td>${esc(f.nombre||('foto-'+f.id+'.jpg'))}</td><td style="white-space:nowrap">${kb}</td>`
+        + `<td>${esc(f.usuario)}</td><td style="white-space:nowrap">${esc(f.fecha)}</td>`
+        + `<td style="white-space:nowrap"><button class="icon-btn" onclick="sellVer(${f.id})">👁️ Ver</button>`
+        + (f.puede_eliminar?` <button class="icon-btn danger" onclick="sellEliminar(${f.id})">🗑 Eliminar</button>`:'')
+        + `</td></tr>`;
+  });
+  html+='</tbody></table></div>';
+  cont.innerHTML=html;
+  SELL_CTX.fotos.forEach(f=>sellThumb(f.id));   // miniaturas en segundo plano
+}
+// La miniatura se pide aparte para que el grid aparezca de inmediato.
+async function sellThumb(fotoId){
+  const cel=document.getElementById('sellThumb_'+fotoId); if(!cel) return;
+  try{
+    const f=await api('GET','/hojas/'+SELL_CTX.hojaId+'/selladas/'+fotoId+'/contenido');
+    cel.innerHTML=`<img class="sell-thumb" src="data:${attr(f.tipo)};base64,${attr(f.contenido)}" alt="miniatura">`;
+  }catch(e){ /* si falla, queda el cuadro gris */ }
+}
+async function sellVer(fotoId){
+  try{
+    const f=await api('GET','/hojas/'+SELL_CTX.hojaId+'/selladas/'+fotoId+'/contenido');
+    openImg(`data:${f.tipo};base64,${f.contenido}`);
+  }catch(e){ toast('No se pudo abrir la foto: '+e.message); }
+}
+function sellEliminar(fotoId){
+  const f=SELL_CTX.fotos.find(x=>x.id===fotoId);
+  askConfirm('Eliminar foto',
+    'Se eliminará '+((f&&f.nombre)||'la foto')+'. Esta acción no se puede deshacer.',
+    'Sí, eliminar',
+    async function(){
+      try{
+        await api('DELETE','/hojas/'+SELL_CTX.hojaId+'/selladas/'+fotoId);
+        toast('Foto eliminada');
+        await sellCargar(SELL_CTX.hojaId, SELL_CTX.contenedor);
+      }catch(e){ toast('No se pudo eliminar: '+e.message); }
+    });
+}
+/* Sube las imágenes seleccionadas, una por una: así una foto que falle no
+   arrastra a las demás, y el aviso dice exactamente cuál falló. */
+async function sellSubir(input){
+  const files=Array.from(input.files||[]); if(!files.length) return;
+  const prog=document.getElementById('sellProgreso');
+  const libres=SELL_CTX.maximo-SELL_CTX.fotos.length;
+  const lote=files.slice(0, Math.max(0, libres));
+  if(files.length>lote.length) toast('Solo se subirán '+lote.length+' de '+files.length+': el máximo por hoja es '+SELL_CTX.maximo+'.');
+  input.disabled=true;
+  let ok=0; const errores=[];
+  for(let i=0;i<lote.length;i++){
+    const f=lote[i];
+    if(prog) prog.textContent='Subiendo '+(i+1)+' de '+lote.length+': '+f.name+'…';
+    try{
+      if(!/^image\//i.test(f.type||'')) throw new Error('no es una imagen');
+      const red=await sellReducir(f);
+      await api('POST','/hojas/'+SELL_CTX.hojaId+'/selladas',{nombre:f.name, tipo:red.tipo, base64:red.base64});
+      ok++;
+    }catch(e){ errores.push(f.name+': '+e.message); }
+  }
+  input.disabled=false; if(prog) prog.textContent='';
+  if(ok) toast(ok===1?'Foto subida':(ok+' fotos subidas'));
+  if(errores.length) toast('No se pudo subir — '+errores.join(' · '));
+  await sellCargar(SELL_CTX.hojaId, SELL_CTX.contenedor);
+}
+
+/* ===== AUDITORÍA DE CAMBIOS ===== */
+let AUD_ROWS=[], AUD_COLF={};
+const AUD_COLS=[
+  {k:'fecha',l:'Fecha y hora'},
+  {k:'usuario',l:'Usuario'},
+  {k:'rol',l:'Rol'},
+  {k:'numero_hoja',l:'N° hoja',link:true},
+  {k:'seccion',l:'Sección'},
+  {k:'linea',l:'Línea'},
+  {k:'campo',l:'Campo'},
+  {k:'valor_anterior',l:'Valor anterior'},
+  {k:'valor_nuevo',l:'Valor nuevo'}
+];
+async function showAuditoria(){
+  if(!canBodega()){ toast('Su rol no tiene acceso'); showInicio(); return; }
+  setTab('auditoria'); showOnly('viewAuditoria');
+  await loadAuditoria();
+}
+async function loadAuditoria(){
+  try{ AUD_ROWS=await api('GET','/auditoria'); }
+  catch(e){ AUD_ROWS=[]; toast('Error al cargar la auditoría: '+e.message); }
+  renderAuditoria();
+}
+function audFiltered(){
+  return AUD_ROWS.filter(r=> Object.keys(AUD_COLF).every(k=>{
+    const f=(AUD_COLF[k]||'').trim().toLowerCase(); if(!f) return true;
+    return String(r[k]==null?'':r[k]).toLowerCase().includes(f);
+  }));
+}
+function onAudFilter(k,v){ AUD_COLF[k]=v; renderAuditoria(); }
+function renderAuditoria(){
+  document.getElementById('audHead').innerHTML=
+    `<tr>${AUD_COLS.map(c=>`<th>${c.l}</th>`).join('')}</tr>`
+    +`<tr class="filter-row">${AUD_COLS.map(c=>`<th><input placeholder="Filtrar…" oninput="onAudFilter('${c.k}',this.value)" value="${attr(AUD_COLF[c.k])}"></th>`).join('')}</tr>`;
+  const rows=audFiltered();
+  const b=document.getElementById('audBody'); b.innerHTML='';
+  document.getElementById('audEmpty').classList.toggle('hidden', AUD_ROWS.length>0);
+  document.getElementById('audGrid').classList.toggle('hidden', AUD_ROWS.length===0);
+  const foot=document.getElementById('audFoot');
+  if(!AUD_ROWS.length){ foot.textContent=''; return; }
+  foot.textContent = rows.length===1 ? '1 cambio' : (rows.length+' cambios');
+  if(!rows.length){ b.innerHTML=`<tr><td colspan="${AUD_COLS.length}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  rows.forEach(r=>{
+    const tds=AUD_COLS.map(c=>{
+      if(c.link) return `<td><span class="link-cell" onclick="verHoja(${r.id_hoja})" title="Abrir la hoja de consumo">${esc(r.numero_hoja)}</span></td>`;
+      return `<td>${esc(r[c.k])}</td>`;
+    }).join('');
+    const tr=document.createElement('tr'); tr.innerHTML=tds; b.appendChild(tr);
+  });
+}
+
+/* Panel "Historial de cambios" dentro de una hoja (Bodega/Administrador).
+   Se carga aparte del resto de la hoja para no demorar su apertura. */
+async function loadAudHoja(id){
+  const cont=document.getElementById('audPanel'); if(!cont) return;
+  try{
+    const rows=await api('GET','/hojas/'+id+'/auditoria');
+    if(!rows || !rows.length){
+      cont.innerHTML='<div class="empty" style="padding:18px"><div>Esta hoja no tiene cambios registrados.</div></div>';
+      return;
+    }
+    let html='<table><thead><tr><th>Fecha y hora</th><th>Usuario</th><th>Sección</th><th>Línea</th><th>Campo</th><th>Valor anterior</th><th>Valor nuevo</th></tr></thead><tbody>';
+    rows.forEach(r=>{
+      html+=`<tr><td style="white-space:nowrap">${esc(r.fecha)}</td><td>${esc(r.usuario)}</td>`
+          + `<td>${esc(r.seccion)}</td><td>${esc(r.linea)}</td><td>${esc(r.campo)}</td>`
+          + `<td>${esc(r.valor_anterior)}</td><td>${esc(r.valor_nuevo)}</td></tr>`;
+    });
+    html+='</tbody></table>';
+    cont.innerHTML=html;
+  }catch(e){
+    cont.innerHTML=`<div class="empty" style="padding:18px;color:var(--danger)">No se pudo cargar el historial: ${esc(e.message)}</div>`;
+  }
+}
+
 // Desde el Histórico (proceso "Pedido Pendiente"): abre la pantalla de Pedido Pendiente
 // filtrada por el Consecutivo de la hoja relacionada.
 function irAPedidoPendiente(consecutivo){
@@ -2457,6 +2732,14 @@ function fillStep2(enc, det){
   renderDet();
   syncWizPrintBtn();
   WIZ.baseline = wizSnapshot();   // referencia para saber si el usuario cambió algo
+  /* Las fotos se cuelgan de una hoja que ya existe: en una hoja nueva la sección
+     no aparece hasta el primer Guardar, igual que el botón Imprimir. El flujo es
+     guardar → imprimir → sellar → fotografiar → subir → enviar. */
+  const sw=document.getElementById('wizSellWrap');
+  if(sw){
+    sw.classList.toggle('hidden', !WIZ.editId);
+    if(WIZ.editId) sellCargar(WIZ.editId, 'wizSellBody');
+  }
 }
 /* El botón Imprimir del wizard se habilita solo cuando la hoja YA está guardada
    (WIZ.editId con valor). Antes se podía imprimir un borrador que la base nunca

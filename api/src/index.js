@@ -1,6 +1,7 @@
 const { app } = require('@azure/functions');
 const { query, getClient } = require('./db');
 const { analyzeLayout, parseLayout, toInt } = require('./layout');
+const audit = require('./auditoria');
 const { getCatalogo, getMapa, normCod } = require('./productos');
 const { getLotes } = require('./lotes');
 const { iniciarDynamics, consultarDynamics } = require('./dynamics');
@@ -398,6 +399,16 @@ const ENC_FIELDS = [
 ];
 const DATE_KEYS = new Set(['fecha_accidente', 'fecha_cirugia', 'fecha_hoja']);
 
+/* Estados en los que la hoja queda BLOQUEADA: ya se dispararon sus trabajos en
+   Dynamics. 'Creando TR' se pone en cuanto el usuario toca el botón, así que el
+   bloqueo empieza ahí y no cuando el flujo responde.
+   'Error' NO entra: si el envío falló, Bodega tiene que poder corregir y
+   reintentar; si no, un problema de red dejaría la hoja trabada para siempre.
+   El bloqueo es para TODOS los roles, Administrador incluido: una hoja con su TR
+   creada es un documento cerrado y lo que haya que corregir va en un
+   reemplazo / corrección. */
+const ESTADOS_BLOQUEADOS = new Set(['Creando TR', 'Finalizada']);
+
 // Formato de fecha/hora local (Costa Rica) para los listados.
 const FECHA_LOCAL = `to_char((FechaCreacion AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica', 'YYYY-MM-DD HH24:MI')`;
 
@@ -674,10 +685,43 @@ app.http('hoja-update', {
     if (!(puedeBodega(rolEditor) || (puedeSubir(rolEditor) && esPendiente))) {
       return json(403, { error: 'No tiene permiso para editar esta hoja' });
     }
+    /* Bloqueo por Dynamics. Va acá, en el servidor, y no solo escondiendo el
+       botón: el frontend deshabilita los campos, pero la regla tiene que valer
+       para cualquier llamada al endpoint. */
+    if (ESTADOS_BLOQUEADOS.has(estadoActual)) {
+      return json(409, {
+        error: 'La hoja est\u00e1 bloqueada porque sus trabajos ya se enviaron a Dynamics '
+             + '(estado "' + estadoActual + '"). Para corregir algo, cree un reemplazo / correcci\u00f3n.'
+      });
+    }
 
     const body = await request.json();
     const enc = body.encabezado || {};
     const detalle = Array.isArray(body.detalle) ? body.detalle : [];
+
+    /* Auditoría: solo se registran los cambios hechos por Bodega/Administrador.
+       Se lee el estado ANTERIOR completo antes de tocar nada; el diff y el
+       INSERT van dentro de la misma transacción del UPDATE, así que si el
+       guardado se revierte, no queda un historial que miente. */
+    const auditar = puedeBodega(rolEditor);
+    let antes = null;
+    if (auditar) {
+      const ah = await query(
+        `SELECT NumeroHoja AS numero_hoja, NumeroDocumento AS numero_documento, Regimen AS regimen,
+                Paciente AS paciente, Identificacion AS identificacion, Tipo AS tipo,
+                to_char(FechaAccidente,'YYYY-MM-DD') AS fecha_accidente,
+                to_char(FechaCirugia,'YYYY-MM-DD')   AS fecha_cirugia,
+                to_char(FechaHoja,'YYYY-MM-DD')      AS fecha_hoja,
+                Cirujano AS cirujano, Instrumentista AS instrumentista,
+                Diagnostico AS diagnostico, Procedimiento AS procedimiento, Estado AS estado
+           FROM dbo.HojaConsumo WHERE Id=$1`, [id]);
+      const ad = await query(
+        `SELECT Codigo AS codigo, NumeroEquipo AS numero_equipo, Und AS und,
+                ReposicionAnaquel AS reposicion_anaquel, NumeroLote AS numero_lote
+           FROM dbo.HojaConsumoDetalle WHERE HojaConsumoId=$1 ORDER BY Linea, Id`, [id]);
+      antes = { encabezado: ah.rows[0] || {}, detalle: ad.rows, estado: estadoActual };
+    }
+
     // Transición de estado permitida solo desde 'Pendiente reposición' (Guardar/Enviar de Hospital).
     let nuevoEstado = null;
     if (esPendiente && (body.estado === 'Pendiente reposición' || body.estado === 'Enviado')) nuevoEstado = body.estado;
@@ -722,6 +766,32 @@ app.http('hoja-update', {
             descNutricare(mapa, d), toInt(d.und), toInt(d.reposicion_anaquel),
             (d.numero_lote === undefined || d.numero_lote === '') ? null : d.numero_lote]);
       }
+
+      /* Diff contra el estado anterior. El detalle se compara ya normalizado
+         (equipo con prefijo NUT-, Und y Reposición como entero) para que el
+         formato no se confunda con un cambio real. */
+      if (auditar && antes) {
+        const detNorm = detalle.map(d => ({
+          codigo: d.codigo || null,
+          numero_equipo: equipoConPrefijo(d.numero_equipo),
+          und: toInt(d.und),
+          reposicion_anaquel: toInt(d.reposicion_anaquel),
+          numero_lote: (d.numero_lote === undefined || d.numero_lote === '') ? null : d.numero_lote
+        }));
+        const cambios = audit.diffHoja(antes, {
+          encabezado: enc,
+          detalle: detNorm,
+          estado: nuevoEstado || estadoActual
+        });
+        await audit.grabarCambios(client, {
+          id,
+          numeroHoja: numHojaUp || (antes.encabezado && antes.encabezado.numero_hoja) || null,
+          usuario: user.name || user.email,
+          email: user.email,
+          rol: rolEditor
+        }, cambios);
+      }
+
       await client.query('COMMIT');
       // Si el usuario corrigió el consecutivo, ese pasa a ser el "último usado".
       const cfgConsUp = await getConfigConsecutivo();
@@ -735,6 +805,221 @@ app.http('hoja-update', {
       return json(500, { error: 'No se pudo actualizar la hoja de consumo', detail: e.message });
     } finally {
       client.release();
+    }
+  }
+});
+
+/* ============================================================
+   Auditoría de cambios de la hoja de consumo
+   ============================================================ */
+
+// Fecha y hora en hora de Costa Rica, igual que el resto de los listados.
+const FECHA_AUDIT = `to_char((FechaHora AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica', 'YYYY-MM-DD HH24:MI')`;
+
+const SELECT_AUDIT = `SELECT Id AS id, IdHojaConsumo AS id_hoja, NumeroHoja AS numero_hoja,
+              ${FECHA_AUDIT} AS fecha, Usuario AS usuario, UsuarioEmail AS usuario_email,
+              Rol AS rol, Seccion AS seccion, Linea AS linea, Campo AS campo,
+              ValorAnterior AS valor_anterior, ValorNuevo AS valor_nuevo
+         FROM dbo.HojaConsumoAuditoria`;
+
+/* GET /api/hojas/{id}/auditoria -> historial de UNA hoja (panel dentro de la hoja).
+   Solo Bodega/Administrador: es la misma restricción con la que se audita. */
+app.http('hoja-auditoria', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'hojas/{id}/auditoria',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user)))
+      return json(403, { error: 'No tiene permiso para ver la auditor\u00eda' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inv\u00e1lido' });
+    try {
+      const r = await query(`${SELECT_AUDIT} WHERE IdHojaConsumo=$1 ORDER BY Id DESC`, [id]);
+      return json(200, r.rows);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener el historial de cambios', detail: e.message });
+    }
+  }
+});
+
+/* GET /api/auditoria -> todos los cambios, el más reciente primero (pantalla global).
+   `?limite=` acota el listado; por defecto 1000 filas para que el grid no se ahogue. */
+app.http('auditoria-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'auditoria',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user)))
+      return json(403, { error: 'No tiene permiso para ver la auditor\u00eda' });
+    let limite = parseInt(request.query.get('limite') || '1000', 10);
+    if (!Number.isFinite(limite) || limite <= 0) limite = 1000;
+    if (limite > 5000) limite = 5000;
+    try {
+      const r = await query(`${SELECT_AUDIT} ORDER BY Id DESC LIMIT $1`, [limite]);
+      return json(200, r.rows);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener la auditor\u00eda', detail: e.message });
+    }
+  }
+});
+
+/* ============================================================
+   Fotos de la hoja SELLADA (solo respaldo, no se procesan por OCR)
+   ============================================================ */
+
+/* Tope de fotos por hoja y peso máximo por foto. El frontend reduce a 2000px
+   JPEG (~400 KB), así que 6 MB es holgura de sobra: el tope está para atajar
+   una subida cruda, no para pelear con el caso normal. */
+const SELLADA_MAX_POR_HOJA = 10;
+const SELLADA_MAX_MB = 6;
+// Solo imágenes. La lista es explícita: 'image/*' dejaría pasar cualquier cosa
+// que el navegador etiquete como imagen, incluido un SVG (que puede traer script).
+const SELLADA_TIPOS = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/bmp']);
+
+// La foto sellada se sube ANTES de enviar la hoja: una vez enviada, el respaldo
+// queda cerrado igual que el resto del documento.
+const SELLADA_ESTADO_ABIERTO = 'Pendiente reposición';
+
+const FECHA_SELLADA = `to_char((FechaHora AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica', 'YYYY-MM-DD HH24:MI')`;
+
+/* GET /api/hojas/{id}/selladas -> listado SIN el contenido.
+   Traer el base64 acá haría que abrir una hoja con 10 fotos bajara varios MB;
+   el contenido se pide foto por foto, solo cuando el usuario la quiere ver.
+   Lo ve cualquier rol autenticado. */
+app.http('selladas-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'hojas/{id}/selladas',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    try {
+      const h = await query(`SELECT Estado AS estado FROM dbo.HojaConsumo WHERE Id=$1`, [id]);
+      if (!h.rows.length) return json(404, { error: 'La hoja no existe' });
+      const abierta = h.rows[0].estado === SELLADA_ESTADO_ABIERTO;
+      const rol = await getRole(user);
+      const r = await query(
+        `SELECT Id AS id, Nombre AS nombre, Tipo AS tipo, Bytes AS bytes,
+                Usuario AS usuario, UsuarioEmail AS usuario_email, ${FECHA_SELLADA} AS fecha
+           FROM dbo.HojaConsumoSellada WHERE IdHojaConsumo=$1 ORDER BY Id`, [id]);
+      // El servidor decide quién puede borrar cada foto; el frontend solo pinta.
+      const rows = r.rows.map(x => ({
+        ...x,
+        puede_eliminar: abierta && puedeSubir(rol) &&
+          String(x.usuario_email || '').toLowerCase() === String(user.email || '').toLowerCase()
+      }));
+      return json(200, { puede_subir: abierta && puedeSubir(rol), maximo: SELLADA_MAX_POR_HOJA, fotos: rows });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener las fotos', detail: e.message });
+    }
+  }
+});
+
+/* GET /api/hojas/{id}/selladas/{sid}/contenido -> una foto (base64).
+   Cualquier rol autenticado la puede ver. */
+app.http('sellada-contenido', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'hojas/{id}/selladas/{sid}/contenido',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const id = parseInt(request.params.id, 10);
+    const sid = parseInt(request.params.sid, 10);
+    if (!id || !sid) return json(400, { error: 'Id inválido' });
+    try {
+      const r = await query(
+        `SELECT Nombre AS nombre, Tipo AS tipo, Contenido AS contenido
+           FROM dbo.HojaConsumoSellada WHERE Id=$1 AND IdHojaConsumo=$2`, [sid, id]);
+      if (!r.rows.length) return json(404, { error: 'La foto no existe' });
+      return json(200, r.rows[0]);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener la foto', detail: e.message });
+    }
+  }
+});
+
+/* POST /api/hojas/{id}/selladas -> sube una foto. Body: { nombre, tipo, base64 }
+   Solo Hospital/Administrador y solo mientras la hoja no se haya enviado. */
+app.http('sellada-create', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'hojas/{id}/selladas',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const rol = await getRole(user);
+    if (!puedeSubir(rol)) return json(403, { error: 'Solo el rol Hospital puede subir las fotos de la hoja sellada' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+
+    const body = await request.json();
+    const tipo = String((body && body.tipo) || '').toLowerCase().trim();
+    const b64 = String((body && body.base64) || '');
+    const nombre = String((body && body.nombre) || '').trim().slice(0, 260) || null;
+
+    if (!b64) return json(400, { error: 'No llegó la imagen' });
+    if (!SELLADA_TIPOS.has(tipo))
+      return json(400, { error: 'Solo se admiten imágenes (JPG, PNG, WEBP, GIF o BMP). Recibido: ' + (tipo || 'sin tipo') });
+    // 3 caracteres de base64 = 4 bytes; alcanza para el tope sin decodificar.
+    const bytes = Math.floor(b64.length * 3 / 4);
+    if (bytes > SELLADA_MAX_MB * 1024 * 1024)
+      return json(400, { error: 'La imagen supera los ' + SELLADA_MAX_MB + ' MB' });
+
+    try {
+      const h = await query(`SELECT Estado AS estado FROM dbo.HojaConsumo WHERE Id=$1`, [id]);
+      if (!h.rows.length) return json(404, { error: 'La hoja no existe' });
+      if (h.rows[0].estado !== SELLADA_ESTADO_ABIERTO)
+        return json(409, { error: 'La hoja ya fue enviada: las fotos de la hoja sellada se suben antes de enviarla' });
+
+      const c = await query(`SELECT COUNT(*)::int AS n FROM dbo.HojaConsumoSellada WHERE IdHojaConsumo=$1`, [id]);
+      if (c.rows[0].n >= SELLADA_MAX_POR_HOJA)
+        return json(400, { error: 'Ya hay ' + SELLADA_MAX_POR_HOJA + ' fotos en esta hoja, el máximo permitido' });
+
+      const r = await query(
+        `INSERT INTO dbo.HojaConsumoSellada (IdHojaConsumo, Nombre, Tipo, Bytes, Contenido, Usuario, UsuarioEmail)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         RETURNING Id AS id, Nombre AS nombre, Tipo AS tipo, Bytes AS bytes, Usuario AS usuario, ${FECHA_SELLADA} AS fecha`,
+        [id, nombre, tipo, bytes, b64, user.name || user.email, user.email]);
+      return json(201, r.rows[0]);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo guardar la foto', detail: e.message });
+    }
+  }
+});
+
+/* DELETE /api/hojas/{id}/selladas/{sid} -> borra una foto.
+   Solo la puede borrar QUIEN LA SUBIÓ, y solo mientras la hoja no se haya
+   enviado. Ni el Administrador borra las de otro: si se necesita, la sube de
+   nuevo quien corresponda. */
+app.http('sellada-delete', {
+  methods: ['DELETE'], authLevel: 'anonymous', route: 'hojas/{id}/selladas/{sid}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const rol = await getRole(user);
+    if (!puedeSubir(rol)) return json(403, { error: 'Su rol no puede eliminar fotos' });
+    const id = parseInt(request.params.id, 10);
+    const sid = parseInt(request.params.sid, 10);
+    if (!id || !sid) return json(400, { error: 'Id inválido' });
+    try {
+      const h = await query(`SELECT Estado AS estado FROM dbo.HojaConsumo WHERE Id=$1`, [id]);
+      if (!h.rows.length) return json(404, { error: 'La hoja no existe' });
+      if (h.rows[0].estado !== SELLADA_ESTADO_ABIERTO)
+        return json(409, { error: 'La hoja ya fue enviada: sus fotos no se pueden eliminar' });
+
+      const f = await query(
+        `SELECT UsuarioEmail AS email FROM dbo.HojaConsumoSellada WHERE Id=$1 AND IdHojaConsumo=$2`, [sid, id]);
+      if (!f.rows.length) return json(404, { error: 'La foto no existe' });
+      if (String(f.rows[0].email || '').toLowerCase() !== String(user.email || '').toLowerCase())
+        return json(403, { error: 'Solo puede eliminar las fotos que subió usted' });
+
+      await query(`DELETE FROM dbo.HojaConsumoSellada WHERE Id=$1 AND IdHojaConsumo=$2`, [sid, id]);
+      return json(200, { ok: true });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo eliminar la foto', detail: e.message });
     }
   }
 });
