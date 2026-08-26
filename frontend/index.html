@@ -2456,6 +2456,7 @@ function fillStep2(enc, det){
   WIZ.detalle = det.length? det.map(d=>Object.assign({}, d, {numero_equipo:equipoDemarcado(d.numero_equipo)})) : [{}];
   renderDet();
   syncWizPrintBtn();
+  WIZ.baseline = wizSnapshot();   // referencia para saber si el usuario cambió algo
 }
 /* El botón Imprimir del wizard se habilita solo cuando la hoja YA está guardada
    (WIZ.editId con valor). Antes se podía imprimir un borrador que la base nunca
@@ -2521,7 +2522,39 @@ function updateEnviarState(){
 }
 function addDetRow(){ WIZ.detalle.push({}); renderDet(); }
 function rmDet(i){ WIZ.detalle.splice(i,1); if(!WIZ.detalle.length)WIZ.detalle=[{}]; renderDet(); }
-function cancelWizard(){ showHojas(); }
+/* Firma del formulario: encabezado + detalle, normalizados en un solo texto.
+   Se toma una al renderizar el paso 2 (WIZ.baseline) y se compara al Cancelar.
+   Se excluyen las columnas derivadas (la Descripción del catálogo) porque no las
+   escribe el usuario. */
+function wizSnapshot(){
+  const enc = ENC.map(f=>{
+    const el=document.getElementById('enc_'+f.k);
+    return f.k+'='+(el ? String(el.value).trim() : '');
+  }).join('|');
+  const cols = DET_COLS.filter(c=>!c.derived);
+  const det = (WIZ.detalle||[])
+    .map(d=> cols.map(c=>String(d[c.k]==null?'':d[c.k]).trim()).join(','))
+    .filter(fila => fila.replace(/,/g,'') !== '')   // las líneas vacías no cuentan
+    .join(';');
+  return enc+'||'+det;
+}
+/* Cancelar: solo pregunta si hay algo que perder.
+   - Formulario igual a como se abrió y sin foto cargada -> sale directo. Es el
+     caso de "no llené nada": el N° de hoja sugerido y el encabezado que viene de
+     una cirugía ya están en la referencia, así que no cuentan como algo escrito.
+   - Cualquier campo cambiado, o una foto que el usuario subió (donde se perdería
+     la lectura del OCR) -> pide confirmación. */
+function cancelWizard(){
+  const cambio  = WIZ.baseline!=null && wizSnapshot()!==WIZ.baseline;
+  const hayFoto = !!WIZ.base64;
+  if(!cambio && !hayFoto){ showHojas(); return; }
+  askConfirm(
+    'Cancelar la hoja de consumo',
+    'Se van a perder los datos que llenó en el formulario. ¿Está seguro de que desea cancelar?',
+    'Sí, cancelar',
+    ()=>{ WIZ.baseline=null; showHojas(); }
+  );
+}
 function verImagenActual(){ if(WIZ.dataUrl) openImg(WIZ.dataUrl); else toast('No hay imagen cargada'); }
 
 /* Junta encabezado + detalle del wizard, valida y marca errores en pantalla.
