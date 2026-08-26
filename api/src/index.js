@@ -234,6 +234,80 @@ app.http('cirujano-update', {
   }
 });
 
+/* ============================================================
+   Catálogo de régimen (lista desplegable del encabezado)
+   ============================================================ */
+
+/* GET /api/regimenes -> lista de regímenes activos (cualquier usuario autenticado). */
+app.http('regimenes-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'regimenes',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    try {
+      const r = await query(
+        `SELECT Id AS id, Nombre AS nombre FROM cat.Regimen WHERE Activo = TRUE ORDER BY Nombre`);
+      return json(200, r.rows);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener el cat\u00e1logo de reg\u00edmenes', detail: e.message });
+    }
+  }
+});
+
+/* POST /api/regimenes -> agrega un régimen. Body: { nombre }
+   Lo puede usar cualquier rol autenticado: el campo Régimen se llena tanto en el
+   wizard de Hospital como en la edición de Bodega, así que los dos necesitan el "+". */
+app.http('regimen-create', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'regimenes',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const body = await request.json();
+    const nombre = normNombre(body && body.nombre);
+    if (!nombre) return json(400, { error: 'El nombre del r\u00e9gimen es obligatorio' });
+    if (nombre.length > 60) return json(400, { error: 'El nombre no puede superar los 60 caracteres' });
+    try {
+      const r = await query(
+        `INSERT INTO cat.Regimen (Nombre, CreadoPor) VALUES ($1, $2) RETURNING Id AS id, Nombre AS nombre`,
+        [nombre, user.name || user.email]);
+      return json(201, r.rows[0]);
+    } catch (e) {
+      if (e.code === '23505') return json(400, { error: 'Ese r\u00e9gimen ya existe en el cat\u00e1logo' });
+      context.error(e);
+      return json(500, { error: 'No se pudo agregar el r\u00e9gimen', detail: e.message });
+    }
+  }
+});
+
+/* PUT /api/regimenes/{id} -> corrige el nombre. Body: { nombre }
+   No modifica las hojas ya creadas: ahí el texto queda como se guardó. */
+app.http('regimen-update', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'regimenes/{id}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inv\u00e1lido' });
+    const body = await request.json();
+    const nombre = normNombre(body && body.nombre);
+    if (!nombre) return json(400, { error: 'El nombre del r\u00e9gimen es obligatorio' });
+    if (nombre.length > 60) return json(400, { error: 'El nombre no puede superar los 60 caracteres' });
+    try {
+      const r = await query(
+        `UPDATE cat.Regimen SET Nombre=$1, ActualizadoPor=$2, FechaActualizacion=(now() at time zone 'utc')
+          WHERE Id=$3 AND Activo = TRUE RETURNING Id AS id, Nombre AS nombre`,
+        [nombre, user.name || user.email, id]);
+      if (!r.rowCount) return json(404, { error: 'El r\u00e9gimen no existe' });
+      return json(200, r.rows[0]);
+    } catch (e) {
+      if (e.code === '23505') return json(400, { error: 'Ya hay otro r\u00e9gimen con ese nombre' });
+      context.error(e);
+      return json(500, { error: 'No se pudo actualizar el r\u00e9gimen', detail: e.message });
+    }
+  }
+});
+
 app.http('equipos-list', {
   methods: ['GET'], authLevel: 'anonymous', route: 'equipos',
   handler: async (request, context) => {
