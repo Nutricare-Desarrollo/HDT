@@ -810,6 +810,99 @@ app.http('hoja-update', {
 });
 
 /* ============================================================
+   Reemplazos / correcciones: consecutivo y diferencias
+   ============================================================ */
+
+/* GET /api/hojas/{id}/siguiente-reemplazo -> N° sugerido para un reemplazo.
+   Del original HDT-3001 sale HDT-3001-R-1; el siguiente reemplazo de esa misma
+   hoja es -R-2, y así. La R es de Reposición.
+   El número se busca probando: si el -R-1 ya existe (por ejemplo porque hubo
+   uno que se eliminó y se recreó), se pasa al siguiente libre. Contar los
+   reemplazos existentes no alcanza — un borrado dejaría el contador pisando un
+   número ya usado, y el índice único de NumeroHoja rechazaría el guardado. */
+const REEMPLAZO_MAX_INTENTOS = 99;
+
+app.http('hoja-siguiente-reemplazo', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'hojas/{id}/siguiente-reemplazo',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    try {
+      const h = await query(`SELECT NumeroHoja AS numero FROM dbo.HojaConsumo WHERE Id=$1`, [id]);
+      if (!h.rows.length) return json(404, { error: 'La hoja no existe' });
+      const base = String(h.rows[0].numero || '').trim();
+      if (!base) return json(200, { numero: null });   // el original no tiene N°: el frontend usa el consecutivo normal
+      for (let n = 1; n <= REEMPLAZO_MAX_INTENTOS; n++) {
+        const cand = base + '-R-' + n;
+        if (!(await numeroHojaEnUso(cand))) return json(200, { numero: cand, secuencia: n });
+      }
+      return json(200, { numero: null });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo calcular el consecutivo del reemplazo', detail: e.message });
+    }
+  }
+});
+
+/* GET /api/hojas/{id}/diferencias -> qué cambió el reemplazo respecto del original.
+   Reutiliza el mismo motor de comparación de la auditoría, así que un cambio se
+   describe igual acá que en el historial: una fila por campo, con el valor de la
+   hoja original y el del reemplazo.
+   El estado NO se compara: son dos hojas distintas y sus estados no tienen por
+   qué coincidir. */
+app.http('hoja-diferencias', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'hojas/{id}/diferencias',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+
+    const SEL_ENC = `SELECT Id AS id, NumeroHoja AS numero_hoja, NumeroDocumento AS numero_documento, Regimen AS regimen,
+              Paciente AS paciente, Identificacion AS identificacion, Tipo AS tipo,
+              to_char(FechaAccidente,'YYYY-MM-DD') AS fecha_accidente,
+              to_char(FechaCirugia,'YYYY-MM-DD')   AS fecha_cirugia,
+              to_char(FechaHoja,'YYYY-MM-DD')      AS fecha_hoja,
+              Cirujano AS cirujano, Instrumentista AS instrumentista,
+              Diagnostico AS diagnostico, Procedimiento AS procedimiento,
+              HojaOrigenId AS hoja_origen_id
+         FROM dbo.HojaConsumo WHERE Id=$1`;
+    const SEL_DET = `SELECT Codigo AS codigo, NumeroEquipo AS numero_equipo, Und AS und,
+              ReposicionAnaquel AS reposicion_anaquel, NumeroLote AS numero_lote
+         FROM dbo.HojaConsumoDetalle WHERE HojaConsumoId=$1 ORDER BY Linea, Id`;
+
+    try {
+      const nueva = await query(SEL_ENC, [id]);
+      if (!nueva.rows.length) return json(404, { error: 'La hoja no existe' });
+      const origenId = nueva.rows[0].hoja_origen_id;
+      if (!origenId) return json(200, { origen: null, cambios: [] });   // no viene de otra hoja: no hay con qué comparar
+
+      const orig = await query(SEL_ENC, [origenId]);
+      if (!orig.rows.length) return json(200, { origen: null, cambios: [] });  // la original ya no existe
+
+      const [dOrig, dNueva] = await Promise.all([query(SEL_DET, [origenId]), query(SEL_DET, [id])]);
+      /* El N° de hoja se deja fuera: en un reemplazo SIEMPRE difiere (lleva el
+         sufijo -R-n), así que listarlo como "cambio" sería ruido en todas las
+         comparaciones. */
+      const cambios = [
+        ...audit.diffEncabezado(orig.rows[0], nueva.rows[0])
+             .filter(c => c.campo !== audit.ETIQUETAS_ENC.numero_hoja),
+        ...audit.diffDetalle(dOrig.rows, dNueva.rows)
+      ];
+      return json(200, {
+        origen: { id: origenId, numero_hoja: orig.rows[0].numero_hoja },
+        cambios
+      });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudieron calcular las diferencias', detail: e.message });
+    }
+  }
+});
+
+/* ============================================================
    Auditoría de cambios de la hoja de consumo
    ============================================================ */
 

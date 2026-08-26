@@ -695,6 +695,15 @@ const GRID_COLS = [
   {k:'regimen',l:'Régimen'},{k:'cirujano',l:'Cirujano',clip:true},{k:'instrumentista',l:'Instrumentista'},
   {k:'diagnostico',l:'Diagnóstico'},{k:'cantidad_lineas',l:'Artículos'},{k:'estado',l:'Estado',estado:true}
 ];
+/* Columnas del grid segun el rol. El rol Hospital no ve Cirujano ni
+   Instrumentista: son datos que a quien sube la hoja no le sirven para
+   encontrarla, y en el celular cada columna de más cuesta. Bodega y
+   Administrador las conservan. Aplica al grid de Hojas y al de Pendientes,
+   que reutiliza estas mismas columnas. */
+const GRID_OCULTAS_HOSPITAL = ['cirujano','instrumentista'];
+function gridCols(){
+  return ROL==='Hospital' ? GRID_COLS.filter(c=>!GRID_OCULTAS_HOSPITAL.includes(c.k)) : GRID_COLS;
+}
 const ESTADOS = ['Enviado','En revisión','Creando TR','Finalizada','Error'];
 const ESTADO_COLOR = {'Enviado':'#0a5c8a','En revisión':'#e08e0b','Creando TR':'#7a3ea8','Finalizada':'#1e8f5a','Error':'#c0392b'};
 const PEND='Pendiente reposición'; // estado de una hoja guardada sin la reposición todavía
@@ -1366,8 +1375,9 @@ async function loadHojas(){
 function toggleScope(){ SCOPE = SCOPE==='hoy'?'historial':'hoy'; loadHojas(); }
 function renderGrid(){
   const head=document.getElementById('gridHead');
-  const cols=GRID_COLS.map(c=>`<th>${c.l}</th>`).join('')+'<th></th>';
-  const filt=GRID_COLS.map(c=> c.estado?'<th></th>':`<th><input placeholder="Filtrar…" oninput="onFilter('${c.k}',this.value)" value="${attr(COLF[c.k])}"></th>`).join('')+'<th></th>';
+  const GC=gridCols();
+  const cols=GC.map(c=>`<th>${c.l}</th>`).join('')+'<th></th>';
+  const filt=GC.map(c=> c.estado?'<th></th>':`<th><input placeholder="Filtrar…" oninput="onFilter('${c.k}',this.value)" value="${attr(COLF[c.k])}"></th>`).join('')+'<th></th>';
   head.innerHTML=`<tr>${cols}</tr><tr class="filter-row">${filt}</tr>`;
   const rows=filtered();
   const b=document.getElementById('gridBody'); b.innerHTML='';
@@ -1376,9 +1386,9 @@ function renderGrid(){
   const foot=document.getElementById('gridFoot');
   foot.textContent = rows.length===1?'1 hoja':(rows.length+' hojas');
   if(!ROWS.length){ foot.textContent=''; return; }
-  if(!rows.length){ b.innerHTML=`<tr><td colspan="${GRID_COLS.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  if(!rows.length){ b.innerHTML=`<tr><td colspan="${GC.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
   rows.forEach(r=>{
-    const tds=GRID_COLS.map(c=>{
+    const tds=GC.map(c=>{
       if(c.link){ const txt=(r[c.k]!=null&&r[c.k]!=='')?r[c.k]:r.id; return `<td><span class="link-cell" onclick="verHoja(${r.id})" title="Abrir la hoja de consumo">${esc(txt)}</span></td>`; }
       if(c.estado) return `<td>${estadoBadge(r.estado)}</td>`;
       if(c.tag) return `<td><span class="tag">${esc(r[c.k])}</span></td>`;
@@ -1493,7 +1503,7 @@ function pendFiltered(){
 function onPendFilter(k,v){ PEND_COLF[k]=v; renderPendientes(); }
 function renderPendientes(){
   // Mismas columnas que el grid principal, sin la de Estado (todas están 'Pendiente reposición') ni la de ID (link).
-  const cols=GRID_COLS.filter(c=>!c.estado && !c.link);
+  const cols=gridCols().filter(c=>!c.estado && !c.link);
   const head=document.getElementById('pendHead');
   head.innerHTML=`<tr>${cols.map(c=>`<th>${c.l}</th>`).join('')}<th></th></tr>`
     +`<tr class="filter-row">${cols.map(c=>`<th><input placeholder="Filtrar…" oninput="onPendFilter('${c.k}',this.value)" value="${attr(PEND_COLF[c.k])}"></th>`).join('')}<th></th></tr>`;
@@ -1591,11 +1601,45 @@ function renderReemplazoView(h){
   html+='<div class="tbl-wrap"><table><thead><tr>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
   (h.detalle||[]).forEach(d=>{ html+='<tr>'+DET_COLS.map(c=>{ const v = c.derived ? (d.descripcion_nutricare||catDesc(d.codigo)) : (c.k==='numero_equipo' ? equipoDemarcado(d.numero_equipo) : d[c.k]); return `<td>${esc(v)}</td>`; }).join('')+'</tr>'; });
   html+='</tbody></table></div>';
+  html+='<div class="section-title" style="margin-top:22px">Diferencias con la hoja original</div>';
+  html+='<div class="sub" style="margin:-4px 0 10px">Qué cambió respecto de la hoja de la que salió este reemplazo.</div>';
+  html+='<div id="difPanel"><div class="empty" style="padding:18px">Cargando…</div></div>';
   html+='<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">';
   html+=`<button class="btn-ghost" onclick="imprimirHoja()">🖨️ Imprimir</button>`;
   if(canBodega() && h.estado!=='Resuelto'){ html+=`<button class="btn-primary" onclick="resolverReemplazo(${h.id})">✔️ Marcar como resuelto</button>`; }
   html+='</div>';
   document.getElementById('verBody').innerHTML=html;
+  loadDiferencias(h.id);   // en segundo plano
+}
+
+/* Diferencias entre un reemplazo y la hoja original. Es lo que Bodega necesita
+   para no tener que abrir las dos hojas y compararlas a ojo. Usa el mismo motor
+   que la auditoría, así que un cambio se describe igual en los dos lugares. */
+async function loadDiferencias(id){
+  const cont=document.getElementById('difPanel'); if(!cont) return;
+  try{
+    const r=await api('GET','/hojas/'+id+'/diferencias');
+    const cambios=(r&&r.cambios)||[];
+    if(!r || !r.origen){
+      cont.innerHTML='<div class="empty" style="padding:18px"><div>No hay una hoja original con la cual comparar.</div></div>';
+      return;
+    }
+    if(!cambios.length){
+      cont.innerHTML=`<div class="empty" style="padding:18px"><div>El reemplazo no tiene diferencias con la hoja N° ${esc(r.origen.numero_hoja)} (aparte del N° de hoja).</div></div>`;
+      return;
+    }
+    let html='<div class="tbl-wrap"><table><thead><tr><th>Sección</th><th>Línea</th><th>Campo</th>'
+           + `<th>Hoja original (N° ${esc(r.origen.numero_hoja)})</th><th>Este reemplazo</th></tr></thead><tbody>`;
+    cambios.forEach(c=>{
+      html+=`<tr><td>${esc(c.seccion)}</td><td>${esc(c.linea)}</td><td>${esc(c.campo)}</td>`
+          + `<td>${esc(c.anterior)}</td><td><b>${esc(c.nuevo)}</b></td></tr>`;
+    });
+    html+='</tbody></table></div>';
+    html+=`<div class="grid-foot">${cambios.length===1?'1 diferencia':(cambios.length+' diferencias')}</div>`;
+    cont.innerHTML=html;
+  }catch(e){
+    cont.innerHTML=`<div class="empty" style="padding:18px;color:var(--danger)">No se pudieron cargar las diferencias: ${esc(e.message)}</div>`;
+  }
 }
 
 /* Vista editable (Bodega/Administrador): encabezado + detalle con columna Lote. */
@@ -2673,7 +2717,15 @@ async function openReemplazo(id){
     document.getElementById('wizStep2').classList.remove('hidden');
     document.getElementById('enviarBtn').classList.remove('hidden');  // el reemplazo se corrige y se envía
     document.getElementById('guardarBtn').classList.remove('hidden');
-    WIZ.numeroSugerido = await siguienteNumeroHoja();   // el reemplazo es una hoja nueva: consecutivo propio
+    /* El N° del reemplazo se deriva del original: HDT-3001 -> HDT-3001-R-1.
+       La R es de Reposición y el número corre por cada reemplazo de esa misma
+       hoja. Lo calcula la API, que es la única que puede garantizar que el
+       consecutivo no choque con otro. Si falla, se cae al consecutivo normal
+       para no dejar al usuario sin número. */
+    try{
+      const r = await api('GET','/hojas/'+id+'/siguiente-reemplazo');
+      WIZ.numeroSugerido = (r && r.numero) || await siguienteNumeroHoja();
+    }catch(e){ WIZ.numeroSugerido = await siguienteNumeroHoja(); }
     fillStep2(h, h.detalle||[]);
   }catch(e){ toast('No se pudo crear el reemplazo: '+e.message); }
 }
