@@ -1,0 +1,36 @@
+# ============================================================================
+#  HDT · Finales de línea
+#  ---------------------------------------------------------------------------
+#  Sin este archivo, cada quien commitea con los finales de línea de su máquina
+#  y aparecen diffs enormes sin un solo cambio real: así fue como database/07 a
+#  11 quedaron con 2.664 líneas agregadas y 2.664 borradas de puro ruido.
+#
+#  Lo que manda acá le gana a core.autocrlf, así que la regla vale igual en
+#  Windows, en Linux y en el runner de Azure.
+# ============================================================================
+
+# Todo lo que git detecte como texto se guarda y se saca con LF.
+# El código corre en Azure Functions (Linux) y lo edita VS Code, que maneja LF
+# sin problema desde hace años.
+* text=auto eol=lf
+
+# Excepción: los scripts que ejecuta Windows se sacan con CRLF.
+# En el repositorio igual se guardan con LF; la conversión es al hacer checkout.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binarios: git no los toca ni intenta convertirlos.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.bmp  binary
+*.ico  binary
+*.pdf  binary
+*.pptx binary
+*.xlsx binary
+*.docx binary
+*.zip  binary
+*.bundle binary
