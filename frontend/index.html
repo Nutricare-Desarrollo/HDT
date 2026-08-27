@@ -147,6 +147,53 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .btn-add{flex:0 0 auto;width:43px;height:43px;padding:0;border-radius:8px;background:var(--accent);color:#fff;font-size:22px;font-weight:400;line-height:1;display:flex;align-items:center;justify-content:center}
 .btn-add:hover{background:#0e8b99}
 .cat-hint{margin:6px 0 0;font-size:12.5px;line-height:1.4;color:#8c5c05}
+/* Modal de catalogo (cirujano, regimen, ...): listado + filtro + alta/edicion */
+.cat-bar{display:flex;gap:8px;margin-bottom:12px}
+.cat-bar input{flex:1;min-width:0}
+.cat-bar .btn-primary{flex:0 0 auto;white-space:nowrap}
+.cat-ocr{margin:-4px 0 12px;padding:9px 12px;border-radius:8px;background:#fdf6e6;border:1px solid #f0dfae;font-size:12.5px;line-height:1.45;color:#8c5c05}
+.cat-form{border:1px solid var(--line);border-radius:10px;padding:13px 14px;margin-bottom:12px;background:#f6fafc}
+.cat-form label{display:block;font-size:13px;color:var(--muted);margin-bottom:5px;font-weight:600}
+.cat-form-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.cat-form-foot button{padding:9px 14px;font-size:13.5px}
+.cat-fhint{margin:8px 0 0;font-size:12.5px;line-height:1.4;color:var(--muted)}
+.cat-fhint.warn{color:#8c5c05}
+.cat-ferr{margin:6px 0 0;font-size:13px;color:var(--danger)}
+.cat-list{max-height:44vh;overflow:auto;border:1px solid var(--line);border-radius:10px}
+.cat-list table{white-space:normal}
+.cat-list thead th{font-size:12px}
+.cat-list tbody tr.inact td:first-child{color:var(--muted);text-decoration:line-through}
+.cat-list td.cat-acts{white-space:nowrap;text-align:right}
+.cat-vacio{padding:26px 14px;text-align:center;color:var(--muted);font-size:13.5px}
+.cat-act{background:#e8f4fb;color:var(--brand);padding:6px 11px;border-radius:6px;font-size:12.5px;font-weight:600;margin-left:6px}
+.cat-act:hover{background:#d3ebf8}
+.cat-act.off{background:#fbeae8;color:var(--danger)}
+.cat-act.off:hover{background:#f6d8d4}
+.cat-badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.cat-badge.on{background:#e3f5ec;color:var(--ok)}
+.cat-badge.off{background:#eef1f4;color:var(--muted)}
+.cat-badge.use{background:#e8f0fb;color:var(--brand);margin-left:7px}
+.cat-foot{display:flex;justify-content:space-between;align-items:center;margin-top:11px;gap:12px}
+.cat-chk{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);cursor:pointer;user-select:none}
+.cat-chk input{width:auto;margin:0;padding:0}
+.cat-count{font-size:12.5px;color:var(--muted);font-weight:600;white-space:nowrap}
+/* En celular la tabla de 3 columnas deja el nombre en 4 renglones: cada fila
+   pasa a ser un bloque (nombre arriba, estado y acciones debajo). */
+@media(max-width:640px){
+  .cat-bar{flex-wrap:wrap}
+  .cat-bar .btn-primary{width:100%;justify-content:center}
+  .cat-list{max-height:40vh}   /* deja a la vista el pie con 'Ver desactivados' */
+  .cat-list thead{display:none}
+  .cat-list tbody tr{display:block;padding:10px 12px;border-bottom:1px solid var(--line)}
+  .cat-list tbody tr:last-child{border-bottom:none}
+  .cat-list tbody tr:hover{background:none}
+  .cat-list tbody td{display:block;border:none;padding:0}
+  .cat-list tbody td:first-child{font-size:14.5px;line-height:1.35}
+  .cat-list tbody td:nth-child(2){margin-top:7px}
+  .cat-list td.cat-acts{display:flex;gap:8px;margin-top:9px;text-align:left}
+  .cat-act{margin:0;flex:1;text-align:center;padding:9px 10px}
+  .cat-badge.use{margin-left:0;display:inline-block;margin-top:5px}
+}
 .locked-note{display:flex;gap:10px;align-items:flex-start;background:#f7fafc;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:10px;padding:12px 14px;margin:0 0 16px;font-size:13.5px;line-height:1.5;color:#41525e}
 .locked-note .ic{font-size:18px;line-height:1.2}
 .locked-note b{color:var(--txt)}
@@ -182,6 +229,7 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .modal-body{padding:16px 18px;overflow:auto}
 .modal-body img{max-width:100%;border-radius:8px}
 .modal.sm{max-width:460px}
+.modal.sm-md{max-width:620px}
 .modal-foot{padding:14px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px}
 #envioModal .field label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
 #envioModal .field input{width:100%}
@@ -588,22 +636,48 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
 </div>
 
 <!-- MODAL de confirmación genérico -->
-<!-- MODAL agregar / editar una opcion de catalogo (cirujano, regimen, ...) -->
+<!-- MODAL de catalogo (cirujano, regimen, ...): listado con filtro, alta y edicion -->
 <div id="catModal" class="overlay hidden">
-  <div class="modal sm">
-    <div class="modal-head"><h3 id="catTitle">Agregar</h3><button class="x" onclick="closeCat()">&times;</button></div>
+  <div class="modal sm-md">
+    <div class="modal-head"><h3 id="catTitle">Cat&aacute;logo</h3><button class="x" onclick="closeCat()">&times;</button></div>
     <div class="modal-body">
-      <div class="field full">
-        <label id="catLabel">Nombre <span class="req">*</span></label>
-        <input id="catNombre" type="text" maxlength="200">
+
+      <!-- Filtro + boton de alta, sobre el listado -->
+      <div class="cat-bar">
+        <input id="catFiltro" type="text" placeholder="Filtrar&hellip;" oninput="catFiltrar(this.value)" autocomplete="off">
+        <button type="button" class="btn-primary" id="catAddBtn" onclick="catNuevo()">&#43;&nbsp;<span id="catAddTxt">Agregar</span></button>
       </div>
-      <p id="catHint" style="margin:10px 0 0;font-size:12.5px;color:var(--muted)"></p>
-      <p id="catErr" style="margin:8px 0 0;font-size:13px;color:var(--danger)"></p>
+
+      <!-- Lo que traia la hoja cuando no esta en el catalogo (viene del OCR) -->
+      <p id="catOcr" class="cat-ocr hidden"></p>
+
+      <!-- Formulario de alta / edicion: oculto hasta que se necesita -->
+      <div id="catForm" class="cat-form hidden">
+        <label id="catLabel">Nombre <span class="req">*</span></label>
+        <input id="catNombre" type="text" maxlength="200" autocomplete="off">
+        <p id="catHint" class="cat-fhint"></p>
+        <p id="catErr" class="cat-ferr"></p>
+        <div class="cat-form-foot">
+          <button type="button" class="btn-ghost" onclick="catCancelForm()">Cancelar</button>
+          <button type="button" class="btn-primary" id="catOkBtn" onclick="guardarCat()">Agregar</button>
+        </div>
+      </div>
+
+      <!-- Listado -->
+      <div class="tbl-wrap cat-list">
+        <table>
+          <thead><tr><th>Nombre</th><th style="width:92px">Estado</th><th style="width:172px"></th></tr></thead>
+          <tbody id="catRows"></tbody>
+        </table>
+      </div>
+      <div class="cat-foot">
+        <label class="cat-chk"><input type="checkbox" id="catVerInact" onchange="catVerInactivos(this.checked)"> Ver desactivados</label>
+        <span id="catCount" class="cat-count"></span>
+      </div>
+
     </div>
     <div class="modal-foot">
-      <button class="btn-ghost" id="catNuevoBtn" onclick="catModoNuevo()" style="margin-right:auto">&#43; Agregar uno nuevo</button>
-      <button class="btn-ghost" onclick="closeCat()">Cancelar</button>
-      <button class="btn-primary" id="catOkBtn" onclick="guardarCat()">Guardar</button>
+      <button class="btn-ghost" onclick="closeCat()">Cerrar</button>
     </div>
   </div>
 </div>
@@ -793,15 +867,19 @@ function loteSearch(codigo, q, limit){
                   false -> la lista queda SIN seleccionar y debajo se avisa qué
                            decía la hoja, para que el usuario elija o lo agregue */
 const CATS = {
-  cirujano: { ruta:'cirujanos', etiq:'cirujano', lista:[], conservar:true,
+  cirujano: { ruta:'cirujanos', etiq:'cirujano', plural:'cirujanos', lista:[], conservar:true,
               ph:'Ej. Dr. Juan Pérez', max:200 },
   // max 60: es lo que aguanta la columna dbo.HojaConsumo.Regimen.
-  regimen:  { ruta:'regimenes', etiq:'régimen',  lista:[], conservar:false,
+  regimen:  { ruta:'regimenes', etiq:'régimen', plural:'regímenes', lista:[], conservar:false,
               ph:'Ej. INS', max:60 }
 };
 let CAT_KEY=null;   // catálogo abierto en el modal ('cirujano' / 'regimen')
 let CAT_CTX=null;   // id del <select> que lo abrió ('enc_regimen' / 'ver_regimen')
 let CAT_EDIT=null;  // id de la opción en edición; null = agregar nueva
+let CAT_TODOS=[];   // catálogo completo (activos + desactivados) que muestra el listado
+let CAT_INACT=false;// el listado incluye los desactivados
+let CAT_Q='';       // texto del filtro del listado
+let CAT_OCR='';     // lo que traía la hoja y no está en el catálogo (del OCR)
 
 // Carga todos los catálogos en paralelo. Si uno falla queda vacío: el campo
 // sigue usable con el botón "+" y no tumba el resto de la pantalla.
@@ -849,45 +927,152 @@ function catRefresh(key, idSel, val){
   const h=document.getElementById(idSel+'_hint'); if(h && el.value) h.remove();
 }
 
-/* Modal: agregar una opción nueva o corregir la que está seleccionada. */
-function openCat(key, idSel){
-  CAT_KEY=key; CAT_CTX=idSel;
+/* ============================================================================
+   Modal de catálogo (lo comparten Cirujano, Régimen y cualquier CATS futuro).
+
+   Es una pantalla de administración, no una caja de texto: abre mostrando el
+   listado completo con filtro, cada fila se puede corregir o desactivar, y el
+   alta está en el botón de arriba. Desactivar solo saca la opción de la lista
+   desplegable — la fila queda en la base y las hojas ya creadas no se tocan,
+   porque ahí el nombre se guardó como texto y no como Id.
+   ============================================================================ */
+
+/* Abre el modal en modo listado. Si el <select> traía un valor que no está en
+   el catálogo (típicamente lo que leyó el OCR), arranca con ese texto en el
+   filtro: así se ve de una si ya existe algo parecido y no se duplica. */
+async function openCat(key, idSel){
+  CAT_KEY=key; CAT_CTX=idSel; CAT_EDIT=null; CAT_INACT=false; CAT_TODOS=[];
   const c=CATS[key];
   const el=document.getElementById(idSel);
   const actual = el ? String(el.value||'').trim() : '';
-  const enCat = c.lista.find(x=>catNorm(x.nombre)===catNorm(actual));
-  document.getElementById('catLabel').innerHTML = 'Nombre del '+esc(c.etiq)+' <span class="req">*</span>';
+  // Ojo: el valor del OCR NO se mete en el filtro. Casi nunca calza exacto y el
+  // listado abriría vacío. Va en el aviso de arriba y precarga el alta.
+  CAT_OCR = (actual && !catEnCat(key,actual)) ? actual : '';
+  CAT_Q = '';
+
+  document.getElementById('catTitle').textContent = 'Catálogo de '+c.plural;
+  document.getElementById('catAddTxt').textContent = 'Agregar '+c.etiq;
+  const f=document.getElementById('catFiltro');
+  f.value = ''; f.placeholder = 'Filtrar '+c.plural+'…';
+  const avi=document.getElementById('catOcr');
+  avi.classList.toggle('hidden', !CAT_OCR);
+  if(CAT_OCR) avi.innerHTML = 'La hoja dice «<b>'+esc(CAT_OCR)+'</b>» y no está en el catálogo. '
+    + 'Búsquelo en la lista por si está escrito distinto, o agréguelo con el botón de arriba.';
+  document.getElementById('catVerInact').checked = false;
   const inp=document.getElementById('catNombre');
   inp.placeholder = c.ph||''; inp.maxLength = c.max||200;
-  if(enCat) catModoEditar(enCat); else catModoNuevo(actual);
-  document.getElementById('catErr').textContent='';
+  catCancelForm();
+  catFilas('<tr><td colspan="3" class="cat-vacio">Cargando…</td></tr>');
+  document.getElementById('catCount').textContent='';
   document.getElementById('catModal').classList.remove('hidden');
-  setTimeout(()=>{ const i=document.getElementById('catNombre'); if(i){ i.focus(); i.select(); } },50);
+  await catCargar();
+  setTimeout(()=>{ const i=document.getElementById('catFiltro'); if(i){ i.focus(); i.select(); } },50);
 }
-function catModoNuevo(nombre){
+
+/* Trae el catálogo completo (?todos=1 incluye los desactivados) y lo pinta.
+   Es una llamada aparte de loadCats(): esa alimenta el <select> y trae solo
+   los activos, esta alimenta el listado del modal. */
+async function catCargar(){
+  const c=CATS[CAT_KEY]; if(!c) return;
+  try{ CAT_TODOS = await api('GET','/'+c.ruta+'?todos=1') || []; }
+  catch(e){
+    CAT_TODOS=[];
+    catFilas('<tr><td colspan="3" class="cat-vacio">No se pudo cargar el catálogo: '+esc(e.message)+'</td></tr>');
+    return;
+  }
+  catPintar();
+}
+
+function catFiltrar(v){ CAT_Q=v; catPintar(); }
+function catVerInactivos(v){ CAT_INACT=!!v; catPintar(); }
+function catFilas(html){ const b=document.getElementById('catRows'); if(b) b.innerHTML=html; }
+
+function catPintar(){
+  const c=CATS[CAT_KEY]; if(!c) return;
+  const q=catNorm(CAT_Q);
+  const activos = x => x.activo !== false;   // el GET viejo no traía 'activo'
+  const total = CAT_TODOS.filter(x=>CAT_INACT||activos(x)).length;
+  const vis = CAT_TODOS.filter(x=>(CAT_INACT||activos(x)) && (!q||catNorm(x.nombre).includes(q)));
+
+  const sel=document.getElementById(CAT_CTX);
+  const enHoja = sel ? catNorm(sel.value) : '';
+
+  if(!vis.length){
+    const msg = CAT_Q
+      ? 'Ningún '+esc(c.etiq)+' coincide con «'+esc(CAT_Q)+'».<br>'
+        + '<button type="button" class="cat-act" style="margin:10px 0 0" onclick="catNuevo()">&#43; Agregar «'+esc(CAT_Q)+'»</button>'
+      : (CAT_INACT ? 'El catálogo está vacío.' : 'No hay '+esc(c.plural)+' activos.');
+    catFilas('<tr><td colspan="3" class="cat-vacio">'+msg+'</td></tr>');
+  }else{
+    catFilas(vis.map(x=>{
+      const off = !activos(x);
+      const usa = enHoja && catNorm(x.nombre)===enHoja;
+      return '<tr class="'+(off?'inact':'')+'">'
+        + '<td>'+esc(x.nombre)+(usa?' <span class="cat-badge use">en esta hoja</span>':'')+'</td>'
+        + '<td><span class="cat-badge '+(off?'off':'on')+'">'+(off?'Inactivo':'Activo')+'</span></td>'
+        + '<td class="cat-acts">'
+        +   '<button type="button" class="cat-act" onclick="catEditar('+x.id+')">Editar</button>'
+        +   '<button type="button" class="cat-act '+(off?'':'off')+'" onclick="catActivo('+x.id+','+(off?'true':'false')+')">'+(off?'Activar':'Desactivar')+'</button>'
+        + '</td></tr>';
+    }).join(''));
+  }
+  document.getElementById('catCount').textContent =
+    (vis.length===total) ? (total+' en total') : (vis.length+' de '+total);
+}
+
+/* ── Formulario de alta / edición (aparece sobre el listado) ─────────────── */
+
+function catNuevo(){
   CAT_EDIT=null;
   const c=CATS[CAT_KEY]||{etiq:''};
-  document.getElementById('catTitle').textContent='Agregar '+c.etiq;
-  document.getElementById('catNombre').value = (typeof nombre==='string') ? nombre : '';
-  document.getElementById('catOkBtn').textContent='Agregar';
-  document.getElementById('catNuevoBtn').classList.add('hidden');
-  document.getElementById('catHint').textContent='Se agregará al catálogo y quedará seleccionado en la hoja.';
-  document.getElementById('catErr').textContent='';
-  const i=document.getElementById('catNombre'); if(i) i.focus();
+  // Precarga lo que se tecleó en el filtro; si no hay nada, lo que leyó el OCR.
+  // Cuando el texto viene del OCR se avisa: de ahí salen los nombres mal escritos.
+  const tecleado = String(CAT_Q||'').replace(/\s+/g,' ').trim();
+  const pre = tecleado || CAT_OCR;
+  const esOcr = !!pre && !tecleado;
+  document.getElementById('catLabel').innerHTML = 'Nombre del '+esc(c.etiq)+' <span class="req">*</span>';
+  document.getElementById('catNombre').value = pre;
+  document.getElementById('catOkBtn').textContent = 'Agregar';
+  const h=document.getElementById('catHint');
+  h.textContent = esOcr
+    ? 'Revise la ortografía antes de agregar: este texto salió de la foto de la hoja.'
+    : 'Se agregará al catálogo y quedará seleccionado en la hoja.';
+  h.classList.toggle('warn', esOcr);
+  catAbrirForm();
 }
-function catModoEditar(op){
-  CAT_EDIT=op.id;
+
+function catEditar(id){
   const c=CATS[CAT_KEY]||{etiq:''};
-  document.getElementById('catTitle').textContent='Editar '+c.etiq;
-  document.getElementById('catNombre').value=op.nombre;
-  document.getElementById('catOkBtn').textContent='Guardar cambios';
-  document.getElementById('catNuevoBtn').classList.remove('hidden');
-  document.getElementById('catHint').textContent='Corregir el nombre no cambia las hojas de consumo ya creadas.';
+  const op=CAT_TODOS.find(x=>x.id===id); if(!op) return;
+  CAT_EDIT=id;
+  document.getElementById('catLabel').innerHTML = 'Nombre del '+esc(c.etiq)+' <span class="req">*</span>';
+  document.getElementById('catNombre').value = op.nombre;
+  document.getElementById('catOkBtn').textContent = 'Guardar cambios';
+  const h=document.getElementById('catHint');
+  h.textContent = 'Corregir el nombre no cambia las hojas de consumo ya creadas.';
+  h.classList.remove('warn');
+  catAbrirForm();
 }
+
+function catAbrirForm(){
+  document.getElementById('catErr').textContent='';
+  document.getElementById('catForm').classList.remove('hidden');
+  document.getElementById('catAddBtn').classList.add('hidden');
+  setTimeout(()=>{ const i=document.getElementById('catNombre'); if(i){ i.focus(); i.select(); } },30);
+}
+function catCancelForm(){
+  CAT_EDIT=null;
+  document.getElementById('catForm').classList.add('hidden');
+  document.getElementById('catAddBtn').classList.remove('hidden');
+  document.getElementById('catErr').textContent='';
+}
+
 function closeCat(){
   document.getElementById('catModal').classList.add('hidden');
-  CAT_KEY=null; CAT_CTX=null; CAT_EDIT=null;
+  CAT_KEY=null; CAT_CTX=null; CAT_EDIT=null; CAT_TODOS=[]; CAT_Q=''; CAT_OCR=''; CAT_INACT=false;
 }
+
+/* Guarda el formulario: POST si es alta, PUT si es corrección. */
 async function guardarCat(){
   const key=CAT_KEY; if(!key) return;
   const c=CATS[key];
@@ -896,18 +1081,45 @@ async function guardarCat(){
   if(!nombre){ err.textContent='Escriba el nombre del '+c.etiq+'.'; return; }
   const btn=document.getElementById('catOkBtn'); const txt=btn.textContent;
   btn.disabled=true; btn.textContent='Guardando…'; err.textContent='';
+  const editando = !!CAT_EDIT;
+  const anterior = editando ? ((CAT_TODOS.find(x=>x.id===CAT_EDIT)||{}).nombre||'') : '';
   try{
-    const editando = !!CAT_EDIT;
     const r = editando ? await api('PUT','/'+c.ruta+'/'+CAT_EDIT,{nombre})
                        : await api('POST','/'+c.ruta,{nombre});
+    const guardado = (r&&r.nombre)||nombre;
     const ctx=CAT_CTX;
-    await loadCats();
-    closeCat();
-    if(ctx) catRefresh(key, ctx, (r&&r.nombre)||nombre);
+    await loadCats();   // <select>: solo activos
+    await catCargar();  // listado del modal: todos
+    catCancelForm();
+    const sel=document.getElementById(ctx);
+    if(sel){
+      // Al agregar, el nuevo queda elegido en la hoja. Al corregir, solo se
+      // reemplaza si lo que se corrigió era justamente lo que la hoja traía.
+      if(!editando) catRefresh(key, ctx, guardado);
+      else if(anterior && catNorm(sel.value)===catNorm(anterior)) catRefresh(key, ctx, guardado);
+      else catRefresh(key, ctx, sel.value);
+    }
     const E = c.etiq.charAt(0).toUpperCase()+c.etiq.slice(1);
     toast(E+(editando?' actualizado':' agregado'));
+    if(!editando) closeCat();   // el alta cierra: ya quedó seleccionado en la hoja
   }catch(e){ err.textContent=e.message; }
   finally{ btn.disabled=false; btn.textContent=txt; }
+}
+
+/* Activa / desactiva una opción. Desactivar la saca de la lista desplegable
+   pero no borra nada ni toca las hojas ya guardadas: es reversible. */
+async function catActivo(id, activar){
+  const c=CATS[CAT_KEY]; if(!c) return;
+  const op=CAT_TODOS.find(x=>x.id===id); if(!op) return;
+  const ctx=CAT_CTX, key=CAT_KEY;
+  try{
+    await api('PUT','/'+c.ruta+'/'+id,{activo:!!activar});
+    await loadCats();
+    await catCargar();
+    const sel=document.getElementById(ctx);
+    if(sel) catRefresh(key, ctx, sel.value);
+    toast(op.nombre+(activar?' activado':' desactivado'));
+  }catch(e){ toast(e.message); }
 }
 
 /* ===== Catálogo de equipos (Anexo #2) para validar "N° equipo" ===== */

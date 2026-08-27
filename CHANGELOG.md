@@ -2,6 +2,42 @@
 
 Registro de los cambios del proyecto, por parte/tanda.
 
+## [Parte 6] — Catálogo de Cirujano / Régimen: pantalla de administración
+
+El botón **＋** de las listas desplegables del encabezado abría una sola caja de texto, así que
+la única forma de ver o corregir el catálogo era por SQL. Ahora abre una pantalla de
+administración. El cambio es del modal genérico, así que **Cirujano y Régimen lo comparten**
+(y cualquier catálogo que se agregue a `CATS` lo hereda).
+
+### API (Azure Functions) — sin migración de base
+- `GET /api/cirujanos` y `GET /api/regimenes`: nuevo parámetro **`?todos=1`** para traer también
+  los desactivados (lo usa el listado del modal; el `<select>` sigue pidiendo solo los activos).
+  Las dos respuestas incluyen ahora el campo **`activo`**.
+- `PUT /api/cirujanos/{id}` y `PUT /api/regimenes/{id}`: aceptan **`{ nombre }`, `{ activo }` o
+  los dos**. Se quitó el `AND Activo = TRUE` del `UPDATE` para poder **reactivar** una opción
+  desactivada. Los campos que no vienen en el body no se tocan (`COALESCE`).
+- No hay cambios de esquema: la columna `Activo` ya existía en `cat.Cirujano` y `cat.Regimen`.
+
+### Frontend
+- El **＋** abre el **catálogo completo** en un listado con **filtro por nombre**, botón
+  **＋ Agregar** sobre el grid, y por cada fila **Editar** (corrige el nombre) y
+  **Desactivar / Activar**.
+- **Desactivar no borra**: saca la opción de la lista desplegable pero la fila queda en la base y
+  es reversible con el check **Ver desactivados**. Las hojas ya creadas nunca se tocan — ahí el
+  nombre se guardó como texto, no como Id.
+- El valor que leyó el OCR ya **no se precarga en el filtro** (casi nunca calza exacto y el
+  listado abría vacío): se muestra en un aviso arriba del grid y precarga el formulario de alta,
+  con la advertencia de revisar la ortografía antes de agregar.
+- La fila que corresponde al valor de la hoja abierta se marca con la etiqueta **«en esta hoja»**.
+- Al agregar, la opción nueva queda seleccionada en la hoja y el modal se cierra (igual que antes).
+  Al corregir un nombre, el `<select>` se actualiza solo si lo corregido era justamente lo que
+  traía la hoja.
+- En celular cada fila se apila (nombre arriba, estado y botones debajo).
+
+### Pendiente
+- Limpiar la basura que sembró `13_Cirujano.sql` desde las hojas y cirugías (ver
+  `database/13b_LimpiarCirujanos.sql`), o desactivarla desde la pantalla nueva.
+
 ## [Parte 5] — Pedido Pendiente (Fase 2)
 
 ### Base de datos — `database/06_PedidoPendiente.sql` (idempotente)

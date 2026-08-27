@@ -172,8 +172,11 @@ app.http('cirujanos-list', {
     const user = getUser(request);
     if (!user) return json(401, { error: 'No autenticado' });
     try {
+      // ?todos=1 -> incluye los desactivados (lo usa la pantalla de catalogo).
+      const todos = /^(1|true|si)$/i.test(String(request.query.get('todos') || ''));
       const r = await query(
-        `SELECT Id AS id, Nombre AS nombre FROM cat.Cirujano WHERE Activo = TRUE ORDER BY Nombre`);
+        `SELECT Id AS id, Nombre AS nombre, Activo AS activo FROM cat.Cirujano
+          ${todos ? '' : 'WHERE Activo = TRUE'} ORDER BY Nombre`);
       return json(200, r.rows);
     } catch (e) {
       context.error(e);
@@ -217,14 +220,22 @@ app.http('cirujano-update', {
     const id = parseInt(request.params.id, 10);
     if (!id) return json(400, { error: 'Id inv\u00e1lido' });
     const body = await request.json();
-    const nombre = normNombre(body && body.nombre);
-    if (!nombre) return json(400, { error: 'El nombre del cirujano es obligatorio' });
-    if (nombre.length > 200) return json(400, { error: 'El nombre no puede superar los 200 caracteres' });
+    // Se puede mandar solo { nombre }, solo { activo } o los dos.
+    const cambiaNombre = !!body && body.nombre !== undefined;
+    const cambiaActivo = !!body && body.activo !== undefined;
+    if (!cambiaNombre && !cambiaActivo) return json(400, { error: 'No hay nada que actualizar' });
+    const nombre = cambiaNombre ? normNombre(body.nombre) : null;
+    if (cambiaNombre && !nombre) return json(400, { error: 'El nombre del cirujano es obligatorio' });
+    if (cambiaNombre && nombre.length > 200) return json(400, { error: 'El nombre no puede superar los 200 caracteres' });
     try {
+      // Sin "AND Activo = TRUE": hay que poder reactivar uno desactivado.
       const r = await query(
-        `UPDATE cat.Cirujano SET Nombre=$1, ActualizadoPor=$2, FechaActualizacion=(now() at time zone 'utc')
-          WHERE Id=$3 AND Activo = TRUE RETURNING Id AS id, Nombre AS nombre`,
-        [nombre, user.name || user.email, id]);
+        `UPDATE cat.Cirujano
+            SET Nombre = COALESCE($1, Nombre),
+                Activo = COALESCE($2, Activo),
+                ActualizadoPor = $3, FechaActualizacion = (now() at time zone 'utc')
+          WHERE Id = $4 RETURNING Id AS id, Nombre AS nombre, Activo AS activo`,
+        [nombre, cambiaActivo ? !!body.activo : null, user.name || user.email, id]);
       if (!r.rowCount) return json(404, { error: 'El cirujano no existe' });
       return json(200, r.rows[0]);
     } catch (e) {
@@ -246,8 +257,11 @@ app.http('regimenes-list', {
     const user = getUser(request);
     if (!user) return json(401, { error: 'No autenticado' });
     try {
+      // ?todos=1 -> incluye los desactivados (lo usa la pantalla de catalogo).
+      const todos = /^(1|true|si)$/i.test(String(request.query.get('todos') || ''));
       const r = await query(
-        `SELECT Id AS id, Nombre AS nombre FROM cat.Regimen WHERE Activo = TRUE ORDER BY Nombre`);
+        `SELECT Id AS id, Nombre AS nombre, Activo AS activo FROM cat.Regimen
+          ${todos ? '' : 'WHERE Activo = TRUE'} ORDER BY Nombre`);
       return json(200, r.rows);
     } catch (e) {
       context.error(e);
@@ -291,14 +305,22 @@ app.http('regimen-update', {
     const id = parseInt(request.params.id, 10);
     if (!id) return json(400, { error: 'Id inv\u00e1lido' });
     const body = await request.json();
-    const nombre = normNombre(body && body.nombre);
-    if (!nombre) return json(400, { error: 'El nombre del r\u00e9gimen es obligatorio' });
-    if (nombre.length > 60) return json(400, { error: 'El nombre no puede superar los 60 caracteres' });
+    // Se puede mandar solo { nombre }, solo { activo } o los dos.
+    const cambiaNombre = !!body && body.nombre !== undefined;
+    const cambiaActivo = !!body && body.activo !== undefined;
+    if (!cambiaNombre && !cambiaActivo) return json(400, { error: 'No hay nada que actualizar' });
+    const nombre = cambiaNombre ? normNombre(body.nombre) : null;
+    if (cambiaNombre && !nombre) return json(400, { error: 'El nombre del r\u00e9gimen es obligatorio' });
+    if (cambiaNombre && nombre.length > 60) return json(400, { error: 'El nombre no puede superar los 60 caracteres' });
     try {
+      // Sin "AND Activo = TRUE": hay que poder reactivar uno desactivado.
       const r = await query(
-        `UPDATE cat.Regimen SET Nombre=$1, ActualizadoPor=$2, FechaActualizacion=(now() at time zone 'utc')
-          WHERE Id=$3 AND Activo = TRUE RETURNING Id AS id, Nombre AS nombre`,
-        [nombre, user.name || user.email, id]);
+        `UPDATE cat.Regimen
+            SET Nombre = COALESCE($1, Nombre),
+                Activo = COALESCE($2, Activo),
+                ActualizadoPor = $3, FechaActualizacion = (now() at time zone 'utc')
+          WHERE Id = $4 RETURNING Id AS id, Nombre AS nombre, Activo AS activo`,
+        [nombre, cambiaActivo ? !!body.activo : null, user.name || user.email, id]);
       if (!r.rowCount) return json(404, { error: 'El r\u00e9gimen no existe' });
       return json(200, r.rows[0]);
     } catch (e) {
