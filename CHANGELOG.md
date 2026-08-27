@@ -2,6 +2,23 @@
 
 Registro de los cambios del proyecto, por parte/tanda.
 
+## [Parte 7] — N° de línea en el detalle de la hoja
+
+Los paneles **Diferencias con la hoja original** (reemplazos) e **Historial de cambios** describen
+cada cambio como Sección `Detalle` / Línea `2`, pero el grid de detalle no mostraba ese número:
+había que contar las filas a ojo para ubicar la línea.
+
+### Frontend — sin cambios de API ni de base
+- Nueva primera columna **`#`** en el grid de detalle de las tres vistas de una hoja: la de
+  reemplazo (Bodega), la editable (Bodega/Admin) y la de solo lectura (Hospital).
+- El número es la **posición 1-based de la línea**, que es exactamente lo que graba la auditoría
+  (`api/src/auditoria.js`, `linea = i + 1`). En el grid editable se renumera solo al agregar o
+  borrar líneas.
+- La columna **Línea** de los dos paneles es ahora un enlace: al hacer clic **salta a esa fila del
+  detalle y la resalta** un par de segundos.
+- No es enlace cuando no hay a dónde ir: filas de `Encabezado` (sin línea) y de `Línea eliminada`,
+  cuyo número es la posición en la hoja **anterior** y ya no existe en el grid actual.
+
 ## [Parte 6] — Catálogo de Cirujano / Régimen: pantalla de administración
 
 El botón **＋** de las listas desplegables del encabezado abría una sola caja de texto, así que

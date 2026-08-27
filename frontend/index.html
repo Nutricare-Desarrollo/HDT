@@ -104,6 +104,15 @@ tbody td{padding:10px 12px;border-bottom:1px solid var(--line)}
 tbody td.clip{max-width:150px;overflow:hidden;text-overflow:ellipsis}
 tbody tr:hover{background:#f5fafc}
 .tag{background:#e8f4fb;color:var(--brand-d);padding:3px 9px;border-radius:20px;font-size:12px;font-weight:600}
+/* Numero de linea del detalle: es el mismo que muestran "Diferencias" e
+   "Historial de cambios" en su columna Linea, para poder ubicar la fila. */
+thead th.det-num{width:44px;text-align:right;padding-right:10px}
+tbody td.det-num{width:44px;text-align:right;padding-right:10px;color:var(--muted);font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;background:#fafcfd}
+/* Clic en la columna Linea de esos paneles -> salta a la fila y la resalta. */
+.linea-link{color:var(--brand);font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.linea-link:hover{color:var(--accent)}
+@keyframes rowFlash{0%,55%{background:#fff3cd}100%{background:transparent}}
+.row-flash td{animation:rowFlash 1.9s ease-out}
 thead tr.filter-row th{background:#0d5478;padding:6px 8px}
 thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;border:1px solid #2a6f95}
 .empty{padding:48px 20px;text-align:center;color:var(--muted)}
@@ -1783,8 +1792,8 @@ function renderVerReadonly(h){
   ENC.forEach(f=>{ html+=`<div class="k">${f.l}</div><div>${esc(h[f.k])}</div>`; });
   html+='</div>';
   html+='<div class="section-title">Detalle ('+(h.detalle?h.detalle.length:0)+' líneas)</div>';
-  html+='<div class="tbl-wrap"><table><thead><tr>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
-  (h.detalle||[]).forEach(d=>{ html+='<tr>'+DET_COLS.map(c=>{ const v = c.k==='numero_equipo' ? equipoDemarcado(d.numero_equipo) : d[c.k]; return `<td>${esc(v)}</td>`; }).join('')+'</tr>'; });
+  html+='<div class="tbl-wrap"><table><thead><tr><th class="det-num">#</th>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
+  (h.detalle||[]).forEach((d,i)=>{ html+=`<tr><td class="det-num">${i+1}</td>`+DET_COLS.map(c=>{ const v = c.k==='numero_equipo' ? equipoDemarcado(d.numero_equipo) : d[c.k]; return `<td>${esc(v)}</td>`; }).join('')+'</tr>'; });
   html+='</tbody></table></div>';
   html+='<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">';
   if(h.imagen_base64){ html+=`<button class="btn-ghost" onclick="verImagenGuardada()">🖼️ Ver hoja de consumo</button>`; }
@@ -1810,8 +1819,9 @@ function renderReemplazoView(h){
   if(h.hoja_origen_id){ html+=`<div>Creada a partir de la hoja <span class="link-cell" onclick="verHoja(${h.hoja_origen_id})">${esc(org)}</span>.</div>`; }
   else { html+='<div>—</div>'; }
   html+='<div class="section-title">Detalle ('+(h.detalle?h.detalle.length:0)+' líneas)</div>';
-  html+='<div class="tbl-wrap"><table><thead><tr>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
-  (h.detalle||[]).forEach(d=>{ html+='<tr>'+DET_COLS.map(c=>{ const v = c.derived ? (d.descripcion_nutricare||catDesc(d.codigo)) : (c.k==='numero_equipo' ? equipoDemarcado(d.numero_equipo) : d[c.k]); return `<td>${esc(v)}</td>`; }).join('')+'</tr>'; });
+  // El id de cada fila permite que la columna "Linea" de Diferencias salte aca.
+  html+='<div class="tbl-wrap"><table><thead><tr><th class="det-num">#</th>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
+  (h.detalle||[]).forEach((d,i)=>{ html+=`<tr id="remDet_${i+1}"><td class="det-num">${i+1}</td>`+DET_COLS.map(c=>{ const v = c.derived ? (d.descripcion_nutricare||catDesc(d.codigo)) : (c.k==='numero_equipo' ? equipoDemarcado(d.numero_equipo) : d[c.k]); return `<td>${esc(v)}</td>`; }).join('')+'</tr>'; });
   html+='</tbody></table></div>';
   html+='<div class="section-title" style="margin-top:22px">Diferencias con la hoja original</div>';
   html+='<div class="sub" style="margin:-4px 0 10px">Qué cambió respecto de la hoja de la que salió este reemplazo.</div>';
@@ -1841,6 +1851,25 @@ function renderReemplazoView(h){
   loadDiferencias(h.id);   // en segundo plano
 }
 
+/* Salta a una linea del detalle desde la columna "Linea" de los paneles de
+   cambios y la resalta un momento. Si la fila no existe (una linea eliminada,
+   cuyo numero es la posicion en la hoja ANTERIOR) no pasa nada. */
+function irALineaDetalle(prefijo, linea){
+  const tr=document.getElementById(prefijo+'_'+linea); if(!tr) return;
+  tr.scrollIntoView({behavior:'smooth', block:'center'});
+  tr.classList.remove('row-flash');
+  void tr.offsetWidth;            // reinicia la animacion si se hace clic dos veces
+  tr.classList.add('row-flash');
+  setTimeout(()=>tr.classList.remove('row-flash'), 2000);
+}
+// Celda "Linea": clickeable solo si esa fila esta en el grid de arriba.
+function celdaLinea(prefijo, seccion, linea){
+  const n=String(linea==null?'':linea).trim();
+  if(seccion!=='Detalle' || !n || !document.getElementById(prefijo+'_'+n)) return `<td>${esc(linea)}</td>`;
+  // Comillas simples y attr(): con JSON.stringify las dobles cerraban el onclick.
+  return `<td><span class="linea-link" title="Ir a la línea ${esc(n)} del detalle" onclick="irALineaDetalle('${prefijo}','${attr(n)}')">${esc(n)}</span></td>`;
+}
+
 /* Diferencias entre un reemplazo y la hoja original. Es lo que Bodega necesita
    para no tener que abrir las dos hojas y compararlas a ojo. Usa el mismo motor
    que la auditoría, así que un cambio se describe igual en los dos lugares. */
@@ -1860,7 +1889,7 @@ async function loadDiferencias(id){
     let html='<div class="tbl-wrap"><table><thead><tr><th>Sección</th><th>Línea</th><th>Campo</th>'
            + `<th>Hoja original (N° ${esc(r.origen.numero_hoja)})</th><th>Este reemplazo</th></tr></thead><tbody>`;
     cambios.forEach(c=>{
-      html+=`<tr><td>${esc(c.seccion)}</td><td>${esc(c.linea)}</td><td>${esc(c.campo)}</td>`
+      html+=`<tr><td>${esc(c.seccion)}</td>`+celdaLinea('remDet', c.seccion, c.linea)+`<td>${esc(c.campo)}</td>`
           + `<td>${esc(c.anterior)}</td><td><b>${esc(c.nuevo)}</b></td></tr>`;
     });
     html+='</tbody></table></div>';
@@ -1914,7 +1943,7 @@ function renderVerEdit(h){
   html+='<div class="section-title" style="margin-top:22px">Historial de cambios</div>';
   html+='<div class="tbl-wrap" id="audPanel"><div class="empty" style="padding:18px">Cargando…</div></div>';
   document.getElementById('verBody').innerHTML=html;
-  document.getElementById('verDetHead').innerHTML='<tr>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'<th></th></tr>';
+  document.getElementById('verDetHead').innerHTML='<tr><th class="det-num">#</th>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'<th></th></tr>';
   renderVerDet();
   sellCargar(h.id, 'verSellBody');   // en segundo plano
   loadAudHoja(h.id);                 // en segundo plano: no demora la apertura de la hoja
@@ -1944,7 +1973,9 @@ function renderVerDet(){
       return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onVerDet(this)"></td>`;
     }).join('');
     const tr=document.createElement('tr');
-    tr.innerHTML=tds+(bloq ? '<td></td>' : `<td><button class="rm-row" onclick="rmVerDet(${i})">✕</button></td>`);
+    // Se renumera solo: agregar o borrar una linea vuelve a pintar todo el tbody.
+    tr.id='verDet_'+(i+1);
+    tr.innerHTML=`<td class="det-num">${i+1}</td>`+tds+(bloq ? '<td></td>' : `<td><button class="rm-row" onclick="rmVerDet(${i})">✕</button></td>`);
     b.appendChild(tr);
   });
 }
@@ -2457,7 +2488,7 @@ async function loadAudHoja(id){
     let html='<table><thead><tr><th>Fecha y hora</th><th>Usuario</th><th>Sección</th><th>Línea</th><th>Campo</th><th>Valor anterior</th><th>Valor nuevo</th></tr></thead><tbody>';
     rows.forEach(r=>{
       html+=`<tr><td style="white-space:nowrap">${esc(r.fecha)}</td><td>${esc(r.usuario)}</td>`
-          + `<td>${esc(r.seccion)}</td><td>${esc(r.linea)}</td><td>${esc(r.campo)}</td>`
+          + `<td>${esc(r.seccion)}</td>`+celdaLinea('verDet', r.seccion, r.linea)+`<td>${esc(r.campo)}</td>`
           + `<td>${esc(r.valor_anterior)}</td><td>${esc(r.valor_nuevo)}</td></tr>`;
     });
     html+='</tbody></table>';
