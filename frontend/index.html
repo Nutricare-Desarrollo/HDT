@@ -772,21 +772,18 @@ const BODEGA_DET_COLS = [
   {k:'numero_lote',l:'N° Lote'}
 ];
 const BODEGA_DET_REQ = [{k:'codigo'},{k:'numero_equipo'},{k:'und'},{k:'reposicion_anaquel'}];
+/* Columnas del grid de Hojas de consumo. Las reutiliza el grid de Pendientes.
+   Cirujano e Instrumentista quedaron fuera para todos los roles: no sirven para
+   encontrar una hoja en el listado y cada columna de más cuesta en el celular.
+   Los dos datos siguen guardados y se ven al abrir la hoja. */
 const GRID_COLS = [
   {k:'consecutivo',l:'Consecutivo',link:true},
   {k:'fecha',l:'Fecha y hora'},{k:'usuario',l:'Usuario'},{k:'numero_hoja',l:'N°',tag:true},
-  {k:'regimen',l:'Régimen'},{k:'cirujano',l:'Cirujano',clip:true},{k:'instrumentista',l:'Instrumentista'},
+  {k:'regimen',l:'Régimen'},
   {k:'diagnostico',l:'Diagnóstico'},{k:'cantidad_lineas',l:'Artículos'},{k:'estado',l:'Estado',estado:true}
 ];
-/* Columnas del grid segun el rol. El rol Hospital no ve Cirujano ni
-   Instrumentista: son datos que a quien sube la hoja no le sirven para
-   encontrarla, y en el celular cada columna de más cuesta. Bodega y
-   Administrador las conservan. Aplica al grid de Hojas y al de Pendientes,
-   que reutiliza estas mismas columnas. */
-const GRID_OCULTAS_HOSPITAL = ['cirujano','instrumentista'];
-function gridCols(){
-  return ROL==='Hospital' ? GRID_COLS.filter(c=>!GRID_OCULTAS_HOSPITAL.includes(c.k)) : GRID_COLS;
-}
+// Antes esto filtraba columnas por rol; ya no hay ninguna que dependa del rol.
+function gridCols(){ return GRID_COLS; }
 const ESTADOS = ['Enviado','En revisión','Creando TR','Finalizada','Error'];
 const ESTADO_COLOR = {'Enviado':'#0a5c8a','En revisión':'#e08e0b','Creando TR':'#7a3ea8','Finalizada':'#1e8f5a','Error':'#c0392b'};
 const PEND='Pendiente reposición'; // estado de una hoja guardada sin la reposición todavía

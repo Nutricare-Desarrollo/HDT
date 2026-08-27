@@ -2,6 +2,20 @@
 
 Registro de los cambios del proyecto, por parte/tanda.
 
+## [Parte 8] — Grid de Hojas de consumo sin Cirujano ni Instrumentista
+
+### Frontend — sin cambios de API ni de base
+- Se quitan las columnas **Cirujano** e **Instrumentista** del grid de Hojas de consumo, ahora
+  para **todos los roles**. Hospital ya no las veía; se igualan Bodega y Administrador.
+- El grid queda en 8 columnas: Consecutivo, Fecha y hora, Usuario, N°, Régimen, Diagnóstico,
+  Artículos y Estado.
+- Los dos datos **se siguen capturando y guardando**: son campos obligatorios del encabezado y se
+  ven al abrir la hoja, en la impresión y en la auditoría. Lo único que se pierde es poder
+  filtrar el listado por ellos.
+- Se elimina `GRID_OCULTAS_HOSPITAL` y el filtrado de columnas por rol, que quedó sin uso:
+  `gridCols()` devuelve siempre las mismas columnas.
+- Aplica también al grid de **Pendientes de reposición**, que reutiliza estas columnas.
+
 ## [Parte 7] — N° de línea en el detalle de la hoja
 
 Los paneles **Diferencias con la hoja original** (reemplazos) e **Historial de cambios** describen
