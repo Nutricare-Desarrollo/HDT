@@ -2,6 +2,43 @@
 
 Registro de los cambios del proyecto, por parte/tanda.
 
+## [Parte 9] — Detalle de la hoja en celular: una tarjeta por línea (rol Hospital)
+
+Hospital captura las hojas desde el celular. En el paso 2 del wizard el detalle son 6 columnas
+(`Código`, `N° equipo`, `Descripción`, `Und`, `Reposición`, la ✕) que con
+`white-space:nowrap` no bajan de ~660 px, contra los ~390 px de un teléfono: había que arrastrar
+de lado para llegar a **Und** y **Reposición**, y al hacerlo se perdían de vista **Código** y
+**N° equipo** junto con el encabezado que dice qué columna es cada una.
+
+### Frontend — sin cambios de API ni de base
+- Bajo **640 px** cada fila de `#detTable` deja de ser fila de tabla y pasa a ser una **tarjeta**:
+  se oculta el `thead` y la fila se vuelve un grid de dos columnas
+  (`"hd hd" / "cod eq" / "desc desc" / "und rep"`). Los cinco campos caben a lo ancho y **se acaba
+  el scroll horizontal**. Es el mismo recurso que ya usaba `.cat-list` (Parte 6).
+- La **etiqueta viaja con el campo** (`td[data-label]::before`), así que ya no se pierde al bajar.
+  `DET_COLS` gana la clave `a` (área del grid) y `renderDet()` emite `data-label` y `class="dc-…"`.
+- El **número de línea** del encabezado de la tarjeta es un **contador CSS** (`counter(detline)`),
+  así que se renumera solo al agregar o borrar y no agrega una columna en escritorio.
+- Los inputs del detalle pasan a **16 px** en celular: por debajo de eso **Safari en iPhone hace
+  zoom solo al enfocar el campo**, que era lo que terminaba de recortar la pantalla.
+- **`inputmode="numeric"`** en Und y Reposición (teclado numérico) y se ocultan las flechitas del
+  `type=number`, que en un campo angosto se comían el ancho útil.
+- **N° equipo** gana el placeholder *«solo el número»*: `equipoBlur()` ya canonizaba a `NUT-xxxx`,
+  pero nada se lo decía al usuario, que tecleaba el prefijo de más.
+- La **Descripción** vacía deja de ser una franja gris en blanco y explica que aparece al escribir
+  el código (`.nutdesc:empty::before`, solo en celular).
+
+### Lo que NO cambia
+- **Escritorio queda idéntico**: verificado que sobre 640 px la fila sigue siendo `table-row`, el
+  `thead` visible y los inputs en 15 px / padding 8 px.
+- **Bodega tampoco se toca.** Todo el bloque está scopeado a `#detTable` (el wizard). El grid de
+  Bodega (`#verDetBody`, `BODEGA_DET_COLS`, que además lleva la columna `N° Lote`) sigue como
+  estaba: ellos trabajan desde portátil.
+- El **color de demarcación del Anexo #2** se mantiene pintando el fondo del campo `N° equipo`.
+  En la tarjeta el campo mide ~165 px, así que `NUT-10129` ya se lee completo y el bloque de color
+  sigue sirviendo para ubicar la bandeja.
+- No se tocó `paintEquipoCell()`, `equipoBlur()` ni el autocompletado, que Bodega comparte.
+
 ## [Parte 8] — Grid de Hojas de consumo sin Cirujano ni Instrumentista
 
 ### Frontend — sin cambios de API ni de base
