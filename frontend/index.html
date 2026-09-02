@@ -3024,6 +3024,17 @@ async function siguienteNumeroHoja(){
   try{ const r=await api('GET','/consecutivo/siguiente'); return (r&&r.numero)||''; }
   catch(e){ return ''; }
 }
+/* Coloca el N° sugerido CUANDO LLEGA, sin volver a dibujar el formulario.
+   Redibujar (fillStep2) hace innerHTML='' sobre el encabezado: le borra al
+   usuario lo que ya escribio y le quita el foco. */
+function ponerNumeroSugerido(n){
+  WIZ.numeroSugerido = n || '';
+  const el = document.getElementById('enc_numero_hoja');
+  if(!el || String(el.value).trim()) return;   // ya escribio uno: no se le pisa
+  el.value = WIZ.numeroSugerido;
+  // Lo puso la app, no el usuario: que Cancelar no lo cuente como un cambio.
+  WIZ.baseline = wizSnapshot();
+}
 /* Por si el usuario avanza antes de que llegue la respuesta del arranque. */
 async function asegurarNumeroSugerido(){
   if(!WIZ.editId && !WIZ.numeroSugerido) WIZ.numeroSugerido = await siguienteNumeroHoja();
@@ -3065,8 +3076,14 @@ async function openManual(){
   document.getElementById('wizStep2').classList.remove('hidden');
   document.getElementById('enviarBtn').classList.add('hidden');    // en creación solo se Guarda
   document.getElementById('guardarBtn').classList.remove('hidden');
-  WIZ.numeroSugerido = await siguienteNumeroHoja();
+  /* La pantalla ya esta visible dos lineas mas arriba, asi que los campos
+     tienen que existir YA. Antes se esperaba el consecutivo ANTES de dibujar:
+     en una red lenta el usuario veia el formulario de la vez anterior (que
+     nadie limpia al salir del wizard), escribia en el, y al llegar la respuesta
+     fillStep2 rehacia todo y le borraba lo escrito. Se veia como "no puedo
+     escribir en la caja de texto", y refrescar la pagina lo "arreglaba". */
   fillStep2({}, []);                 // render inmediato (encabezado vacío + 1 línea)
+  siguienteNumeroHoja().then(ponerNumeroSugerido);
   // El catálogo se carga al entrar al sitio (init) o con el botón "Cargar productos".
 }
 /* Abrir una hoja 'Pendiente reposición' para completar la reposición y enviarla. */
@@ -3110,11 +3127,17 @@ async function openReemplazo(id){
        hoja. Lo calcula la API, que es la única que puede garantizar que el
        consecutivo no choque con otro. Si falla, se cae al consecutivo normal
        para no dejar al usuario sin número. */
-    try{
-      const r = await api('GET','/hojas/'+id+'/siguiente-reemplazo');
-      WIZ.numeroSugerido = (r && r.numero) || await siguienteNumeroHoja();
-    }catch(e){ WIZ.numeroSugerido = await siguienteNumeroHoja(); }
-    fillStep2(h, h.detalle||[]);
+    /* Igual que en openManual: se dibuja YA y el numero se coloca cuando
+       llega. El N° va vacio a proposito y no con el de la hoja original, para
+       no mostrar un numero que en un segundo va a cambiar por el del
+       reemplazo. */
+    fillStep2(Object.assign({}, h, {numero_hoja:''}), h.detalle||[]);
+    (async ()=>{
+      try{
+        const r = await api('GET','/hojas/'+id+'/siguiente-reemplazo');
+        ponerNumeroSugerido((r && r.numero) || await siguienteNumeroHoja());
+      }catch(e){ ponerNumeroSugerido(await siguienteNumeroHoja()); }
+    })();
   }catch(e){ toast('No se pudo crear el reemplazo: '+e.message); }
 }
 function setStep(n){

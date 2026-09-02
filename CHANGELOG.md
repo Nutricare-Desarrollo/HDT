@@ -2,6 +2,50 @@
 
 Registro de los cambios del proyecto, por parte/tanda.
 
+## [Parte 12] — «Entro a Crear hoja de consumo y no puedo escribir»
+
+Síntoma reportado: se entra a la pantalla, se intenta escribir en un campo del encabezado y no
+se puede; refrescando la página funciona. Era una **carrera entre la pantalla y la red**.
+
+`openManual()` hacía, en este orden:
+
+```js
+document.getElementById('wizStep2').classList.remove('hidden');  // la pantalla YA se ve
+WIZ.numeroSugerido = await siguienteNumeroHoja();                // espera a la red
+fillStep2({}, []);                                               // recién aquí se crean los campos
+```
+
+Entre la línea 1 y la 3 hay una llamada a `/api/consecutivo/siguiente`. Y `#encFields` **nadie lo
+limpia al salir del wizard** (solo se limpia dentro de `fillStep2`, con `innerHTML=''`). Entonces:
+
+- **Primera vez**: la pantalla se ve con **cero campos** todo lo que tarde la red. No hay dónde
+  escribir.
+- **De la segunda en adelante**: se ven **los campos del render anterior**. El usuario escribe en
+  ellos, llega la respuesta, `fillStep2` rehace el encabezado y **le borra lo escrito y le quita el
+  foco**. Se siente como un campo que no responde.
+
+Refrescar lo "arreglaba" porque reiniciaba el ciclo.
+
+### Frontend — sin cambios de API ni de base
+- `openManual()` **dibuja primero** (`fillStep2`) y pide el consecutivo después, sin `await`.
+- Nueva función **`ponerNumeroSugerido(n)`**: coloca el N° cuando llega **sin volver a dibujar**.
+  Si el usuario ya escribió un número, **no se le pisa**. Y como el valor lo puso la app y no la
+  persona, vuelve a tomar `WIZ.baseline` para que **Cancelar no avise de cambios inexistentes**.
+- `openReemplazo()` tenía el mismo patrón y se corrigió igual. Ahí el N° arranca **vacío** a
+  propósito, en vez de mostrar el de la hoja original, para no enseñar un número que un segundo
+  después cambia por el del reemplazo (`HDT-3001` → `HDT-3001-R-1`).
+- `openEditarPendiente()` ya estaba bien: ahí el `await` ocurre **antes** de mostrar la pantalla.
+
+### Verificado (reproducido antes y después, con la red demorada a propósito)
+| | Antes | Después |
+|---|---|---|
+| Campos a los 150 ms de abrir | 0 | 13 |
+| Texto escrito mientras carga | se borraba | se conserva |
+| Foco al llegar la respuesta | se perdía (`body`) | se mantiene en el campo |
+| N° sugerido | `HDT-3042` | `HDT-3042` |
+| N° escrito por el usuario | — | respetado |
+| Cancelar sin tocar nada | — | no avisa |
+
 ## [Parte 11] — Por qué está apagado el botón Guardar
 
 Mostrando la app en el HDT pasó que el detalle estaba lleno y **Guardar y Enviar aparecían
