@@ -2,6 +2,42 @@
 
 Registro de los cambios del proyecto, por parte/tanda.
 
+## [Parte 11] — Por qué está apagado el botón Guardar
+
+Mostrando la app en el HDT pasó que el detalle estaba lleno y **Guardar y Enviar aparecían
+apagados, sin ninguna explicación**. Los apaga `updateEnviarState()` cuando alguna línea tiene un
+problema, y hay tres:
+
+1. un **código** que no existe en el catálogo de productos,
+2. un **N° de equipo** que no existe en la lista de equipos,
+3. código y equipo válidos por separado pero que **no cruzan** (`comboBad`).
+
+El motivo se explicaba en el **`title` del botón**, o sea un tooltip. Hospital trabaja desde el
+celular: ahí no hay mouse ni hover, así que ese texto **no se leía nunca**. Y encima decía siempre
+*«Hay códigos que no existen en el catálogo de productos»*, que es falso en dos de los tres casos.
+
+### Frontend — sin cambios de API ni de base
+- Nuevo **aviso visible** (`#detAviso`) entre el detalle y los botones, que dice **qué pasa y en
+  cuál línea**, con un texto por caso en vez de uno solo para los tres.
+- El **número de línea es un chip tocable de 34×34 px** que salta a esa tarjeta y la resalta
+  (reusa `irALineaDetalle` de la Parte 7). Se dimensionó para el dedo: un dígito subrayado de 10 px
+  no se puede tocar en un celular. Las filas del wizard ganaron `id="wizDet_N"` para poder saltar.
+- El aviso desaparece solo y los botones reviven en cuanto se corrige la última línea.
+
+### El caso que más despistaba
+Los catálogos se cargan **en segundo plano** al entrar (`loadCatalogo`, `loadEquipos`,
+`loadEquipoProd`, sin `await`) y mientras no cargan la validación es **fail-open**: todo se da por
+bueno. Pero `updateEnviarState()` solo corría desde `renderDet()` y `onDet()`. Entonces:
+
+- se abría el wizard antes de que cargara el catálogo → todo válido, botón habilitado;
+- terminaba de cargar → nadie recalculaba, el botón seguía habilitado;
+- se tocaba cualquier código o equipo → recién ahí se evaluaba y **el botón se apagaba solo**.
+
+Desde afuera se veía como si la app se hubiera dañado sola. Ahora los tres `load*` llaman a
+**`revalidarDetalle()`** al terminar, que repinta las celdas y recalcula los botones. Repinta con
+`markDetRow()` en vez de volver a renderizar, para no arrancarle el foco al usuario si está
+escribiendo justo cuando cae el catálogo.
+
 ## [Parte 10] — Descripción adicional por línea de detalle
 
 Hospital necesita anotar sobre el producto algo que la descripción del catálogo no dice (una

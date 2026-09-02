@@ -203,6 +203,22 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
   .cat-act{margin:0;flex:1;text-align:center;padding:9px 10px}
   .cat-badge.use{margin-left:0;display:inline-block;margin-top:5px}
 }
+/* Por que Guardar y Enviar estan apagados. Antes esto vivia en el title del
+   boton: en el celular no hay hover, asi que el usuario veia un boton muerto y
+   ninguna explicacion. */
+.det-aviso{display:flex;gap:10px;align-items:flex-start;margin:0 18px 16px;padding:12px 14px;
+  background:#fdf3e3;border:1px solid #f0c36d;border-left:4px solid var(--warn);
+  border-radius:10px;color:#6d4b06;font-size:13.5px;line-height:1.5}
+.det-aviso.hidden{display:none}
+.det-aviso .ic{font-size:16px;line-height:1.3}
+.det-aviso ul{margin:6px 0 0;padding-left:18px}
+.det-aviso li{margin:3px 0}
+/* El numero de linea es tocable con el dedo, no con un mouse: va como chip
+   con area propia, no como un digito subrayado de 10px. */
+.det-aviso .linea-link{color:#7a4f00;background:rgba(224,142,11,.2);border:1px solid rgba(224,142,11,.45);
+  padding:6px 11px;margin:1px 2px;border-radius:6px;display:inline-block;min-width:34px;
+  text-align:center;text-decoration:none;font-variant-numeric:tabular-nums;font-weight:700}
+.det-aviso .linea-link:active{background:rgba(224,142,11,.38)}
 .locked-note{display:flex;gap:10px;align-items:flex-start;background:#f7fafc;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:10px;padding:12px 14px;margin:0 0 16px;font-size:13.5px;line-height:1.5;color:#41525e}
 .locked-note .ic{font-size:18px;line-height:1.2}
 .locked-note b{color:var(--txt)}
@@ -512,6 +528,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
             <div id="wizSellBody"></div>
           </div>
         </div>
+        <div id="detAviso" class="det-aviso hidden"></div>
         <div class="foot">
           <button class="btn-ghost" id="verImgBtn" onclick="verImagenActual()">🖼️ Ver hoja de consumo</button>
           <button class="btn-ghost" id="wizPrintBtn" onclick="imprimirWizard()">🖨️ Imprimir</button>
@@ -924,6 +941,7 @@ async function loadCatalogo(){
     const m=new Map();
     (arr||[]).forEach(p=>{ const c=normCod(p.codigo); if(c) m.set(c, p.descripcion||''); });
     CATALOGO=m;
+    revalidarDetalle();
   }catch(e){ CATALOGO=null; toast('No se pudo cargar el catálogo de productos: '+e.message); }
 }
 async function ensureCatalogo(){ if(!catReady()) await loadCatalogo(); }
@@ -1239,6 +1257,7 @@ async function loadEquipos(){
     const m=new Map();
     (arr||[]).forEach(e=>{ const c=normEquipo(e.codigo!=null?e.codigo:e.demarcado); if(c) m.set(c, {nombre:e.nombre||'', color:e.color||'', demarcado:e.demarcado||''}); });
     EQUIPOS=m;
+    revalidarDetalle();
   }catch(e){ EQUIPOS=null; }
 }
 // Busca equipos por código o nombre para el autocompletado.
@@ -1279,6 +1298,7 @@ async function loadEquipoProd(){
     const m=new Map();
     (arr||[]).forEach(x=>{ const e=normEquipo(x.equipo); if(!e) return; const s=m.get(e)||new Set(); (x.codigos||[]).forEach(c=>{ const cc=normCod(c); if(cc) s.add(cc); }); m.set(e,s); });
     EQUIPOPROD=m;
+    revalidarDetalle();
   }catch(e){ EQUIPOPROD=null; }
 }
 // ¿El código pertenece al equipo? Fail-open si la relación no cargó o el equipo no tiene listado.
@@ -3205,6 +3225,8 @@ function renderDet(){
       return `<td class="dc-${c.a}" data-label="${attr(c.l)}"><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onDet(this)"></td>`;
     }).join('');
     const tr=document.createElement('tr');
+    // Se renumera solo: agregar o borrar una linea vuelve a pintar el tbody.
+    tr.id='wizDet_'+(i+1);
     tr.innerHTML=tds+`<td class="det-rm"><button class="rm-row" onclick="rmDet(${i})" aria-label="Quitar la línea ${i+1}">✕</button></td>`;
     b.appendChild(tr);
   });
@@ -3235,13 +3257,58 @@ function onDet(el){
   }
 }
 // Deshabilita "Enviar" mientras haya códigos que no existen en el catálogo.
+// Numero de linea como enlace: salta a esa tarjeta y la resalta.
+function linkNum(n){ return `<span class="linea-link" onclick="irALineaDetalle('wizDet','${attr(n)}')">${esc(n)}</span>`; }
+function listaLineas(a){
+  const l=a.map(linkNum);
+  return l.length===1 ? ('línea '+l[0]) : ('líneas '+l.slice(0,-1).join(', ')+' y '+l[l.length-1]);
+}
+/* Por que el detalle bloquea Guardar/Enviar, con un texto por caso. Antes los
+   tres casos compartian un solo mensaje ("Hay códigos que no existen en el
+   catálogo"), que ademas era falso en dos de los tres. */
+function motivosDetalle(){
+  const cod=[], eq=[], cruce=[];
+  (WIZ.detalle||[]).forEach((d,i)=>{
+    const n=i+1;
+    if(normCod(d.codigo) && !catCodigoValido(d.codigo)) cod.push(n);
+    else if(comboBad(d)) cruce.push(n);
+    if(normEquipo(d.numero_equipo) && !equipoValido(d.numero_equipo)) eq.push(n);
+  });
+  const out=[];
+  if(cod.length) out.push((cod.length===1?'El <b>código</b> de la ':'Los <b>códigos</b> de las ')
+    +listaLineas(cod)+' no '+(cod.length===1?'existe':'existen')+' en el catálogo de productos.');
+  if(eq.length) out.push((eq.length===1?'El <b>N° de equipo</b> de la ':'Los <b>N° de equipo</b> de las ')
+    +listaLineas(eq)+' no '+(eq.length===1?'existe':'existen')+' en la lista de equipos.');
+  if(cruce.length) out.push('En la'+(cruce.length===1?' ':'s ')+listaLineas(cruce)
+    +' el <b>código no pertenece al N° de equipo</b> indicado.');
+  return out;
+}
 function updateEnviarState(){
-  const hayInvalidos=WIZ.detalle.some(d=> codigoInvalidRow(d) || equipoInvalidRow(d));
+  const motivos=motivosDetalle();
+  const hay=motivos.length>0;
   ['enviarBtn','guardarBtn'].forEach(id=>{
     const btn=document.getElementById(id); if(!btn) return;
-    btn.disabled=hayInvalidos;
-    btn.title=hayInvalidos?'Hay códigos que no existen en el catálogo de productos':'';
+    btn.disabled=hay;
+    btn.title=hay?'Revise el aviso que está sobre los botones':'';
   });
+  const av=document.getElementById('detAviso');
+  if(av){
+    av.classList.toggle('hidden', !hay);
+    av.innerHTML = hay
+      ? '<div class="ic">⚠️</div><div><b>No se puede guardar todavía.</b><ul>'
+        +motivos.map(m=>'<li>'+m+'</li>').join('')+'</ul></div>'
+      : '';
+  }
+}
+/* Los catalogos cargan en segundo plano y mientras tanto la validacion es
+   fail-open (todo se da por bueno). updateEnviarState() solo corria al tocar un
+   campo, asi que el boton no se enteraba de que ya habia catalogo y se apagaba
+   solo en medio de la captura, sin que el usuario hubiera hecho nada raro. */
+function revalidarDetalle(){
+  if(typeof WIZ==='undefined' || !WIZ || !WIZ.detalle) return;
+  if(!document.getElementById('detBody')) return;
+  WIZ.detalle.forEach((d,i)=> markDetRow('#detBody', i, d));
+  updateEnviarState();
 }
 /* La linea nueva va al FINAL, no al inicio: la posicion en el grid es el orden
    con que se graba (dbo.HojaConsumoDetalle.Linea, "orden de la linea en la
