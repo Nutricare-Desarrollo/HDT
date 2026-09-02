@@ -2,6 +2,68 @@
 
 Registro de los cambios del proyecto, por parte/tanda.
 
+## [Parte 13] — Crear la hoja desde una cirugía: prellenado y catálogos
+
+### Prellenado (`cirEnc`)
+El mapeo cambió. Antes: `Cirugía → Procedimiento` y `Observación → Diagnóstico`, y
+**`Requerimiento` no se usaba**. Ahora:
+
+| Campo de la hoja | Viene de |
+|---|---|
+| **Diagnóstico** | `Cirugía` (+ `Observación` pegada atrás con « — », para no perderla) |
+| **Procedimiento** | `Requerimiento quirúrgico` |
+| **Régimen** | `Régimen` |
+| **Cirujano** | `Cirujano` |
+
+Sigue trayendo paciente, identificación, fechas y N° de caso, como antes.
+
+### El botón «＋ Crear hoja de consumo» al programar una cirugía
+Vivía solo en la ficha de una cirugía ya guardada. Ahora, al **guardar una cirugía nueva**, se
+abre su ficha automáticamente — que es donde está el botón. Un solo lugar donde vive, y de paso
+confirma que quedó guardada. Al **editar** una existente no se abre nada (el modal ya se cerró
+sobre la ficha que se estaba viendo).
+
+### Régimen y Cirujano fuera del catálogo
+Los dos catálogos se comportaban distinto, y ninguno de los dos como hacía falta:
+
+- **Cirujano** (`conservar:true`) guardaba el valor desconocido como opción `«X» (sin registrar)`,
+  pero **no lo marcaba de ninguna forma**.
+- **Régimen** (`conservar:false`) **descartaba el valor**: el campo quedaba en «— Seleccione —» y
+  solo salía un aviso en texto. Un régimen que venía de la cirugía o del OCR **se perdía**.
+
+Se quitó la marca `conservar` y ahora los dos hacen lo mismo: **conservan el valor, pintan el
+campo en rojo y muestran el aviso al lado**, con el botón **＋** para registrarlo sin salir de la
+pantalla. Mostrarlo mal es mejor que perderlo.
+
+- El aviso dejó de decir «La hoja decía…» (redacción del OCR) porque ahora el valor también puede
+  venir de una cirugía: «*«X» no está en el catálogo de regímenes*».
+- Aplica a **los dos flujos**, cirugía y foto, porque es el mismo `catField()`.
+
+### Ahora también bloquea el guardado
+Un Régimen o Cirujano fuera del catálogo **apaga Guardar y Enviar** y aparece en el aviso de la
+Parte 11, junto a los problemas del detalle. Son campos obligatorios que se graban **como texto**
+en la hoja: dejar pasar uno inventado ensucia el dato para siempre y después no hay cómo saber si
+fue un error de dedo o un cirujano real. `catPicked()` y `catRefresh()` recalculan, así que en
+cuanto se elige uno válido —o se agrega con ＋— el botón revive solo.
+
+> ⚠️ **Efecto sobre hojas viejas:** una hoja `Pendiente reposición` creada antes de este cambio,
+> cuyo cirujano nunca se registró, **no se va a poder guardar ni enviar** hasta que lo elijan de la
+> lista o lo agreguen con ＋. El valor no se pierde y el arreglo son dos clics, pero conviene medir
+> cuántas hay antes de desplegar:
+>
+> ```sql
+> SELECT h.Id, h.NumeroHoja, h.Estado, h.Cirujano
+>   FROM dbo.HojaConsumo h
+>  WHERE COALESCE(btrim(h.Cirujano),'') <> ''
+>    AND NOT EXISTS (SELECT 1 FROM cat.Cirujano c
+>                     WHERE lower(btrim(c.Nombre)) = lower(btrim(h.Cirujano)))
+>  ORDER BY h.Id DESC;
+> ```
+
+**Bodega no cambia de comportamiento**: sus campos también se marcan en rojo (usan el mismo
+`catField`), pero `guardarVer()` no bloquea. Se dejó así a propósito: Bodega es quien tiene el
+grueso de las hojas viejas y trabarle el guardado por un dato heredado sería peor que el problema.
+
 ## [Parte 12] — «Entro a Crear hoja de consumo y no puedo escribir»
 
 Síntoma reportado: se entra a la pantalla, se intenta escribir en un campo del encabezado y no

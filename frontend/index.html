@@ -155,7 +155,7 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .field-row select{flex:1;min-width:0}
 .btn-add{flex:0 0 auto;width:43px;height:43px;padding:0;border-radius:8px;background:var(--accent);color:#fff;font-size:22px;font-weight:400;line-height:1;display:flex;align-items:center;justify-content:center}
 .btn-add:hover{background:#0e8b99}
-.cat-hint{margin:6px 0 0;font-size:12.5px;line-height:1.4;color:#8c5c05}
+.cat-hint{margin:6px 0 0;font-size:12.5px;line-height:1.4;color:var(--danger);font-weight:600}
 /* Modal de catalogo (cirujano, regimen, ...): listado + filtro + alta/edicion */
 .cat-bar{display:flex;gap:8px;margin-bottom:12px}
 .cat-bar input{flex:1;min-width:0}
@@ -983,11 +983,15 @@ function loteSearch(codigo, q, limit){
                   true  -> se conserva como opción «(sin registrar)»
                   false -> la lista queda SIN seleccionar y debajo se avisa qué
                            decía la hoja, para que el usuario elija o lo agregue */
+/* Se quito 'conservar'. Antes Cirujano guardaba el valor desconocido y Regimen
+   lo DESCARTABA dejando el campo vacio, asi que un regimen que venia de la
+   cirugia o del OCR se perdia en silencio. Ahora los dos conservan el valor y
+   los dos lo marcan como invalido: es mejor mostrarlo mal que perderlo. */
 const CATS = {
-  cirujano: { ruta:'cirujanos', etiq:'cirujano', plural:'cirujanos', lista:[], conservar:true,
+  cirujano: { ruta:'cirujanos', etiq:'cirujano', plural:'cirujanos', lista:[],
               ph:'Ej. Dr. Juan Pérez', max:200 },
   // max 60: es lo que aguanta la columna dbo.HojaConsumo.Regimen.
-  regimen:  { ruta:'regimenes', etiq:'régimen', plural:'regímenes', lista:[], conservar:false,
+  regimen:  { ruta:'regimenes', etiq:'régimen', plural:'regímenes', lista:[],
               ph:'Ej. INS', max:60 }
 };
 let CAT_KEY=null;   // catálogo abierto en el modal ('cirujano' / 'regimen')
@@ -1013,7 +1017,7 @@ const catEnCat = (key,v) => CATS[key].lista.some(x=>catNorm(x.nombre)===catNorm(
 function catOptions(key, val){
   const c=CATS[key], v=String(val==null?'':val).trim(), n=catNorm(v);
   let html = `<option value="">— Seleccione —</option>`;
-  if(v && !catEnCat(key,v) && c.conservar)
+  if(v && !catEnCat(key,v))
     html += `<option value="${attr(v)}" selected>${esc(v)} (sin registrar)</option>`;
   c.lista.forEach(x=>{
     html += `<option value="${attr(x.nombre)}"${catNorm(x.nombre)===n?' selected':''}>${esc(x.nombre)}</option>`;
@@ -1023,17 +1027,21 @@ function catOptions(key, val){
 // Campo completo: <select> + botón "+" (y el aviso, si se perdió el valor leído).
 function catField(key, idSel, val, deshabilitado){
   const c=CATS[key], v=String(val==null?'':val).trim();
-  const perdido = !deshabilitado && v && !c.conservar && !catEnCat(key,v);
+  // Fuera del catalogo: se conserva el valor, se pinta el select en rojo y se
+  // explica al lado. El texto es neutro porque el valor puede venir del OCR de
+  // la foto o del prellenado desde una cirugia.
+  const perdido = !deshabilitado && v && !catEnCat(key,v);
   const dis = deshabilitado ? ' disabled' : '';
-  return `<div class="field-row"><select id="${idSel}" onchange="catPicked('${idSel}')"${dis}>${catOptions(key,v)}</select>`
+  return `<div class="field-row"><select id="${idSel}"${perdido?' class="invalid"':''} onchange="catPicked('${idSel}')"${dis}>${catOptions(key,v)}</select>`
        + `<button type="button" class="btn-add" title="Agregar o editar ${esc(c.etiq)}" onclick="openCat('${key}','${idSel}')"${dis}>+</button></div>`
-       + (perdido ? `<p class="cat-hint" id="${idSel}_hint">La hoja decía «${esc(v)}», que no está en el catálogo. Elija uno de la lista o agréguelo con el botón ＋</p>` : '');
+       + (perdido ? `<p class="cat-hint" id="${idSel}_hint">«${esc(v)}» no está en el catálogo de ${esc(c.plural)}. Elíjalo de la lista o agréguelo con el botón ＋</p>` : '');
 }
 // Al elegir una opción, el aviso de "no está en el catálogo" ya no aplica.
 function catPicked(idSel){
   const el=document.getElementById(idSel); if(!el) return;
   if(el.value) el.classList.remove('invalid');
   const h=document.getElementById(idSel+'_hint'); if(h && el.value) h.remove();
+  updateEnviarState();   // el encabezado tambien decide si Guardar se habilita
 }
 // Refresca las opciones conservando (o fijando) el valor elegido.
 function catRefresh(key, idSel, val){
@@ -1041,7 +1049,11 @@ function catRefresh(key, idSel, val){
   const v = (val!=null) ? val : el.value;
   el.innerHTML = catOptions(key, v);
   el.value = v || '';
-  const h=document.getElementById(idSel+'_hint'); if(h && el.value) h.remove();
+  // Si el valor ya quedo dentro del catalogo (lo acaban de agregar), se limpia
+  // la marca; si no, se mantiene.
+  el.classList.toggle('invalid', !!(el.value && !catEnCat(key, el.value)));
+  const h=document.getElementById(idSel+'_hint'); if(h && el.value && catEnCat(key, el.value)) h.remove();
+  updateEnviarState();
 }
 
 /* ============================================================================
@@ -3306,8 +3318,23 @@ function motivosDetalle(){
     +' el <b>código no pertenece al N° de equipo</b> indicado.');
   return out;
 }
+/* Un Regimen o Cirujano fuera del catalogo tambien frena el guardado: son
+   campos obligatorios y se graban como texto en la hoja, asi que dejar pasar
+   uno inventado ensucia el dato para siempre. El boton + esta al lado para
+   agregarlo sin salir de la pantalla. */
+function motivosEncabezado(){
+  const out=[];
+  ENC.filter(f=>f.cat).forEach(f=>{
+    const el=document.getElementById('enc_'+f.k); if(!el) return;
+    const v=String(el.value||'').trim();
+    if(v && !catEnCat(f.cat, v))
+      out.push('El <b>'+esc(f.l)+'</b> «'+esc(v)+'» no está en el catálogo. Elíjalo de la lista o agréguelo con el botón ＋.');
+  });
+  return out;
+}
 function updateEnviarState(){
-  const motivos=motivosDetalle();
+  if(typeof WIZ==='undefined' || !WIZ) return;
+  const motivos=motivosEncabezado().concat(motivosDetalle());
   const hay=motivos.length>0;
   ['enviarBtn','guardarBtn'].forEach(id=>{
     const btn=document.getElementById(id); if(!btn) return;
@@ -3432,6 +3459,16 @@ function recolectarWizard(reqReposicion){
     if(!enc[f.k]){ faltanEnc.push(f.l); const el=document.getElementById('enc_'+f.k); if(el) el.classList.add('invalid'); }
   });
   if(faltanEnc.length) errores.push('Complete los campos requeridos del encabezado: '+faltanEnc.join(', ')+'.');
+  // Cinturon y tirantes: el boton ya esta deshabilitado por updateEnviarState,
+  // pero un valor fuera del catalogo no debe poder colarse por ningun lado.
+  ENC.filter(f=>f.cat).forEach(f=>{
+    const el=document.getElementById('enc_'+f.k); if(!el) return;
+    const v=String(el.value||'').trim();
+    if(v && !catEnCat(f.cat, v)){
+      el.classList.add('invalid');
+      errores.push('El '+f.l+' «'+v+'» no está en el catálogo. Elíjalo de la lista o agréguelo con el botón ＋.');
+    }
+  });
 
   // Detalle: la Descripción es derivada (no se captura). La Reposición solo se exige al Enviar.
   const reqCols = DET_REQ.filter(c=> c.k!=='reposicion_anaquel' || reqReposicion);
@@ -3640,8 +3677,13 @@ async function guardarCir(){
   if(!data.fecha_cirugia){ toast('La fecha de cirugía es requerida'); return; }
   const btn=document.getElementById('cirSaveBtn'); btn.disabled=true; btn.textContent='Guardando…';
   try{
-    if(CIR_EDIT) await api('PUT','/cirugias/'+CIR_EDIT,data); else await api('POST','/cirugias',data);
+    let nuevoId=null;
+    if(CIR_EDIT) await api('PUT','/cirugias/'+CIR_EDIT,data);
+    else { const r=await api('POST','/cirugias',data); nuevoId=(r&&r.id)||null; }
     toast('Cirugía guardada'); closeCir(); loadCirugias();
+    /* Recien programada: se abre su ficha, que es donde vive el boton
+       "＋ Crear hoja de consumo". Ademas confirma que quedo guardada. */
+    if(nuevoId) openCirDet(nuevoId);
   }catch(e){ toast('No se pudo guardar: '+e.message); }
   finally{ btn.disabled=false; btn.textContent='Guardar'; }
 }
@@ -3662,7 +3704,21 @@ function renderCirDet(c){
   if(!principal) fh+=`<button class="btn-primary" onclick="crearHojaDeCirugia()">＋ Crear hoja de consumo</button>`;
   document.getElementById('cirDetFoot').innerHTML=fh;
 }
-function cirEnc(c){ return { paciente:c.paciente, identificacion:c.identificacion, regimen:c.regimen, fecha_accidente:c.fecha_accidente, fecha_cirugia:c.fecha_cirugia, cirujano:c.cirujano, procedimiento:c.cirugia, diagnostico:c.observacion, numero_documento:c.numero_caso }; }
+/* Encabezado de la hoja a partir de la cirugia.
+     Diagnostico   <- Cirugia (+ la Observacion pegada atras, para no perderla)
+     Procedimiento <- Requerimiento quirurgico
+   Regimen y Cirujano viajan tal cual: si no estan en su catalogo, catField()
+   los conserva, pinta el campo en rojo y frena el guardado hasta corregirlos. */
+function cirEnc(c){
+  return {
+    paciente:c.paciente, identificacion:c.identificacion, regimen:c.regimen,
+    fecha_accidente:c.fecha_accidente, fecha_cirugia:c.fecha_cirugia,
+    cirujano:c.cirujano,
+    diagnostico: conNota(c.cirugia||'', c.observacion),
+    procedimiento: c.requerimiento,
+    numero_documento: c.numero_caso
+  };
+}
 function crearHojaDeCirugia(){
   const c=CUR_CIR; if(!c) return; if(!canSubir()){ toast('Su rol no puede crear hojas'); return; }
   closeCirDet();
