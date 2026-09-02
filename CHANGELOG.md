@@ -25,8 +25,22 @@ de lado para llegar a **Und** y **Reposición**, y al hacerlo se perdían de vis
   `type=number`, que en un campo angosto se comían el ancho útil.
 - **N° equipo** gana el placeholder *«solo el número»*: `equipoBlur()` ya canonizaba a `NUT-xxxx`,
   pero nada se lo decía al usuario, que tecleaba el prefijo de más.
-- La **Descripción** vacía deja de ser una franja gris en blanco y explica que aparece al escribir
-  el código (`.nutdesc:empty::before`, solo en celular).
+- La **Descripción** sin código deja de ser una franja gris con un `—` suelto y explica que
+  aparece al escribir el código (clase `.sin-desc`, solo en celular; en escritorio se respeta el
+  `—`, que es la convención del resto de la app). Ojo: no se puede usar `:empty`, porque
+  `esc('')` devuelve `—` y la celda nunca queda vacía.
+
+### Línea nueva: se agrega al final, pero la pantalla salta a ella
+`＋ Agregar línea` dejaba la tarjeta nueva fuera de la vista y había que bajar a buscarla.
+- Se evaluó insertarla **al inicio**, pero la posición en el grid **se persiste**:
+  `dbo.HojaConsumoDetalle.Linea` es literalmente *«orden de la línea en la hoja»* y todo se lee con
+  `ORDER BY Linea, Id`. Insertar arriba renumera el resto y el orden impreso deja de calzar con la
+  hoja de papel que el OCR leyó de arriba hacia abajo.
+- Se resolvió sin tocar el orden: `addDetRow()` sigue haciendo `push`, y la nueva función
+  `irALineaNueva()` hace `scrollIntoView({block:'nearest'})` hasta la tarjeta y le deja el **cursor
+  puesto en Código**. Además de no tener que buscarla, se ahorra un toque.
+- `block:'nearest'` evita mover la pantalla cuando la línea ya se veía, y se respeta
+  `prefers-reduced-motion`.
 
 ### Lo que NO cambia
 - **Escritorio queda idéntico**: verificado que sobre 640 px la fila sigue siendo `table-row`, el

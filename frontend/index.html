@@ -280,11 +280,15 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
     padding:8px 10px;min-width:0;border-radius:8px;background:#f2f7fa;
     font-size:13.5px;font-weight:600;
   }
-  #detTable .nutdesc:empty{
-    padding:0;background:none;font-weight:400;font-style:italic;
-    font-size:12.5px;color:var(--muted);
+  /* Sin codigo todavia, esc('') pinta un '—' suelto en una franja gris que no
+     dice nada. En el celular se reemplaza por la explicacion; font-size:0 tapa
+     el guion y el ::before le devuelve el tamano al texto de ayuda.
+     En escritorio se respeta el '—', que es la convencion del resto de la app. */
+  #detTable .nutdesc.sin-desc{padding:0;background:none;font-size:0}
+  #detTable .nutdesc.sin-desc::before{
+    content:"La descripción aparece al escribir el código";
+    font-size:12.5px;font-weight:400;font-style:italic;color:var(--muted);
   }
-  #detTable .nutdesc:empty::before{content:"La descripción aparece al escribir el código"}
 }
 
 .overlay{position:fixed;inset:0;background:rgba(10,40,60,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:60}
@@ -3139,7 +3143,7 @@ function renderDet(){
     const tds=DET_COLS.map(c=>{
       if(c.derived){
         const dn = (d.descripcion_nutricare!=null && d.descripcion_nutricare!=='') ? d.descripcion_nutricare : catDesc(d.codigo);
-        return `<td class="dc-${c.a}"><div class="nutdesc" id="nut_${i}">${esc(dn)}</div></td>`;
+        return `<td class="dc-${c.a}"><div class="nutdesc${dn?'':' sin-desc'}" id="nut_${i}">${esc(dn)}</div></td>`;
       }
       const isCode = c.k==='codigo';
       const isEquipo = c.k==='numero_equipo';
@@ -3169,7 +3173,8 @@ function onDet(el){
   if(k==='codigo'){
     // La Descripción se toma SIEMPRE del catálogo por código (columna derivada de solo lectura).
     d.descripcion_nutricare=catDesc(d.codigo);
-    const cell=document.getElementById('nut_'+i); if(cell) cell.innerHTML=esc(d.descripcion_nutricare);
+    const cell=document.getElementById('nut_'+i);
+    if(cell){ cell.innerHTML=esc(d.descripcion_nutricare); cell.classList.toggle('sin-desc', !d.descripcion_nutricare); }
   }
   // Cambiar código o equipo afecta la validez individual y la de la combinación de esa línea.
   if(k==='codigo' || k==='numero_equipo'){
@@ -3186,7 +3191,26 @@ function updateEnviarState(){
     btn.title=hayInvalidos?'Hay códigos que no existen en el catálogo de productos':'';
   });
 }
-function addDetRow(){ WIZ.detalle.push({}); renderDet(); }
+/* La linea nueva va al FINAL, no al inicio: la posicion en el grid es el orden
+   con que se graba (dbo.HojaConsumoDetalle.Linea, "orden de la linea en la
+   hoja") y con que se imprime, asi que tiene que seguir calzando con la hoja
+   de papel que el OCR leyo de arriba hacia abajo. Para que no haya que buscarla
+   en el celular, el grid salta a la tarjeta nueva y le deja el cursor puesto. */
+function addDetRow(){ WIZ.detalle.push({}); renderDet(); irALineaNueva(); }
+// Lleva la vista a la ultima linea del detalle y enfoca su campo Codigo.
+function irALineaNueva(){
+  const i=WIZ.detalle.length-1;
+  const inp=document.querySelector(`#detBody input[data-i="${i}"][data-k="codigo"]`);
+  if(!inp) return;
+  const fila=inp.closest('tr');
+  if(fila && fila.scrollIntoView){
+    const quieto = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // 'nearest': si la linea ya se veia, no mueve la pantalla de gusto.
+    fila.scrollIntoView({block:'nearest', behavior: quieto?'auto':'smooth'});
+  }
+  // preventScroll: el salto ya lo hizo scrollIntoView; sin esto el foco lo repite.
+  try{ inp.focus({preventScroll:true}); }catch(e){ inp.focus(); }
+}
 function rmDet(i){ WIZ.detalle.splice(i,1); if(!WIZ.detalle.length)WIZ.detalle=[{}]; renderDet(); }
 /* Firma del formulario: encabezado + detalle, normalizados en un solo texto.
    Se toma una al renderizar el paso 2 (WIZ.baseline) y se compara al Cancelar.
