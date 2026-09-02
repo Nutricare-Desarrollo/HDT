@@ -42,6 +42,16 @@ de lado para llegar a **Und** y **Reposición**, y al hacerlo se perdían de vis
 - `block:'nearest'` evita mover la pantalla cuando la línea ya se veía, y se respeta
   `prefers-reduced-motion`.
 
+### El botón «＋ Agregar línea» se mueve al final de la lista (celular)
+El botón vive en el título **Detalle**, o sea arriba del todo. Con las líneas en tarjetas eso queda
+lejos: al terminar la última línea había que subir a buscarlo.
+- En celular se **oculta el de arriba** (`.det-add-top`) y aparece uno **a todo el ancho al final
+  de la lista** (`.det-add-bottom`, 47 px de alto para el pulgar). En escritorio es al revés: el de
+  arriba se queda y el de abajo no existe.
+- Los dos llaman al mismo `addDetRow()`, así que el ciclo se cierra solo: **agregar → el grid salta
+  a la tarjeta nueva con el cursor puesto → llenarla → el botón quedó justo debajo**. Se acabó el
+  scroll en los dos sentidos.
+
 ### Lo que NO cambia
 - **Escritorio queda idéntico**: verificado que sobre 640 px la fila sigue siendo `table-row`, el
   `thead` visible y los inputs en 15 px / padding 8 px.

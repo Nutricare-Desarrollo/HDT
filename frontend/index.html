@@ -229,6 +229,9 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .det-table th{font-size:11.5px}
 .det-table .nutdesc{padding:8px;font-size:13px;color:var(--brand-d);white-space:normal;min-width:160px;line-height:1.3}
 .rm-row{background:#fbeae8;color:var(--danger);padding:8px 10px;border-radius:7px}
+/* El boton de agregar vive junto al titulo "Detalle". El duplicado del final
+   es solo para el celular (ver el @media de mas abajo). */
+.det-add-bottom{display:none}
 
 /* Detalle en celular (rol Hospital): cada fila pasa a ser una tarjeta.
    Las 6 columnas no bajan de ~660px, asi que en el telefono habia que
@@ -271,6 +274,14 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
     content:"Línea " counter(detline);
     font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.03em;
   }
+  /* Con las lineas en tarjetas el boton de arriba queda lejisimos: al terminar
+     la ultima linea habia que subir a buscarlo. Se pasa al final de la lista,
+     que es donde el usuario ya esta parado, y ahi encadena solo:
+     agregar -> el grid salta a la tarjeta nueva -> llenarla -> el boton quedo
+     justo debajo. */
+  .det-add-top{display:none}
+  .det-add-bottom{display:block;width:100%;padding:13px 15px;font-size:15px}
+
   /* 16px es el minimo con el que Safari en iPhone NO hace zoom al enfocar
      el campo. A 15px se acercaba solo y recortaba todavia mas la pantalla. */
   #detTable input{font-size:16px;padding:11px 12px}
@@ -483,8 +494,9 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div class="pad">
           <div class="section-title">Encabezado</div>
           <div class="form-grid" id="encFields"></div>
-          <div class="section-title">Detalle <button class="btn-ghost" style="padding:6px 12px;margin-left:8px" onclick="addDetRow()">＋ Agregar línea</button></div>
+          <div class="section-title">Detalle <button class="btn-ghost det-add-top" style="padding:6px 12px;margin-left:8px" onclick="addDetRow()">＋ Agregar línea</button></div>
           <div class="tbl-wrap"><table class="det-table" id="detTable"><thead id="detHead"></thead><tbody id="detBody"></tbody></table></div>
+          <button class="btn-ghost det-add-bottom" onclick="addDetRow()">＋ Agregar línea</button>
           <div id="wizSellWrap" class="hidden">
             <div class="section-title">Fotos de la hoja sellada</div>
             <div class="sub" style="margin:-4px 0 10px">Respaldo de la hoja física con los sellos del hospital. No se procesan: solo se guardan.</div>
