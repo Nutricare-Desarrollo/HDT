@@ -17,6 +17,12 @@ El mapeo cambió. Antes: `Cirugía → Procedimiento` y `Observación → Diagn�
 
 Sigue trayendo paciente, identificación, fechas y N° de caso, como antes.
 
+### El botón lleva DIRECTO al formulario, sin el paso de la foto
+Antes caía en el paso 1 del wizard («Foto de la hoja»), con un botón «Ingresar sin foto» que había
+que buscar. No tenía sentido: **cuando se programa la cirugía todavía no existe la hoja física que
+fotografiar**, y el encabezado ya viene de la cirugía. Ahora abre el formulario de una, igual que
+«Crear hoja manualmente». La carga con foto (OCR) sigue donde siempre, en «Subir hoja de consumo».
+
 ### El botón «＋ Crear hoja de consumo» al programar una cirugía
 Vivía solo en la ficha de una cirugía ya guardada. Ahora, al **guardar una cirugía nueva**, se
 abre su ficha automáticamente — que es donde está el botón. Un solo lugar donde vive, y de paso

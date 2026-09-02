@@ -3722,24 +3722,24 @@ function cirEnc(c){
 function crearHojaDeCirugia(){
   const c=CUR_CIR; if(!c) return; if(!canSubir()){ toast('Su rol no puede crear hojas'); return; }
   closeCirDet();
-  // Igual que "Subir hoja": permite foto (OCR) o ingreso sin foto; el encabezado viene precargado de la cirugía.
-  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[],manual:false,editId:null,esReemplazo:false,origenId:null,cirugiaId:c.id,prefillEnc:cirEnc(c)};
-  siguienteNumeroHoja().then(n=>{ WIZ.numeroSugerido=n; });
+  /* Va DIRECTO al formulario, saltandose el paso de la foto: cuando se programa
+     la cirugia todavia NO existe la hoja fisica que fotografiar, asi que ese
+     paso solo estorbaba. El encabezado ya viene de la cirugia. La carga con
+     foto (OCR) sigue estando donde siempre, en "Subir hoja de consumo". */
+  WIZ={dataUrl:'',base64:'',tipo:'',detalle:[{}],manual:true,editId:null,esReemplazo:false,origenId:null,cirugiaId:c.id,prefillEnc:cirEnc(c)};
   showOnly('viewWizard'); setTab('cirugias');
-  document.getElementById('wizTitle').textContent='Crear hoja de consumo (cirugía)';
+  document.getElementById('wizTitle').textContent='Crear hoja de consumo';
   document.getElementById('wizSub').textContent=(c.paciente||'')+' · '+(c.cirugia||'');
-  document.getElementById('wizSteps').classList.remove('hidden');
-  document.getElementById('verImgBtn').classList.remove('hidden');
-  document.getElementById('wizStep1').classList.remove('hidden');
-  document.getElementById('wizStep2').classList.add('hidden');
+  document.getElementById('wizSteps').classList.add('hidden');       // no hay pasos de foto
+  document.getElementById('verImgBtn').classList.add('hidden');      // no hay imagen
+  document.getElementById('wizStep1').classList.add('hidden');
   document.getElementById('wizResult').classList.add('hidden');
-  document.getElementById('fileInput').value='';
-  document.getElementById('prevWrap').innerHTML='';
-  document.getElementById('analizarBtn').disabled=true;
-  document.getElementById('sinFotoBtn').classList.remove('hidden');  // opción de ingresar sin foto
+  document.getElementById('wizStep2').classList.remove('hidden');
   document.getElementById('enviarBtn').classList.add('hidden');      // borrador: solo Guardar
   document.getElementById('guardarBtn').classList.remove('hidden');
-  setStep(1);
+  // Dibujar YA y pedir el consecutivo despues (ver Parte 12).
+  fillStep2(WIZ.prefillEnc||{}, []);
+  siguienteNumeroHoja().then(ponerNumeroSugerido);
 }
 /* Salta el paso de la foto: va al detalle manual con el encabezado precargado. */
 async function continuarSinFoto(){
