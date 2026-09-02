@@ -26,13 +26,17 @@ const ETIQUETAS_ENC = {
 
 /* Campos del detalle que se auditan. Quedan fuera a propósito:
    - descripcion            -> es lo que leyó el OCR, no lo escribe el usuario
-   - descripcion_nutricare  -> se deriva del código; auditar el código ya lo cubre */
+   - descripcion_nutricare  -> se deriva del código; auditar el código ya lo cubre
+   descripcion_adicional SI se audita: es texto libre que escribe el usuario, no
+   se deriva de nada, y es justo el tipo de campo por el que despues se pregunta
+   quien lo escribio y cuando. */
 const CAMPOS_DET = [
   ['codigo', 'Código'],
   ['numero_equipo', 'N° equipo'],
   ['und', 'Und'],
   ['reposicion_anaquel', 'Reposición anaquel'],
-  ['numero_lote', 'N° Lote']
+  ['numero_lote', 'N° Lote'],
+  ['descripcion_adicional', 'Descripción adicional']
 ];
 
 // Todo se compara como texto recortado: '' y null son lo mismo (vacío), y
@@ -54,6 +58,7 @@ function resumenLinea(d) {
   if (txt(d.und)) p.push(txt(d.und) + ' und');
   if (txt(d.reposicion_anaquel)) p.push('rep. ' + txt(d.reposicion_anaquel));
   if (txt(d.numero_lote)) p.push('lote ' + txt(d.numero_lote));
+  if (txt(d.descripcion_adicional)) p.push('«' + txt(d.descripcion_adicional) + '»');
   return p.length ? p.join(' · ') : '(línea vacía)';
 }
 

@@ -28,6 +28,16 @@ function codigosInvalidos(detalle, mapa) {
 // Descripción oficial del catálogo para un código; si no está, usa la que mandó el cliente.
 const descNutricare = (mapa, d) => (mapa.get(normCod(d.codigo)) || d.descripcion_nutricare || null);
 
+// Nota libre que escribe Hospital sobre la línea. Opcional: vacío se guarda
+// como NULL. Se recorta a 150 (el ancho de la columna) en vez de dejar que el
+// INSERT falle con 500: el formulario ya limita, pero la API no puede confiar
+// en que todo lo que le llega paso por el formulario.
+const DESC_ADIC_MAX = 150;
+const descAdicional = (d) => {
+  const v = (d && d.descripcion_adicional != null) ? String(d.descripcion_adicional).trim() : '';
+  return v === '' ? null : v.slice(0, DESC_ADIC_MAX);
+};
+
 // Usuario autenticado que inyecta Static Web Apps (Entra ID / SSO).
 function getUser(request) {
   const header = request.headers.get('x-ms-client-principal');
@@ -592,10 +602,10 @@ app.http('hoja-create', {
       for (const d of detalle) {
         linea++;
         await client.query(
-          `INSERT INTO dbo.HojaConsumoDetalle (HojaConsumoId, Linea, Codigo, NumeroEquipo, Descripcion, DescripcionNutricare, Und, ReposicionAnaquel)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          `INSERT INTO dbo.HojaConsumoDetalle (HojaConsumoId, Linea, Codigo, NumeroEquipo, Descripcion, DescripcionNutricare, DescripcionAdicional, Und, ReposicionAnaquel)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
           [id, d.linea || linea, d.codigo || null, equipoConPrefijo(d.numero_equipo), d.descripcion || null,
-            descNutricare(mapa, d), toInt(d.und), toInt(d.reposicion_anaquel)]);
+            descNutricare(mapa, d), descAdicional(d), toInt(d.und), toInt(d.reposicion_anaquel)]);
       }
       await client.query('COMMIT');
       // El consecutivo recién usado pasa a ser el "último usado" de Configuración.
@@ -684,6 +694,7 @@ app.http('hoja-get', {
       const d = await query(
         `SELECT Id AS id, Linea AS linea, Codigo AS codigo, NumeroEquipo AS numero_equipo,
                 Descripcion AS descripcion, DescripcionNutricare AS descripcion_nutricare,
+                DescripcionAdicional AS descripcion_adicional,
                 Und AS und, ReposicionAnaquel AS reposicion_anaquel, NumeroLote AS numero_lote
          FROM dbo.HojaConsumoDetalle WHERE HojaConsumoId=$1 ORDER BY Linea, Id`, [id]);
       return json(200, { ...h.rows[0], detalle: d.rows });
@@ -742,7 +753,8 @@ app.http('hoja-update', {
            FROM dbo.HojaConsumo WHERE Id=$1`, [id]);
       const ad = await query(
         `SELECT Codigo AS codigo, NumeroEquipo AS numero_equipo, Und AS und,
-                ReposicionAnaquel AS reposicion_anaquel, NumeroLote AS numero_lote
+                ReposicionAnaquel AS reposicion_anaquel, NumeroLote AS numero_lote,
+                DescripcionAdicional AS descripcion_adicional
            FROM dbo.HojaConsumoDetalle WHERE HojaConsumoId=$1 ORDER BY Linea, Id`, [id]);
       antes = { encabezado: ah.rows[0] || {}, detalle: ad.rows, estado: estadoActual };
     }
@@ -785,10 +797,10 @@ app.http('hoja-update', {
       for (const d of detalle) {
         linea++;
         await client.query(
-          `INSERT INTO dbo.HojaConsumoDetalle (HojaConsumoId, Linea, Codigo, NumeroEquipo, Descripcion, DescripcionNutricare, Und, ReposicionAnaquel, NumeroLote)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          `INSERT INTO dbo.HojaConsumoDetalle (HojaConsumoId, Linea, Codigo, NumeroEquipo, Descripcion, DescripcionNutricare, DescripcionAdicional, Und, ReposicionAnaquel, NumeroLote)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
           [id, d.linea || linea, d.codigo || null, equipoConPrefijo(d.numero_equipo), d.descripcion || null,
-            descNutricare(mapa, d), toInt(d.und), toInt(d.reposicion_anaquel),
+            descNutricare(mapa, d), descAdicional(d), toInt(d.und), toInt(d.reposicion_anaquel),
             (d.numero_lote === undefined || d.numero_lote === '') ? null : d.numero_lote]);
       }
 
@@ -801,7 +813,8 @@ app.http('hoja-update', {
           numero_equipo: equipoConPrefijo(d.numero_equipo),
           und: toInt(d.und),
           reposicion_anaquel: toInt(d.reposicion_anaquel),
-          numero_lote: (d.numero_lote === undefined || d.numero_lote === '') ? null : d.numero_lote
+          numero_lote: (d.numero_lote === undefined || d.numero_lote === '') ? null : d.numero_lote,
+          descripcion_adicional: descAdicional(d)
         }));
         const cambios = audit.diffHoja(antes, {
           encabezado: enc,
@@ -895,7 +908,8 @@ app.http('hoja-diferencias', {
               HojaOrigenId AS hoja_origen_id
          FROM dbo.HojaConsumo WHERE Id=$1`;
     const SEL_DET = `SELECT Codigo AS codigo, NumeroEquipo AS numero_equipo, Und AS und,
-              ReposicionAnaquel AS reposicion_anaquel, NumeroLote AS numero_lote
+              ReposicionAnaquel AS reposicion_anaquel, NumeroLote AS numero_lote,
+              DescripcionAdicional AS descripcion_adicional
          FROM dbo.HojaConsumoDetalle WHERE HojaConsumoId=$1 ORDER BY Linea, Id`;
 
     try {

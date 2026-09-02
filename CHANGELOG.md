@@ -2,6 +2,63 @@
 
 Registro de los cambios del proyecto, por parte/tanda.
 
+## [Parte 10] — Descripción adicional por línea de detalle
+
+Hospital necesita anotar sobre el producto algo que la descripción del catálogo no dice (una
+aclaración de la cirugía, una medida, un detalle del material). Texto libre, **opcional**, tope de
+**150 caracteres**.
+
+> ⚠️ **Orden de despliegue:** correr `database/20_DescripcionAdicional.sql` **ANTES** de subir el
+> código. La API pasa a nombrar `DescripcionAdicional` en los `INSERT` del detalle; si la columna
+> todavía no existe, **guardar cualquier hoja falla**.
+
+### Base de datos — `database/20_DescripcionAdicional.sql` (idempotente)
+- Nueva columna **`dbo.HojaConsumoDetalle.DescripcionAdicional VARCHAR(150) NULL`**.
+- Es una columna nueva y no se reutiliza ninguna de las dos que ya existían, porque cada una tiene
+  un dueño distinto: `Descripcion` es lo que leyó el OCR, `DescripcionNutricare` es la del catálogo
+  (derivada del código) y `DescripcionAdicional` es lo que escribe el usuario. Mezclarlas haría
+  imposible saber después quién escribió qué.
+
+### API (Azure Functions)
+- `POST /api/hojas` y `PUT /api/hojas/{id}`: guardan la nota. Nuevo helper **`descAdicional()`**, que
+  la recorta a 150 y convierte el vacío en `NULL`. Se recorta en vez de dejar que reviente el
+  `INSERT`: el formulario ya limita, pero la API no puede confiar en que todo lo que le llega pasó
+  por el formulario.
+- `GET /api/hojas/{id}` devuelve `descripcion_adicional` en cada línea. También se agregó al
+  `SELECT` del *antes* de la auditoría y al de **Diferencias** (reemplazos).
+- **Dynamics no cambia**: el payload sigue mandando solo la descripción del catálogo, así que no hay
+  que coordinar nada con quien mantiene el flujo de Power Automate.
+- Auditoría: `descripcion_adicional` entra en `CAMPOS_DET` y en `resumenLinea()`. Es texto libre
+  escrito a mano, justo el tipo de campo por el que después se pregunta quién lo puso.
+
+### Frontend
+- **Hospital (wizard)**: campo nuevo **Descripción adicional**, debajo de la Descripción. Es un
+  `textarea` y no un `input`: 150 caracteres en un campo de una línea dejan ver unos 30 en el
+  celular, y la nota se relee después. **Crece solo** con lo que se escribe (`autoAlto()`).
+- **Contador `n/150`** que aparece solo a partir de 120 caracteres y se pone ámbar en el tope. Uno
+  debajo de cada una de las 15 líneas sería ruido, pero quedarse sin poder escribir sin saber por
+  qué es peor.
+- **Bodega la ve pero no la edita** (`ro:true` en `BODEGA_DET_COLS`): la escribe Hospital. Igual
+  viaja de vuelta en el `PUT` de `guardarVer()` — el update reescribe todo el detalle, así que sin
+  reenviarla Bodega la borraría al guardar.
+- **Impresión**: el formato oficial Nutricare tiene 5 columnas fijas y mínimo 18 filas, así que no
+  hay lugar para una sexta. La nota se **pega a la Descripción** en la misma celda
+  (`conNota()`: `Broca, de 2.5mm — la nota`). Sin nota, la hoja sale exactamente igual que antes.
+- En la tarjeta de celular ocupa una fila completa (área `nota` del grid).
+
+### Detalles que costaron
+- `DET_REQ` se arma con `DET_COLS.filter(c=>!c.derived)`, así que una columna nueva **se volvía
+  obligatoria sola** y habría bloqueado el envío de toda hoja sin nota. Se agregó la marca `opt` y
+  el filtro pasó a `!c.derived && !c.opt`.
+- `esc('')` devuelve `—`, así que el `textarea` se llena con `attr()` y no con `esc()`; si no,
+  arrancaba con un guion escrito adentro.
+- `autoAlto()` sobre un elemento oculto lee `scrollHeight === 0`. `fillStep2()` corre **antes** de
+  quitarle el `hidden` al paso 2 en dos de sus llamadas, así que fijar el alto ahí dejaba la nota
+  en `height:0px` para siempre. Se deja el alto sin fijar cuando no está visible (manda el CSS) y
+  se reintenta en un `setTimeout(0)`.
+- Con `box-sizing:border-box` el alto incluye el borde pero `scrollHeight` no, así que hay que
+  sumarlo: sin eso el campo quedaba 2 px corto y aparecía scroll interno.
+
 ## [Parte 9] — Detalle de la hoja en celular: una tarjeta por línea (rol Hospital)
 
 Hospital captura las hojas desde el celular. En el paso 2 del wizard el detalle son 6 columnas
