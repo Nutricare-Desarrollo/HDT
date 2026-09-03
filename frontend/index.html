@@ -119,6 +119,13 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
    el resto de las columnas. Se recorta con puntos suspensivos; el texto
    completo queda en el title de la celda. */
 #banGrid .ban-desc{max-width:280px;overflow:hidden;text-overflow:ellipsis}
+/* Hospitales: el nombre es la columna larga; se recorta igual que en Bandejas. */
+#hosGrid .hos-nom{max-width:420px;overflow:hidden;text-overflow:ellipsis}
+/* Una fila desactivada se lee distinto sin necesidad de mirar la columna Estado. */
+.hos-row-off td{opacity:.55}
+.hos-off{color:#a3364a}
+.hos-chk{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;color:var(--txt);cursor:pointer;white-space:nowrap}
+.hos-chk input{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
 .empty{padding:48px 20px;text-align:center;color:var(--muted)}
 .empty .big{font-size:38px;margin-bottom:8px}
 .grid-foot{padding:11px 14px;color:var(--muted);font-size:13px;font-weight:600;text-align:right}
@@ -698,6 +705,23 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       </div>
     </section>
 
+    <!-- HOSPITALES — mantenimiento (solo Bodega / Administrador) -->
+    <section id="viewHospitales" class="hidden">
+      <div class="page-head">
+        <div><h2>Hospitales</h2><div class="sub" id="hosSub">Catálogo de hospitales y centros médicos</div></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <label class="hos-chk"><input type="checkbox" id="hosVerInactivos" onchange="renderHospitales()"> Ver desactivados</label>
+          <button class="btn-ghost" onclick="loadHospitales()">🔄 Actualizar</button>
+          <button class="btn-primary" onclick="nuevoHospital()">➕ Nuevo hospital</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap"><table id="hosGrid"><thead id="hosHead"></thead><tbody id="hosBody"></tbody></table></div>
+        <div id="hosEmpty" class="empty hidden"><div class="big">🏥</div><div>No hay hospitales en el catálogo.</div></div>
+        <div class="grid-foot" id="hosFoot"></div>
+      </div>
+    </section>
+
     <!-- REEMPLAZOS / CORRECCIONES (Bodega / Administrador) -->
     <section id="viewReemplazos" class="hidden">
       <div class="page-head">
@@ -737,6 +761,38 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
 </div>
 
 <!-- MODAL cargando -->
+<!-- HOSPITALES — alta y edición -->
+<div id="hosModal" class="overlay hidden">
+  <div class="modal sm-md">
+    <div class="modal-head">
+      <h3 id="hosModalTit">Nuevo hospital</h3>
+      <button class="x" onclick="cerrarHospital()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field full">
+        <label>Nombre <span class="req">*</span></label>
+        <input id="hosNombre" type="text" maxlength="200" autocomplete="off" onkeydown="onHosModalKey(event)">
+        <div class="cat-fhint" id="hosHint"></div>
+      </div>
+      <div class="field">
+        <label>Provincia</label>
+        <select id="hosProvincia"></select>
+      </div>
+      <div class="field">
+        <label>Estado</label>
+        <select id="hosActivo">
+          <option value="1">Activo</option>
+          <option value="0">Desactivado</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="cerrarHospital()">Cancelar</button>
+      <button class="btn-primary" id="hosSave" onclick="guardarHospital()">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <!-- BANDEJAS — agregar o editar un producto de la bandeja -->
 <div id="banProdModal" class="overlay hidden">
   <div class="modal sm-md">
@@ -1682,6 +1738,7 @@ function buildNav(){
   if(canBodega()) items.push({id:'trabajos',ic:'🧾',l:'Histórico Dynamics',fn:showTrabajos});
   if(canBodega()) items.push({id:'auditoria',ic:'🕵️',l:'Auditoría de cambios',fn:showAuditoria});
   if(canBodega()) items.push({id:'bandejas',ic:'🧰',l:'Bandejas',fn:showBandejas});
+  if(canBodega()) items.push({id:'hospitales',ic:'🏥',l:'Hospitales',fn:showHospitales});
   if(canBodega()) items.push({id:'config',ic:'⚙️',l:'Configuración',fn:showConfig});
   // Usuarios y roles: solo Administrador (se oculta al simular otro rol).
   if(ROL==='Administrador') items.push({id:'usuarios',ic:'👥',l:'Usuarios y roles',fn:showUsuarios});
@@ -1695,7 +1752,7 @@ function buildNav(){
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('ovl').classList.toggle('show'); }
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('ovl').classList.remove('show'); }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet'];
+const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
 
 /* ===== INICIO ===== */
@@ -4289,6 +4346,166 @@ async function eliminarProducto(prodEnc){
     toast('Producto eliminado: '+producto);
     renderBandejaDet();
   }catch(e){ toast('No se pudo eliminar: '+e.message); if(btn) btn.disabled=false; }
+}
+
+/* ===== HOSPITALES — mantenimiento (solo Bodega / Administrador) ===== */
+let HOS_ROWS=[], HOS_COLF={}, HOS_EDIT=null;
+const HOS_PROVINCIAS=['San José','Alajuela','Cartago','Heredia','Guanacaste','Puntarenas','Limón'];
+const HOS_COLS=[
+  {k:'nombre',    l:'Nombre', cls:'hos-nom'},
+  {k:'provincia', l:'Provincia'},
+  {k:'estado',    l:'Estado'}
+];
+
+/* Opciones de provincia. La vacia existe porque 8 hospitales de la carga
+   quedaron sin provincia y no corresponde inventarsela al guardar. */
+function hosProvOpciones(sel){
+  const v=(sel==null?'':String(sel)).trim();
+  return `<option value="">— Sin definir —</option>`
+    + HOS_PROVINCIAS.map(x=>`<option value="${attr(x)}"${x===v?' selected':''}>${esc(x)}</option>`).join('');
+}
+
+async function showHospitales(){
+  if(!canBodega()){ toast('Su rol no tiene acceso'); showInicio(); return; }
+  setTab('hospitales'); showOnly('viewHospitales');
+  await loadHospitales();
+}
+async function loadHospitales(){
+  showLoading('Cargando hospitales', 'Estamos trayendo el catálogo…');
+  try{ HOS_ROWS=await api('GET','/hospitales?todos=1'); }
+  catch(e){ HOS_ROWS=[]; toast('Error al cargar hospitales: '+e.message); }
+  finally{ hideLoading(); }
+  HOS_ROWS.forEach(r=>{ r.estado = r.activo ? 'Activo' : 'Desactivado'; });
+  renderHospitales();
+}
+function hosFiltered(){
+  const verInactivos=document.getElementById('hosVerInactivos').checked;
+  return HOS_ROWS.filter(r=> (verInactivos || r.activo) && Object.keys(HOS_COLF).every(k=>{
+    const f=(HOS_COLF[k]||'').trim().toLowerCase(); if(!f) return true;
+    return String(r[k]==null?'':r[k]).toLowerCase().includes(f);
+  }));
+}
+function onHosFilter(k,v){ HOS_COLF[k]=v; renderHosBody(); }
+function onHosFilterKey(e){
+  if(e.key==='Enter'){ e.preventDefault(); renderHosBody(); return; }
+  if(e.key==='Escape'){ e.preventDefault(); e.target.value=''; onHosFilter(e.target.dataset.k,''); }
+}
+/* El encabezado se dibuja una sola vez: si se redibujara en cada tecla se
+   perderia el foco del input y solo entraria la primera letra. */
+function renderHosHead(){
+  const head=document.getElementById('hosHead');
+  if(head.dataset.listo) return;
+  head.innerHTML=`<tr>${HOS_COLS.map(c=>`<th${c.cls?' class="'+c.cls+'"':''}>${c.l}</th>`).join('')}<th></th></tr>`
+    +`<tr class="filter-row">${HOS_COLS.map(c=>`<th><input placeholder="Filtrar…" autocomplete="off" data-k="${c.k}" oninput="onHosFilter('${c.k}',this.value)" onkeydown="onHosFilterKey(event)" value="${attr(HOS_COLF[c.k])}"></th>`).join('')}<th></th></tr>`;
+  head.dataset.listo='1';
+}
+function renderHospitales(){ renderHosHead(); renderHosBody(); }
+function renderHosBody(){
+  const rows=hosFiltered();
+  const b=document.getElementById('hosBody'); b.innerHTML='';
+  document.getElementById('hosEmpty').classList.toggle('hidden', HOS_ROWS.length>0);
+  document.getElementById('hosGrid').classList.toggle('hidden', HOS_ROWS.length===0);
+  const activos=HOS_ROWS.filter(r=>r.activo).length;
+  const inactivos=HOS_ROWS.length-activos;
+  const foot=document.getElementById('hosFoot');
+  if(!HOS_ROWS.length){ foot.textContent=''; return; }
+  /* Sin filtro se muestra el total y cuantos estan desactivados; con filtro
+     se aclara «X de Y» para que el numero no parezca el total del catalogo. */
+  const total=HOS_ROWS.length;
+  const desact = inactivos ? ' · '+inactivos+(inactivos===1?' desactivado':' desactivados') : '';
+  foot.textContent = (rows.length===total)
+    ? total+(total===1?' hospital':' hospitales')+desact
+    : rows.length+' de '+total+' hospitales'+desact;
+  if(!rows.length){ b.innerHTML=`<tr><td colspan="${HOS_COLS.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  rows.forEach(r=>{
+    const tds=HOS_COLS.map(c=>{
+      if(c.k==='nombre')
+        return `<td class="hos-nom"><span class="link-cell" onclick="editarHospital(${r.id})" title="Editar">${esc(r.nombre)}</span></td>`;
+      if(c.k==='estado')
+        return r.activo ? '<td>Activo</td>' : '<td><b class="hos-off">Desactivado</b></td>';
+      return `<td>${esc(r[c.k])}</td>`;
+    }).join('');
+    const tr=document.createElement('tr');
+    tr.className = r.activo ? '' : 'hos-row-off';
+    tr.innerHTML=tds
+      +`<td style="white-space:nowrap">`
+      +`<button class="icon-btn" onclick="editarHospital(${r.id})">✏️ Editar</button> `
+      +(r.activo
+        ? `<button class="icon-btn danger" onclick="cambiarEstadoHospital(${r.id},false)">🚫 Desactivar</button>`
+        : `<button class="icon-btn" onclick="cambiarEstadoHospital(${r.id},true)">✅ Activar</button>`)
+      +`</td>`;
+    b.appendChild(tr);
+  });
+}
+
+/* ----- Alta y edicion, las dos en el mismo modal ----- */
+function nuevoHospital(){
+  HOS_EDIT=null;
+  document.getElementById('hosModalTit').textContent='Nuevo hospital';
+  document.getElementById('hosNombre').value='';
+  document.getElementById('hosProvincia').innerHTML=hosProvOpciones('');
+  document.getElementById('hosActivo').value='1';
+  document.getElementById('hosHint').textContent='';
+  document.getElementById('hosModal').classList.remove('hidden');
+  setTimeout(()=>document.getElementById('hosNombre').focus(), 30);
+}
+function editarHospital(id){
+  const r=HOS_ROWS.find(x=>x.id===id); if(!r) return;
+  HOS_EDIT=id;
+  document.getElementById('hosModalTit').textContent='Editar hospital';
+  document.getElementById('hosNombre').value=r.nombre||'';
+  document.getElementById('hosProvincia').innerHTML=hosProvOpciones(r.provincia);
+  document.getElementById('hosActivo').value=r.activo?'1':'0';
+  document.getElementById('hosHint').textContent='';
+  document.getElementById('hosModal').classList.remove('hidden');
+  setTimeout(()=>document.getElementById('hosNombre').focus(), 30);
+}
+function cerrarHospital(){ document.getElementById('hosModal').classList.add('hidden'); HOS_EDIT=null; }
+function onHosModalKey(e){ if(e.key==='Enter'){ e.preventDefault(); guardarHospital(); } }
+
+async function guardarHospital(){
+  const nombre=document.getElementById('hosNombre').value.trim();
+  const hint=document.getElementById('hosHint');
+  if(!nombre){ hint.textContent='El nombre es obligatorio.'; hint.className='cat-fhint warn'; return; }
+  /* Aviso local antes de mandarlo: el indice unico de la base tambien lo
+     rechaza, pero es mejor decirlo antes de que el usuario pierda el viaje. */
+  const rep=HOS_ROWS.find(x=>x.id!==HOS_EDIT && String(x.nombre||'').trim().toLowerCase()===nombre.toLowerCase());
+  if(rep){ hint.textContent='Ya existe un hospital con ese nombre.'; hint.className='cat-fhint warn'; return; }
+  hint.textContent=''; hint.className='cat-fhint';
+  const cuerpo={
+    nombre,
+    provincia: document.getElementById('hosProvincia').value,
+    activo: document.getElementById('hosActivo').value==='1'
+  };
+  const btn=document.getElementById('hosSave'); btn.disabled=true;
+  try{
+    if(HOS_EDIT){
+      const r=await api('PUT','/hospitales/'+HOS_EDIT, cuerpo);
+      const i=HOS_ROWS.findIndex(x=>x.id===HOS_EDIT);
+      if(i>=0) HOS_ROWS[i]={...r, estado: r.activo?'Activo':'Desactivado'};
+      toast('Hospital actualizado');
+    }else{
+      const r=await api('POST','/hospitales', cuerpo);
+      HOS_ROWS.push({...r, estado: r.activo?'Activo':'Desactivado'});
+      HOS_ROWS.sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre),'es'));
+      toast('Hospital agregado');
+    }
+    cerrarHospital();
+    renderHosBody();
+  }catch(e){ toast('No se pudo guardar: '+e.message); }
+  finally{ btn.disabled=false; }
+}
+
+/* Activar o desactivar desde la fila. No hay borrado: las solicitudes van a
+   referenciar estos registros y borrar uno dejaria huerfano el historico. */
+async function cambiarEstadoHospital(id, activo){
+  const r=HOS_ROWS.find(x=>x.id===id); if(!r) return;
+  try{
+    const upd=await api('PUT','/hospitales/'+id, {activo});
+    Object.assign(r, upd, {estado: upd.activo?'Activo':'Desactivado'});
+    toast((activo?'Activado: ':'Desactivado: ')+r.nombre);
+    renderHosBody();
+  }catch(e){ toast('No se pudo cambiar el estado: '+e.message); }
 }
 
 /* ===== Utilidades ===== */

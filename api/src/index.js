@@ -700,6 +700,134 @@ app.http('bandeja-producto-delete', {
   }
 });
 
+
+/* ============================================================
+   Hospitales — catálogo
+   El mantenimiento es solo para Administrador y Bodega, pero la lista de
+   activos la puede leer cualquier usuario autenticado: el formulario de
+   Solicitud de Equipo (rol Hospital) la va a necesitar como desplegable.
+
+   No hay DELETE a propósito: un hospital se desactiva. Las solicitudes van
+   a referenciar estos registros y borrar uno dejaría huérfano el histórico.
+   ============================================================ */
+
+const PROVINCIAS = ['San José', 'Alajuela', 'Cartago', 'Heredia', 'Guanacaste', 'Puntarenas', 'Limón'];
+
+/* Corrige la capitalización y las tildes contra la lista cerrada de
+   provincias. Un valor que no calce se rechaza: aquí sí conviene ser
+   estricto, porque la tabla arranca limpia y no hay historia que respetar. */
+function normProvincia(v) {
+  const t = textoONull(v, 40);
+  if (!t) return { ok: true, valor: null };
+  const sinTilde = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const m = PROVINCIAS.find((p) => sinTilde(p) === sinTilde(t));
+  return m ? { ok: true, valor: m } : { ok: false, valor: null };
+}
+
+const normNombreHospital = (v) => textoONull(v, 200);
+
+/* GET /api/hospitales -> activos. ?todos=1 incluye los desactivados y es
+   solo para la pantalla de mantenimiento. */
+app.http('hospitales-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'hospitales',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const todos = /^(1|true|si)$/i.test(String(request.query.get('todos') || ''));
+    if (todos && !puedeBodega(await getRole(user))) {
+      return json(403, { error: 'No tiene permiso para ver los hospitales desactivados' });
+    }
+    try {
+      const r = await query(
+        `SELECT Id AS id, Nombre AS nombre, Provincia AS provincia, Activo AS activo
+           FROM cat.Hospital
+          ${todos ? '' : 'WHERE Activo = TRUE'}
+          ORDER BY Nombre`);
+      return json(200, r.rows);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener el catálogo de hospitales', detail: e.message });
+    }
+  }
+});
+
+/* POST /api/hospitales -> agrega un hospital. Body: { nombre, provincia, activo } */
+app.http('hospital-create', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'hospitales',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de hospitales' });
+    const body = await request.json();
+    const nombre = normNombreHospital(body && body.nombre);
+    if (!nombre) return json(400, { error: 'El nombre del hospital es obligatorio' });
+    const prov = normProvincia(body && body.provincia);
+    if (!prov.ok) return json(400, { error: 'La provincia debe ser una de: ' + PROVINCIAS.join(', ') });
+    const activo = (body && body.activo !== undefined) ? !!body.activo : true;
+    try {
+      const r = await query(
+        `INSERT INTO cat.Hospital (Nombre, Provincia, Activo, CreadoPor, FechaActualizacion)
+         VALUES ($1,$2,$3,$4,(now() at time zone 'utc'))
+         RETURNING Id AS id, Nombre AS nombre, Provincia AS provincia, Activo AS activo`,
+        [nombre, prov.valor, activo, user.name || user.email]);
+      return json(201, r.rows[0]);
+    } catch (e) {
+      if (e.code === '23505') return json(400, { error: 'Ya existe un hospital con ese nombre' });
+      context.error(e);
+      return json(500, { error: 'No se pudo agregar el hospital', detail: e.message });
+    }
+  }
+});
+
+/* PUT /api/hospitales/{id} -> corrige el nombre, la provincia o el estado.
+   Se puede mandar solo { activo } para activar o desactivar desde el grid.
+   No modifica las solicitudes ya creadas. */
+app.http('hospital-update', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'hospitales/{id}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de hospitales' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    const body = await request.json();
+    const cambiaNombre    = !!body && body.nombre !== undefined;
+    const cambiaProvincia = !!body && body.provincia !== undefined;
+    const cambiaActivo    = !!body && body.activo !== undefined;
+    if (!cambiaNombre && !cambiaProvincia && !cambiaActivo) return json(400, { error: 'No hay nada que actualizar' });
+
+    const nombre = cambiaNombre ? normNombreHospital(body.nombre) : null;
+    if (cambiaNombre && !nombre) return json(400, { error: 'El nombre del hospital es obligatorio' });
+
+    /* La provincia se puede vaciar a propósito, así que se distingue entre
+       «no la mandaron» y «la mandaron vacía»: por eso el flag aparte. */
+    let provincia = null;
+    if (cambiaProvincia) {
+      const p = normProvincia(body.provincia);
+      if (!p.ok) return json(400, { error: 'La provincia debe ser una de: ' + PROVINCIAS.join(', ') });
+      provincia = p.valor;
+    }
+    try {
+      const r = await query(
+        `UPDATE cat.Hospital
+            SET Nombre    = COALESCE($1::varchar, Nombre),
+                Provincia = CASE WHEN $2::boolean THEN $3::varchar ELSE Provincia END,
+                Activo    = COALESCE($4::boolean, Activo),
+                ActualizadoPor = $5, FechaActualizacion = (now() at time zone 'utc')
+          WHERE Id = $6
+          RETURNING Id AS id, Nombre AS nombre, Provincia AS provincia, Activo AS activo`,
+        [nombre, cambiaProvincia, provincia, cambiaActivo ? !!body.activo : null,
+         user.name || user.email, id]);
+      if (!r.rowCount) return json(404, { error: 'El hospital no existe' });
+      return json(200, r.rows[0]);
+    } catch (e) {
+      if (e.code === '23505') return json(400, { error: 'Ya hay otro hospital con ese nombre' });
+      context.error(e);
+      return json(500, { error: 'No se pudo actualizar el hospital', detail: e.message });
+    }
+  }
+});
+
 /* ============================================================
    Hojas de consumo — CRUD
    ============================================================ */
