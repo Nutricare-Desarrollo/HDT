@@ -44,9 +44,14 @@ ALTER TABLE cat.EquipoProducto ADD COLUMN IF NOT EXISTS DescripcionProducto VARC
 ALTER TABLE cat.EquipoProducto ADD COLUMN IF NOT EXISTS ActualizadoPor VARCHAR(200) NULL;
 ALTER TABLE cat.EquipoProducto ADD COLUMN IF NOT EXISTS FechaActualizacion TIMESTAMP(0) NULL;
 
--- La cantidad no puede ser cero ni negativa.
+/* La cantidad no puede ser negativa. Se permite el cero a proposito: nueve
+   lineas del export de SharePoint vinieron sin cantidad registrada y se cargan
+   tal cual, para no inventar un valor que despues nadie revisaria. Quedan
+   listadas al final de este archivo y la pantalla las marca en amarillo.
+   La API es mas estricta que la base: al agregar o editar un producto exige
+   una cantidad mayor que cero, asi que no se pueden crear ceros nuevos. */
 ALTER TABLE cat.EquipoProducto DROP CONSTRAINT IF EXISTS CK_EquipoProducto_Cantidad;
-ALTER TABLE cat.EquipoProducto ADD  CONSTRAINT CK_EquipoProducto_Cantidad CHECK (Cantidad > 0);
+ALTER TABLE cat.EquipoProducto ADD  CONSTRAINT CK_EquipoProducto_Cantidad CHECK (Cantidad >= 0);
 
 
 /* ---------- 2. Bandejas ---------- */
@@ -3832,6 +3837,17 @@ ON CONFLICT (EquipoCodigo, ProductoCodigo) DO UPDATE SET
        desde la pantalla con un código propio.
      - Bandejas sin color de demarcación: CONS METRO, KIT KW, NUT- BATERIA, NUT-0001401.
      - Bandejas sin ningún producto: CONS METRO, NUT- BATERIA, NUT-0001401, NUT-10290.
+     - Líneas que vinieron con cantidad CERO (9). Se cargaron en cero a
+       propósito; hay que registrar la cantidad real desde la pantalla:
+         0001331    236160         Protector, Φ 3.2mm
+         0001332    236160         Protector, Φ 3.2mm
+         0001332    31409000       Washer 4.0
+         0001339    30387040       Tornillo Cortical, Rosca Completa, Autoperforante, 3.5, 3.5x
+         0001344    24291114       Placa Dis Dor Húmero Bloq Compr 2.7/3.5, 6+14-Orif
+         0001400    24278202       Placa Dis Radio Dos-Col Volar I, 2.4/2.7, 7+2-Orif
+         0001403    24258112       Placa AnteroLat Clavicular Bloq Compr, 2.7/3.5, 7+5-Orif
+         0001404    24257107       Placa Reconstrucción Clavicular Bloq Compr 3.5, 7-Orif
+         0001410    24261208       Placa Lat Dis Fibula Bloq Compr 2.7/3.5, 5+3-Orif
 */
 
 COMMIT;

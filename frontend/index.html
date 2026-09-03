@@ -4128,8 +4128,14 @@ function renderBandejaProductos(){
     const aviso = (catReady() && !catCodigoValido(p.producto))
       ? ' <span class="cat-fhint warn" title="El código ya no aparece en el catálogo de productos">⚠</span>' : '';
     const tr=document.createElement('tr');
+    /* Nueve lineas vinieron en cero desde SharePoint: se cargaron asi a proposito
+       en lugar de inventarles un 1. Se marcan para que Bodega registre la real. */
+    const cant=Number(p.cantidad);
+    const celdaCant = (cant>0)
+      ? `<td>${esc(p.cantidad)}</td>`
+      : `<td><b title="Vino sin cantidad registrada desde SharePoint. Edite la línea para poner la cantidad real.">0 ⚠</b></td>`;
     tr.innerHTML=`<td>${esc(p.producto)}${aviso}</td><td>${esc(desc)}</td><td>${esc(p.tipo)}</td>`
-      +`<td>${esc(p.cantidad)}</td>`
+      +celdaCant
       +`<td style="white-space:nowrap">`
       +`<button class="icon-btn" onclick="abrirProducto('${enc}')">✏️ Editar</button> `
       +`<button class="icon-btn danger" id="banDel-${enc}" onclick="eliminarProducto('${enc}')">🗑️ Eliminar</button>`
