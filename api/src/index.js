@@ -1057,7 +1057,8 @@ function solDetalle(body) {
     vistos.set(cod, {
       codigo: cod,
       demarcado: solTexto(d && d.demarcado, 60),
-      descripcion: solTexto(d && d.descripcion, 300)
+      descripcion: solTexto(d && d.descripcion, 300),
+      color: solTexto(d && d.color, 40)
     });
   }
   return [...vistos.values()];
@@ -1157,7 +1158,8 @@ app.http('solicitud-get', {
       const s = await query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
       if (!s.rowCount) return json(404, { error: 'La solicitud no existe' });
       const d = await query(
-        `SELECT EquipoCodigo AS equipo_codigo, Demarcado AS demarcado, Descripcion AS descripcion
+        `SELECT EquipoCodigo AS equipo_codigo, Demarcado AS demarcado, Descripcion AS descripcion,
+                Color AS color
            FROM dbo.SolicitudEquipoDetalle WHERE SolicitudId = $1 ORDER BY Id`, [id]);
       return json(200, { ...s.rows[0], detalle: d.rows });
     } catch (e) {
@@ -1195,9 +1197,15 @@ async function leerEncabezado(body) {
 async function guardarDetalle(client, id, detalle) {
   await client.query(`DELETE FROM dbo.SolicitudEquipoDetalle WHERE SolicitudId = $1`, [id]);
   for (const d of detalle) {
+    /* El color se toma del catálogo cuando el cliente no lo manda: la fuente
+       de verdad es cat.Equipo, no el navegador. Queda grabado en la línea
+       para que una solicitud enviada conserve el color con que se pidió. */
     await client.query(
-      `INSERT INTO dbo.SolicitudEquipoDetalle (SolicitudId, EquipoCodigo, Demarcado, Descripcion)
-       VALUES ($1,$2,$3,$4)`, [id, d.codigo, d.demarcado, d.descripcion]);
+      `INSERT INTO dbo.SolicitudEquipoDetalle (SolicitudId, EquipoCodigo, Demarcado, Descripcion, Color)
+       VALUES ($1,$2,$3,$4,
+               COALESCE($5, (SELECT e.Color FROM cat.Equipo e
+                              WHERE UPPER(TRIM(e.Codigo)) = UPPER(TRIM($2)))))`,
+      [id, d.codigo, d.demarcado, d.descripcion, d.color]);
   }
 }
 
@@ -1352,7 +1360,8 @@ app.http('solicitud-enviar', {
       }
       const s = await client.query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
       const d = await client.query(
-        `SELECT EquipoCodigo AS equipo_codigo, Demarcado AS demarcado, Descripcion AS descripcion
+        `SELECT EquipoCodigo AS equipo_codigo, Demarcado AS demarcado, Descripcion AS descripcion,
+                Color AS color
            FROM dbo.SolicitudEquipoDetalle WHERE SolicitudId = $1 ORDER BY Id`, [id]);
       sol = s.rows[0]; detalle = d.rows;
 

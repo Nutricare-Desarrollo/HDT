@@ -142,6 +142,7 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 /* Solicitud de Equipo */
 #solGrid .sol-hosp{max-width:280px;overflow:hidden;text-overflow:ellipsis}
 #solGrid .sol-user{max-width:190px;overflow:hidden;text-overflow:ellipsis}
+#solDetGrid .sol-desc{max-width:420px;overflow:hidden;text-overflow:ellipsis}
 .sol-add{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0 4px}
 .sol-add select{flex:1 1 320px;min-width:0}
 .sol-opt{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-left:5px}
@@ -4852,9 +4853,13 @@ const SOL_COMBOS={
                    ph:'Escriba para filtrar hospitales…', vacio:'Sin coincidencias en hospitales' },
   sol_cirujano:  { items:()=>(CATS.cirujano.lista||[]).map(x=>({val:x.nombre, lab:x.nombre})),
                    ph:'Escriba para filtrar cirujanos…',  vacio:'Sin coincidencias en cirujanos' },
+  /* La etiqueta lleva el codigo y el color; la descripcion va en la segunda
+     linea. El filtro mira las dos, asi que se puede buscar por codigo, por
+     color o por descripcion. */
   solBandejaSel: { items:()=>(SOL_BANDEJAS||[]).map(x=>({val:x.codigo,
-                     lab:(x.demarcado||('NUT-'+x.codigo))+' — '+(x.nombre||'')})),
-                   ph:'Escriba código o descripción…', vacio:'Sin coincidencias en bandejas' }
+                     lab:(x.demarcado||('NUT-'+x.codigo))+(x.color?'  ·  '+x.color:''),
+                     sub:x.nombre||''})),
+                   ph:'Escriba código, color o descripción…', vacio:'Sin coincidencias en bandejas' }
 };
 
 /* Campo completo. Con boton '+' si el combo tiene catalogo administrable. */
@@ -4904,8 +4909,10 @@ function cbFiltrar(id, q){
   if(!t) return todos.slice(0,60);
   const pre=[], con=[];
   todos.forEach(x=>{
-    const l=cbNorm(x.lab);
-    if(l.startsWith(t)) pre.push(x); else if(l.includes(t)) con.push(x);
+    const l=cbNorm(x.lab), todo=cbNorm(x.lab+' '+(x.sub||''));
+    // Las que empiezan con lo escrito primero; despues las que lo contienen
+    // en cualquier parte, incluida la descripcion de la segunda linea.
+    if(l.startsWith(t)) pre.push(x); else if(todo.includes(t)) con.push(x);
   });
   return pre.concat(con).slice(0,60);
 }
@@ -4917,7 +4924,8 @@ function cbAbrir(id, todo){
   CB_ACT={id, lista:cbFiltrar(id, todo ? '' : el.value)}; CB_IDX=-1;
   const box=cbBox();
   box.innerHTML = CB_ACT.lista.length
-    ? CB_ACT.lista.map((x,i)=>`<div class="ac-item" data-i="${i}"><span class="ac-code">${esc(x.lab)}</span></div>`).join('')
+    ? CB_ACT.lista.map((x,i)=>`<div class="ac-item" data-i="${i}"><span class="ac-code">${esc(x.lab)}</span>`
+        +(x.sub?`<span class="ac-desc">${esc(x.sub)}</span>`:'')+`</div>`).join('')
     : `<div class="ac-empty">${esc(SOL_COMBOS[id].vacio)}</div>`;
   const r=el.getBoundingClientRect();
   box.style.left=r.left+'px'; box.style.top=(r.bottom+4)+'px'; box.style.width=Math.max(r.width,280)+'px';
@@ -5139,7 +5147,7 @@ function renderSolDetalle(){
   const s=SOL_ACT; if(!s) return;
   const ed=solEditable(), lista=s.detalle||[];
   document.getElementById('solDetHead').innerHTML=
-    '<tr><th>Código de bandeja</th><th>Descripción</th>'+(ed?'<th></th>':'')+'</tr>';
+    '<tr><th>Código de bandeja</th><th>Color</th><th>Descripción</th>'+(ed?'<th></th>':'')+'</tr>';
   const b=document.getElementById('solDetBody'); b.innerHTML='';
   document.getElementById('solDetEmpty').classList.toggle('hidden', lista.length>0);
   document.getElementById('solDetGrid').classList.toggle('hidden', lista.length===0);
@@ -5147,7 +5155,8 @@ function renderSolDetalle(){
     ? (lista.length===1?'1 bandeja':lista.length+' bandejas') : '';
   lista.forEach((d,i)=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${esc(d.demarcado||d.equipo_codigo)}</td><td>${esc(d.descripcion)}</td>`
+    tr.innerHTML=`<td>${esc(d.demarcado||d.equipo_codigo)}</td><td>${esc(d.color)}</td>`
+      +`<td class="sol-desc" title="${attr(d.descripcion)}">${esc(d.descripcion)}</td>`
       +(ed?`<td style="white-space:nowrap"><button class="icon-btn danger" onclick="quitarBandejaSolicitud(${i})">🗑️ Eliminar</button></td>`:'');
     b.appendChild(tr);
   });
@@ -5159,7 +5168,8 @@ function agregarBandejaSolicitud(){
   SOL_ACT.detalle=SOL_ACT.detalle||[];
   if(SOL_ACT.detalle.some(d=>String(d.equipo_codigo)===String(cod))){ toast('Esa bandeja ya está en el detalle'); return; }
   const b=(SOL_BANDEJAS||[]).find(x=>String(x.codigo)===String(cod));
-  SOL_ACT.detalle.push({equipo_codigo:cod, demarcado:(b&&b.demarcado)||('NUT-'+cod), descripcion:(b&&b.nombre)||null});
+  SOL_ACT.detalle.push({equipo_codigo:cod, demarcado:(b&&b.demarcado)||('NUT-'+cod),
+                        descripcion:(b&&b.nombre)||null, color:(b&&b.color)||null});
   sel.value=''; sel.dataset.val=''; sel.classList.remove('invalid');
   renderSolDetalle();
 }
@@ -5185,7 +5195,8 @@ function solLeerForm(){
     fecha_entrega: v('sol_fecha_entrega'),
     hora_entrega: v('sol_hora_entrega'),
     observaciones: v('sol_observaciones'),
-    detalle: (SOL_ACT.detalle||[]).map(d=>({equipo_codigo:d.equipo_codigo, demarcado:d.demarcado, descripcion:d.descripcion}))
+    detalle: (SOL_ACT.detalle||[]).map(d=>({equipo_codigo:d.equipo_codigo, demarcado:d.demarcado,
+                                            descripcion:d.descripcion, color:d.color}))
   };
 }
 /* Las mismas reglas que la API, para avisar sin gastar el viaje. La API las
