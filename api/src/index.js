@@ -5,6 +5,7 @@ const audit = require('./auditoria');
 const { getCatalogo, getMapa, normCod } = require('./productos');
 const { getLotes } = require('./lotes');
 const { iniciarDynamics, consultarDynamics } = require('./dynamics');
+const { notificar, cuentasDe } = require('./notificar');
 
 /* ============================================================
    Utilidades
@@ -955,6 +956,391 @@ app.http('notificacion-delete', {
       context.error(e);
       return json(500, { error: 'No se pudo eliminar la cuenta', detail: e.message });
     }
+  }
+});
+
+
+/* ============================================================
+   Solicitud de Equipo
+   Rol Hospital (y Administrador). Dos estados: Borrador y Enviada.
+
+   Guardar y enviar son operaciones distintas a proposito. Si un solo
+   boton validara y enviara siempre, el estado Borrador no existiria: cada
+   guardado saltaria a Enviada y la cejilla de borradores quedaria muerta.
+   Asi que guardar admite datos incompletos y enviar exige todo.
+
+   Una vez Enviada la solicitud no se edita ni se borra: ya salio el aviso
+   a Bodega y el registro es el respaldo de lo que se pidio.
+   ============================================================ */
+
+const SOL_ESTADOS = ['Borrador', 'Enviada'];
+
+/* Fecha y hora actuales en Costa Rica, tomadas de la BASE y no del reloj del
+   proceso. Azure corre en UTC: a las 6pm de Costa Rica ya es el dia siguiente
+   en UTC, asi que comparar contra UTC rechazaria cirugias validas de la tarde
+   y aceptaria horas ya pasadas. */
+async function ahoraCR() {
+  const r = await query(
+    `SELECT (now() AT TIME ZONE 'America/Costa_Rica')::date::text AS fecha,
+            to_char((now() AT TIME ZONE 'America/Costa_Rica'), 'HH24:MI') AS hora`);
+  return r.rows[0];
+}
+
+const solTexto = (v, max) => {
+  const t = (v == null) ? '' : String(v).replace(/\s+/g, ' ').trim();
+  return t === '' ? null : t.slice(0, max);
+};
+/* 'YYYY-MM-DD' o null. Cualquier otra cosa es null: no se adivina el formato. */
+const solFecha = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim()) ? String(v).trim() : null);
+/* 'HH:MM' en 24 horas, o null. */
+const solHora  = (v) => (/^([01]\d|2[0-3]):[0-5]\d$/.test(String(v || '').trim()) ? String(v).trim() : null);
+
+/* Normaliza el detalle: quita repetidos por codigo de bandeja y recorta. */
+function solDetalle(body) {
+  const arr = Array.isArray(body && body.detalle) ? body.detalle : [];
+  const vistos = new Map();
+  for (const d of arr) {
+    const cod = normBandeja(d && (d.equipo_codigo != null ? d.equipo_codigo : d.codigo));
+    if (!cod || vistos.has(cod)) continue;
+    vistos.set(cod, {
+      codigo: cod,
+      demarcado: solTexto(d && d.demarcado, 60),
+      descripcion: solTexto(d && d.descripcion, 300)
+    });
+  }
+  return [...vistos.values()];
+}
+
+/* Las validaciones del enunciado, todas juntas. Devuelve [] si esta lista
+   para enviarse. */
+function validarParaEnviar(sol, detalle, hoy) {
+  const faltan = [];
+  if (!sol.hospital)      faltan.push('Nombre del hospital');
+  if (!sol.cirugia)       faltan.push('Cirugía');
+  if (!sol.fecha_cirugia) faltan.push('Fecha de la cirugía');
+  if (!sol.cirujano)      faltan.push('Cirujano');
+  const errs = [];
+  if (faltan.length) errs.push('Complete los campos obligatorios: ' + faltan.join(', ') + '.');
+  if (!detalle.length) errs.push('Agregue al menos una bandeja al detalle.');
+  if (sol.fecha_cirugia) {
+    if (sol.fecha_cirugia < hoy.fecha) {
+      errs.push('La fecha de la cirugía no puede ser anterior a hoy.');
+    } else if (sol.fecha_cirugia === hoy.fecha && sol.hora_cirugia && sol.hora_cirugia < hoy.hora) {
+      /* La hora solo se compara cuando la cirugia es HOY: para una fecha
+         futura cualquier hora es valida. */
+      errs.push('La cirugía es hoy, así que la hora no puede ser anterior a la hora actual (' + hoy.hora + ').');
+    }
+  }
+  return errs;
+}
+
+/* Texto del campo Descripcion del aviso. Lo arma la API para que el correo
+   llegue con contexto sin que nadie lo escriba. */
+function resumenSolicitud(sol, detalle) {
+  const partes = [sol.codigo];
+  if (sol.hospital) partes.push(sol.hospital);
+  if (sol.fecha_cirugia) {
+    const [a, m, d] = sol.fecha_cirugia.split('-');
+    partes.push('cirugía del ' + d + '/' + m + '/' + a + (sol.hora_cirugia ? ' ' + sol.hora_cirugia : ''));
+  }
+  partes.push(detalle.length === 1 ? '1 bandeja' : detalle.length + ' bandejas');
+  return partes.join(' — ');
+}
+
+const SOL_SELECT = `SELECT s.Id AS id, s.Codigo AS codigo, s.Estado AS estado,
+       s.HospitalId AS hospital_id, s.Hospital AS hospital, s.Cirugia AS cirugia,
+       s.FechaCirugia::text AS fecha_cirugia, s.HoraCirugia AS hora_cirugia,
+       s.Cirujano AS cirujano, s.PacienteCedula AS paciente_cedula,
+       s.PacienteNombre AS paciente_nombre,
+       s.FechaEntrega::text AS fecha_entrega, s.HoraEntrega AS hora_entrega,
+       s.Observaciones AS observaciones,
+       s.CreadoPor AS creado_por, s.CreadoPorEmail AS creado_por_email,
+       to_char(s.FechaCreacion, 'YYYY-MM-DD HH24:MI') AS fecha_registro,
+       to_char(s.FechaEnvio, 'YYYY-MM-DD HH24:MI') AS fecha_envio
+  FROM dbo.SolicitudEquipo s`;
+
+/* GET /api/solicitudes?estado=Borrador -> listado de una cejilla. */
+app.http('solicitudes-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'solicitudes',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const rol = await getRole(user);
+    if (!puedeSubir(rol) && !puedeBodega(rol)) return json(403, { error: 'Su rol no tiene acceso a las solicitudes' });
+    const estado = SOL_ESTADOS.find((e) => e.toLowerCase() === String(request.query.get('estado') || '').toLowerCase());
+    try {
+      const r = await query(
+        `${SOL_SELECT}
+          ${estado ? 'WHERE s.Estado = $1' : ''}
+          ORDER BY s.Id DESC`, estado ? [estado] : []);
+      /* Cuantas bandejas lleva cada una, para mostrarlo en el grid sin
+         pedir el detalle de cada fila. */
+      const ids = r.rows.map((x) => x.id);
+      let conteo = {};
+      if (ids.length) {
+        const c = await query(
+          `SELECT SolicitudId AS id, COUNT(*)::int AS n FROM dbo.SolicitudEquipoDetalle
+            WHERE SolicitudId = ANY($1::int[]) GROUP BY SolicitudId`, [ids]);
+        c.rows.forEach((x) => { conteo[x.id] = x.n; });
+      }
+      return json(200, r.rows.map((x) => ({ ...x, bandejas: conteo[x.id] || 0 })));
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener las solicitudes', detail: e.message });
+    }
+  }
+});
+
+/* GET /api/solicitudes/{id} -> encabezado + detalle. */
+app.http('solicitud-get', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'solicitudes/{id}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const rol = await getRole(user);
+    if (!puedeSubir(rol) && !puedeBodega(rol)) return json(403, { error: 'Su rol no tiene acceso a las solicitudes' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    try {
+      const s = await query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
+      if (!s.rowCount) return json(404, { error: 'La solicitud no existe' });
+      const d = await query(
+        `SELECT EquipoCodigo AS equipo_codigo, Demarcado AS demarcado, Descripcion AS descripcion
+           FROM dbo.SolicitudEquipoDetalle WHERE SolicitudId = $1 ORDER BY Id`, [id]);
+      return json(200, { ...s.rows[0], detalle: d.rows });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener la solicitud', detail: e.message });
+    }
+  }
+});
+
+/* Lee el encabezado del body y, si mandaron hospital_id, toma el nombre del
+   catalogo en vez de confiar en el que venga del cliente. */
+async function leerEncabezado(body) {
+  const hospitalId = parseInt(body && body.hospital_id, 10) || null;
+  let hospital = solTexto(body && body.hospital, 200);
+  if (hospitalId) {
+    const h = await query(`SELECT Nombre FROM cat.Hospital WHERE Id = $1`, [hospitalId]);
+    if (h.rowCount) hospital = h.rows[0].nombre;
+  }
+  return {
+    hospital_id: hospitalId,
+    hospital,
+    cirugia: solTexto(body && body.cirugia, 400),
+    fecha_cirugia: solFecha(body && body.fecha_cirugia),
+    hora_cirugia: solHora(body && body.hora_cirugia),
+    cirujano: solTexto(body && body.cirujano, 200),
+    paciente_cedula: solTexto(body && body.paciente_cedula, 60),
+    paciente_nombre: solTexto(body && body.paciente_nombre, 200),
+    fecha_entrega: solFecha(body && body.fecha_entrega),
+    hora_entrega: solHora(body && body.hora_entrega),
+    observaciones: solTexto(body && body.observaciones, 1000)
+  };
+}
+
+/* Reescribe el detalle completo dentro de la transaccion abierta. */
+async function guardarDetalle(client, id, detalle) {
+  await client.query(`DELETE FROM dbo.SolicitudEquipoDetalle WHERE SolicitudId = $1`, [id]);
+  for (const d of detalle) {
+    await client.query(
+      `INSERT INTO dbo.SolicitudEquipoDetalle (SolicitudId, EquipoCodigo, Demarcado, Descripcion)
+       VALUES ($1,$2,$3,$4)`, [id, d.codigo, d.demarcado, d.descripcion]);
+  }
+}
+
+/* POST /api/solicitudes -> crea el borrador. Guardar no exige nada mas que
+   existir: las validaciones son del envio. */
+app.http('solicitud-create', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'solicitudes',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeSubir(await getRole(user))) return json(403, { error: 'No tiene permiso para crear solicitudes' });
+    const body = await request.json();
+    const enc = await leerEncabezado(body);
+    const detalle = solDetalle(body);
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      const cod = await client.query(
+        `SELECT 'ORT-' || lpad(nextval('dbo.SolicitudEquipoSeq')::text, 6, '0') AS codigo`);
+      const r = await client.query(
+        `INSERT INTO dbo.SolicitudEquipo
+           (Codigo, Estado, HospitalId, Hospital, Cirugia, FechaCirugia, HoraCirugia, Cirujano,
+            PacienteCedula, PacienteNombre, FechaEntrega, HoraEntrega, Observaciones,
+            CreadoPor, CreadoPorEmail)
+         VALUES ($1,'Borrador',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         RETURNING Id`,
+        [cod.rows[0].codigo, enc.hospital_id, enc.hospital, enc.cirugia, enc.fecha_cirugia,
+         enc.hora_cirugia, enc.cirujano, enc.paciente_cedula, enc.paciente_nombre,
+         enc.fecha_entrega, enc.hora_entrega, enc.observaciones,
+         user.name || user.email, user.email]);
+      const id = r.rows[0].id;
+      await guardarDetalle(client, id, detalle);
+      await client.query('COMMIT');
+      const out = await query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
+      return json(201, { ...out.rows[0], bandejas: detalle.length, detalle });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      context.error(e);
+      return json(500, { error: 'No se pudo crear la solicitud', detail: e.message });
+    } finally {
+      client.release();
+    }
+  }
+});
+
+/* PUT /api/solicitudes/{id} -> actualiza el borrador. Una Enviada no se toca. */
+app.http('solicitud-update', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'solicitudes/{id}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeSubir(await getRole(user))) return json(403, { error: 'No tiene permiso para editar solicitudes' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    const body = await request.json();
+    const enc = await leerEncabezado(body);
+    const detalle = solDetalle(body);
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      const act = await client.query(`SELECT Estado FROM dbo.SolicitudEquipo WHERE Id = $1 FOR UPDATE`, [id]);
+      if (!act.rowCount) { await client.query('ROLLBACK'); return json(404, { error: 'La solicitud no existe' }); }
+      if (act.rows[0].estado !== 'Borrador') {
+        await client.query('ROLLBACK');
+        return json(409, { error: 'La solicitud ya fue enviada y no se puede modificar' });
+      }
+      await client.query(
+        `UPDATE dbo.SolicitudEquipo
+            SET HospitalId=$1, Hospital=$2, Cirugia=$3, FechaCirugia=$4, HoraCirugia=$5, Cirujano=$6,
+                PacienteCedula=$7, PacienteNombre=$8, FechaEntrega=$9, HoraEntrega=$10, Observaciones=$11,
+                ActualizadoPor=$12, FechaActualizacion=(now() at time zone 'utc')
+          WHERE Id=$13`,
+        [enc.hospital_id, enc.hospital, enc.cirugia, enc.fecha_cirugia, enc.hora_cirugia, enc.cirujano,
+         enc.paciente_cedula, enc.paciente_nombre, enc.fecha_entrega, enc.hora_entrega, enc.observaciones,
+         user.name || user.email, id]);
+      await guardarDetalle(client, id, detalle);
+      await client.query('COMMIT');
+      const out = await query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
+      return json(200, { ...out.rows[0], bandejas: detalle.length, detalle });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      context.error(e);
+      return json(500, { error: 'No se pudo actualizar la solicitud', detail: e.message });
+    } finally {
+      client.release();
+    }
+  }
+});
+
+/* DELETE /api/solicitudes/{id} -> borra el borrador (el detalle se va en
+   cascada). Una Enviada no se borra. */
+app.http('solicitud-delete', {
+  methods: ['DELETE'], authLevel: 'anonymous', route: 'solicitudes/{id}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeSubir(await getRole(user))) return json(403, { error: 'No tiene permiso para eliminar solicitudes' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    try {
+      const r = await query(`DELETE FROM dbo.SolicitudEquipo WHERE Id = $1 AND Estado = 'Borrador'`, [id]);
+      if (!r.rowCount) {
+        const ex = await query(`SELECT Estado FROM dbo.SolicitudEquipo WHERE Id = $1`, [id]);
+        if (!ex.rowCount) return json(404, { error: 'La solicitud no existe' });
+        return json(409, { error: 'La solicitud ya fue enviada y no se puede eliminar' });
+      }
+      return json(200, { ok: true });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo eliminar la solicitud', detail: e.message });
+    }
+  }
+});
+
+/* POST /api/solicitudes/{id}/enviar -> valida, pasa a Enviada y avisa.
+   Body opcional: el encabezado y el detalle, para guardar antes de enviar y
+   que el usuario no tenga que dar dos botones. */
+app.http('solicitud-enviar', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'solicitudes/{id}/enviar',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeSubir(await getRole(user))) return json(403, { error: 'No tiene permiso para enviar solicitudes' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    let body = {};
+    try { body = await request.json(); } catch { body = {}; }
+    const traeEncabezado = body && Object.keys(body).length > 0;
+
+    const client = await getClient();
+    let sol, detalle;
+    try {
+      await client.query('BEGIN');
+      const act = await client.query(`SELECT Estado FROM dbo.SolicitudEquipo WHERE Id = $1 FOR UPDATE`, [id]);
+      if (!act.rowCount) { await client.query('ROLLBACK'); return json(404, { error: 'La solicitud no existe' }); }
+      if (act.rows[0].estado !== 'Borrador') {
+        await client.query('ROLLBACK');
+        return json(409, { error: 'La solicitud ya fue enviada' });
+      }
+      if (traeEncabezado) {
+        const enc = await leerEncabezado(body);
+        await client.query(
+          `UPDATE dbo.SolicitudEquipo
+              SET HospitalId=$1, Hospital=$2, Cirugia=$3, FechaCirugia=$4, HoraCirugia=$5, Cirujano=$6,
+                  PacienteCedula=$7, PacienteNombre=$8, FechaEntrega=$9, HoraEntrega=$10, Observaciones=$11,
+                  ActualizadoPor=$12, FechaActualizacion=(now() at time zone 'utc')
+            WHERE Id=$13`,
+          [enc.hospital_id, enc.hospital, enc.cirugia, enc.fecha_cirugia, enc.hora_cirugia, enc.cirujano,
+           enc.paciente_cedula, enc.paciente_nombre, enc.fecha_entrega, enc.hora_entrega, enc.observaciones,
+           user.name || user.email, id]);
+        await guardarDetalle(client, id, solDetalle(body));
+      }
+      const s = await client.query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
+      const d = await client.query(
+        `SELECT EquipoCodigo AS equipo_codigo, Demarcado AS demarcado, Descripcion AS descripcion
+           FROM dbo.SolicitudEquipoDetalle WHERE SolicitudId = $1 ORDER BY Id`, [id]);
+      sol = s.rows[0]; detalle = d.rows;
+
+      const hoy = await ahoraCR();
+      const errs = validarParaEnviar(sol, detalle, hoy);
+      if (errs.length) {
+        await client.query('ROLLBACK');
+        return json(400, { error: errs[0], errores: errs });
+      }
+      await client.query(
+        `UPDATE dbo.SolicitudEquipo
+            SET Estado='Enviada', FechaEnvio=(now() at time zone 'utc'),
+                ActualizadoPor=$1, FechaActualizacion=(now() at time zone 'utc')
+          WHERE Id=$2`, [user.name || user.email, id]);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      context.error(e);
+      return json(500, { error: 'No se pudo enviar la solicitud', detail: e.message });
+    } finally {
+      client.release();
+    }
+
+    /* El aviso va DESPUES del commit y no puede tumbar el envio: la solicitud
+       ya quedo Enviada. Si el flujo falla, el usuario se lleva el aviso para
+       coordinar con Bodega por otro medio. */
+    let notif = { enviado: false, cuentas: 0, aviso: null };
+    try {
+      const cuentas = await cuentasDe(query, 'solicitud');
+      notif = await notificar({
+        descripcion: resumenSolicitud(sol, detalle),
+        solicitadoPor: user.email,
+        cuentas
+      }, context);
+    } catch (e) {
+      context.error('Fallo al preparar la notificación: ' + e.message);
+      notif = { enviado: false, cuentas: 0, aviso: 'No se pudo preparar el aviso; la solicitud quedó enviada.' };
+    }
+    const out = await query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
+    return json(200, { ...out.rows[0], bandejas: detalle.length, detalle, notificacion: notif });
   }
 });
 

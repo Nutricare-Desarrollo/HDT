@@ -132,6 +132,20 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 #notGrid .not-si{color:#1c7a54;font-weight:700}
 #notGrid .not-no{color:var(--muted)}
 .not-chks{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:9px 16px;margin-top:2px}
+/* Cejillas. No existian en la app; se agregan aca. */
+.tabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin:0 0 16px}
+.tab{background:none;color:var(--muted);padding:10px 18px;font-size:14.5px;font-weight:600;border-radius:9px 9px 0 0;border-bottom:2px solid transparent;margin-bottom:-2px;display:inline-flex;align-items:center}
+.tab:hover{color:var(--txt);background:#f1f5f9}
+.tab.active{color:var(--brand-d);border-bottom-color:var(--brand)}
+.tab .n{font-size:11.5px;font-weight:700;background:#e8f1fb;color:var(--brand-d);border-radius:10px;padding:1px 7px;margin-left:8px}
+.tab.active .n{background:var(--brand);color:#fff}
+/* Solicitud de Equipo */
+#solGrid .sol-hosp{max-width:280px;overflow:hidden;text-overflow:ellipsis}
+#solGrid .sol-user{max-width:190px;overflow:hidden;text-overflow:ellipsis}
+.sol-add{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0 4px}
+.sol-add select{flex:1 1 320px;min-width:0}
+.sol-opt{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-left:5px}
+.sol-acciones{margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}
 .empty{padding:48px 20px;text-align:center;color:var(--muted)}
 .empty .big{font-size:38px;margin-bottom:8px}
 .grid-foot{padding:11px 14px;color:var(--muted);font-size:13px;font-weight:600;text-align:right}
@@ -725,6 +739,54 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div class="tbl-wrap"><table id="hosGrid"><thead id="hosHead"></thead><tbody id="hosBody"></tbody></table></div>
         <div id="hosEmpty" class="empty hidden"><div class="big">🏥</div><div>No hay hospitales en el catálogo.</div></div>
         <div class="grid-foot" id="hosFoot"></div>
+      </div>
+    </section>
+
+    <!-- SOLICITUD DE EQUIPO — listado por cejilla (Hospital / Administrador) -->
+    <section id="viewSolicitudes" class="hidden">
+      <div class="page-head">
+        <div><h2>Solicitud de Equipo</h2><div class="sub">Equipos solicitados a Bodega para cirugía</div></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn-ghost" onclick="loadSolicitudes()">🔄 Actualizar</button>
+          <button class="btn-primary" id="solCrearBtn" onclick="nuevaSolicitud()">➕ Crear solicitud</button>
+        </div>
+      </div>
+      <div class="tabs" id="solTabs">
+        <button class="tab active" id="solTab-Borrador" onclick="solCejilla('Borrador')">Borrador<span class="n" id="solN-Borrador">0</span></button>
+        <button class="tab" id="solTab-Enviada" onclick="solCejilla('Enviada')">Enviado<span class="n" id="solN-Enviada">0</span></button>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap"><table id="solGrid"><thead id="solHead"></thead><tbody id="solBody"></tbody></table></div>
+        <div id="solEmpty" class="empty hidden"><div class="big">📝</div><div id="solEmptyTxt">No hay solicitudes en borrador.</div></div>
+        <div class="grid-foot" id="solFoot"></div>
+      </div>
+    </section>
+
+    <!-- SOLICITUD DE EQUIPO — formulario -->
+    <section id="viewSolicitudDet" class="hidden">
+      <div class="page-head">
+        <div><h2 id="solDetTit">Solicitud de Equipo</h2><div class="sub" id="solDetSub"></div></div>
+        <button class="btn-ghost" onclick="showSolicitudes()">← Volver al listado</button>
+      </div>
+      <div class="card pad">
+        <div class="section-title" style="margin-top:0">Datos de la cirugía</div>
+        <div class="form-grid" id="solForm"></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <div class="pad" style="padding-bottom:4px">
+          <div class="section-title" style="margin-top:0">Bandejas solicitadas</div>
+          <div class="sol-add" id="solAddBox">
+            <select id="solBandejaSel"></select>
+            <button class="btn-primary" onclick="agregarBandejaSolicitud()">➕ Agregar</button>
+          </div>
+        </div>
+        <div class="tbl-wrap"><table id="solDetGrid"><thead id="solDetHead"></thead><tbody id="solDetBody"></tbody></table></div>
+        <div id="solDetEmpty" class="empty hidden"><div class="big">🧰</div><div>Sin bandejas. Agregue al menos una para poder enviar.</div></div>
+        <div class="grid-foot" id="solDetFoot"></div>
+      </div>
+      <div class="sol-acciones" id="solAcciones">
+        <button class="btn-ghost" id="solGuardarBtn" onclick="guardarSolicitud(false)">💾 Guardar borrador</button>
+        <button class="btn-primary" id="solEnviarBtn" onclick="guardarSolicitud(true)">📤 Enviar solicitud</button>
       </div>
     </section>
 
@@ -1787,6 +1849,7 @@ function navGrupos(){
       {id:'inicio',      ic:'\u{1F3E0}', l:'Inicio',                   fn:showInicio,      ver:()=>true},
       {id:'hojas',       ic:'\u{1F4CB}', l:'Hojas de consumo',         fn:showHojas,       ver:()=>true},
       {id:'pendientes',  ic:'\u{1F552}', l:'Pendientes de reposición', fn:showPendientes,  ver:canSubir},
+      {id:'solicitudes', ic:'\u{1F4E4}', l:'Solicitud de Equipo',     fn:showSolicitudes, ver:canSubir},
       {id:'cirugias',    ic:'\u{1F4C5}', l:'Cirugías',                 fn:showCirugias,    ver:canSubir}
     ]},
     { titulo:'BODEGA', items:[
@@ -1828,7 +1891,7 @@ function buildNav(){
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('ovl').classList.toggle('show'); }
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('ovl').classList.remove('show'); }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales','viewNotificaciones'];
+const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales','viewNotificaciones','viewSolicitudes','viewSolicitudDet'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
 
 /* ===== INICIO ===== */
@@ -4744,6 +4807,304 @@ async function eliminarNotificacion(id){
     NOT_ROWS=NOT_ROWS.filter(x=>x.id!==id);
     toast('Cuenta eliminada: '+r.email);
     renderNotBody();
+  }catch(e){ toast('No se pudo eliminar: '+e.message); if(btn) btn.disabled=false; }
+}
+
+/* ===== SOLICITUD DE EQUIPO (Hospital / Administrador) ===== */
+let SOL_ROWS=[], SOL_COLF={}, SOL_CEJILLA='Borrador', SOL_ACT=null, SOL_DEL=null, SOL_DEL_T=null;
+let SOL_HOSPITALES=null, SOL_CIRUJANOS=null, SOL_BANDEJAS=null;
+const SOL_COLS=[
+  {k:'codigo',         l:'Código'},
+  {k:'hospital',       l:'Hospital', cls:'sol-hosp'},
+  {k:'fecha_registro', l:'Registro'},
+  {k:'fecha_cirugia',  l:'Fecha cirugía'},
+  {k:'creado_por',     l:'Creada por', cls:'sol-user'}
+];
+/* Solo un borrador se edita o se borra. Una enviada se abre de solo lectura:
+   ya salio el aviso a Bodega y el registro es el respaldo de lo que se pidio. */
+const solEditable = () => SOL_ACT && SOL_ACT.estado === 'Borrador';
+
+async function showSolicitudes(){
+  if(!canSubir()){ toast('Su rol no tiene acceso'); showInicio(); return; }
+  setTab('solicitudes'); showOnly('viewSolicitudes');
+  await loadSolicitudes();
+}
+function solCejilla(estado){
+  SOL_CEJILLA=estado;
+  ['Borrador','Enviada'].forEach(e=>document.getElementById('solTab-'+e).classList.toggle('active', e===estado));
+  document.getElementById('solCrearBtn').classList.toggle('hidden', estado!=='Borrador');
+  document.getElementById('solEmptyTxt').textContent = estado==='Borrador'
+    ? 'No hay solicitudes en borrador. Use «Crear solicitud».'
+    : 'Todavía no se ha enviado ninguna solicitud.';
+  renderSolBody();
+}
+async function loadSolicitudes(){
+  showLoading('Cargando solicitudes', 'Estamos trayendo el listado…');
+  try{ SOL_ROWS=await api('GET','/solicitudes'); }
+  catch(e){ SOL_ROWS=[]; toast('Error al cargar solicitudes: '+e.message); }
+  finally{ hideLoading(); }
+  renderSolicitudes();
+}
+function solDeCejilla(){ return SOL_ROWS.filter(r=>r.estado===SOL_CEJILLA); }
+function solFiltered(){
+  return solDeCejilla().filter(r=> Object.keys(SOL_COLF).every(k=>{
+    const f=(SOL_COLF[k]||'').trim().toLowerCase(); if(!f) return true;
+    return String(r[k]==null?'':r[k]).toLowerCase().includes(f);
+  }));
+}
+function onSolFilter(k,v){ SOL_COLF[k]=v; renderSolBody(); }
+function onSolFilterKey(e){
+  if(e.key==='Enter'){ e.preventDefault(); renderSolBody(); return; }
+  if(e.key==='Escape'){ e.preventDefault(); e.target.value=''; onSolFilter(e.target.dataset.k,''); }
+}
+function renderSolHead(){
+  const head=document.getElementById('solHead');
+  if(head.dataset.listo) return;
+  head.innerHTML=`<tr>${SOL_COLS.map(c=>`<th${c.cls?' class="'+c.cls+'"':''}>${c.l}</th>`).join('')}<th>Bandejas</th><th></th></tr>`
+    +`<tr class="filter-row">${SOL_COLS.map(c=>`<th><input placeholder="Filtrar…" autocomplete="off" data-k="${c.k}" oninput="onSolFilter('${c.k}',this.value)" onkeydown="onSolFilterKey(event)" value="${attr(SOL_COLF[c.k])}"></th>`).join('')}<th></th><th></th></tr>`;
+  head.dataset.listo='1';
+}
+function renderSolicitudes(){ renderSolHead(); renderSolBody(); }
+function renderSolBody(){
+  ['Borrador','Enviada'].forEach(e=>{
+    document.getElementById('solN-'+e).textContent = SOL_ROWS.filter(r=>r.estado===e).length;
+  });
+  const enCejilla=solDeCejilla(), rows=solFiltered();
+  const b=document.getElementById('solBody'); b.innerHTML='';
+  document.getElementById('solEmpty').classList.toggle('hidden', enCejilla.length>0);
+  document.getElementById('solGrid').classList.toggle('hidden', enCejilla.length===0);
+  const foot=document.getElementById('solFoot');
+  if(!enCejilla.length){ foot.textContent=''; return; }
+  foot.textContent = (rows.length===enCejilla.length)
+    ? enCejilla.length+(enCejilla.length===1?' solicitud':' solicitudes')
+    : rows.length+' de '+enCejilla.length+' solicitudes';
+  if(!rows.length){ b.innerHTML=`<tr><td colspan="${SOL_COLS.length+2}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  const editable = SOL_CEJILLA==='Borrador';
+  rows.forEach(r=>{
+    const tds=SOL_COLS.map(c=>{
+      if(c.k==='codigo')
+        return `<td><span class="link-cell" onclick="abrirSolicitud(${r.id})" title="${editable?'Editar':'Ver'}">${esc(r.codigo)}</span></td>`;
+      if(c.k==='fecha_cirugia')
+        return `<td>${esc(solFechaTxt(r.fecha_cirugia, r.hora_cirugia))}</td>`;
+      if(c.cls) return `<td class="${c.cls}" title="${attr(r[c.k])}">${esc(r[c.k])}</td>`;
+      return `<td>${esc(r[c.k])}</td>`;
+    }).join('');
+    const tr=document.createElement('tr');
+    tr.innerHTML=tds+`<td>${r.bandejas}</td>`
+      +`<td style="white-space:nowrap">`
+      +`<button class="icon-btn" onclick="abrirSolicitud(${r.id})">${editable?'✏️ Editar':'👁️ Ver'}</button>`
+      +(editable ? ` <button class="icon-btn danger" id="solDel-${r.id}" onclick="eliminarSolicitud(${r.id})">🗑️ Eliminar</button>` : '')
+      +`</td>`;
+    b.appendChild(tr);
+  });
+}
+/* 'YYYY-MM-DD' + 'HH:MM' -> 'DD/MM/YYYY HH:MM' */
+function solFechaTxt(f, h){
+  if(!f) return '';
+  const [a,m,d]=String(f).split('-');
+  return d+'/'+m+'/'+a+(h?' '+h:'');
+}
+
+/* ----- Catalogos del formulario ----- */
+async function solCatalogos(){
+  const pedir=async(url,dest)=>{ try{ return await api('GET',url); }catch(e){ toast('No se pudo cargar '+dest+': '+e.message); return []; } };
+  const [h,c,b]=await Promise.all([
+    SOL_HOSPITALES ? SOL_HOSPITALES : pedir('/hospitales','hospitales'),
+    SOL_CIRUJANOS  ? SOL_CIRUJANOS  : pedir('/cirujanos','cirujanos'),
+    SOL_BANDEJAS   ? SOL_BANDEJAS   : pedir('/equipos','bandejas')
+  ]);
+  SOL_HOSPITALES=h; SOL_CIRUJANOS=c; SOL_BANDEJAS=b;
+}
+const solOpc=(lista, valor, texto, sel, vacio) =>
+  `<option value="">${vacio}</option>`+
+  (lista||[]).map(x=>`<option value="${attr(valor(x))}"${String(valor(x))===String(sel==null?'':sel)?' selected':''}>${esc(texto(x))}</option>`).join('');
+
+/* ----- Alta, edicion y consulta ----- */
+function solVacia(){
+  return {id:null, codigo:'(nueva)', estado:'Borrador', hospital_id:null, hospital:null, cirugia:null,
+    fecha_cirugia:null, hora_cirugia:null, cirujano:null, paciente_cedula:null, paciente_nombre:null,
+    fecha_entrega:null, hora_entrega:null, observaciones:null, detalle:[]};
+}
+async function nuevaSolicitud(){
+  if(!canSubir()){ toast('Su rol no tiene acceso'); return; }
+  showLoading('Preparando la solicitud','Estamos trayendo hospitales, cirujanos y bandejas…');
+  try{ await solCatalogos(); } finally{ hideLoading(); }
+  SOL_ACT=solVacia();
+  setTab('solicitudes'); showOnly('viewSolicitudDet');
+  renderSolicitudDet();
+}
+async function abrirSolicitud(id){
+  if(!canSubir()){ toast('Su rol no tiene acceso'); return; }
+  showLoading('Abriendo la solicitud','Estamos trayendo los datos y el detalle…');
+  try{
+    const [s]=await Promise.all([ api('GET','/solicitudes/'+id), solCatalogos() ]);
+    SOL_ACT=s;
+  }catch(e){ toast('No se pudo abrir la solicitud: '+e.message); hideLoading(); return; }
+  finally{ hideLoading(); }
+  setTab('solicitudes'); showOnly('viewSolicitudDet');
+  renderSolicitudDet();
+}
+function renderSolicitudDet(){
+  const s=SOL_ACT; if(!s) return;
+  const ed=solEditable();
+  const ro = ed ? '' : ' disabled';
+  document.getElementById('solDetTit').textContent = s.id ? s.codigo : 'Nueva solicitud';
+  document.getElementById('solDetSub').textContent = s.id
+    ? (ed ? 'Borrador — se puede editar' : 'Enviada el '+(s.fecha_envio||'')+' — solo lectura')
+    : 'Complete los datos y agregue las bandejas';
+  document.getElementById('solForm').innerHTML=`
+    <div class="field"><label>Nombre del hospital <span class="req">*</span></label>
+      <select id="sol_hospital"${ro}>${solOpc(SOL_HOSPITALES, x=>x.id, x=>x.nombre, s.hospital_id, '— Seleccione —')}</select></div>
+    <div class="field"><label>Cirujano <span class="req">*</span></label>
+      <select id="sol_cirujano"${ro}>${solOpc(SOL_CIRUJANOS, x=>x.nombre, x=>x.nombre, s.cirujano, '— Seleccione —')}</select></div>
+    <div class="field full"><label>Cirugía <span class="req">*</span></label>
+      <input id="sol_cirugia" type="text" maxlength="400" autocomplete="off" value="${attr(s.cirugia)}"${ro}></div>
+    <div class="field"><label>Fecha de la cirugía <span class="req">*</span></label>
+      <input id="sol_fecha_cirugia" type="date" value="${attr(s.fecha_cirugia)}"${ro}></div>
+    <div class="field"><label>Hora de la cirugía</label>
+      <input id="sol_hora_cirugia" type="time" value="${attr(s.hora_cirugia)}"${ro}></div>
+    <div class="field"><label>Cédula del paciente</label>
+      <input id="sol_paciente_cedula" type="text" maxlength="60" autocomplete="off" value="${attr(s.paciente_cedula)}"${ro}></div>
+    <div class="field"><label>Nombre del paciente</label>
+      <input id="sol_paciente_nombre" type="text" maxlength="200" autocomplete="off" value="${attr(s.paciente_nombre)}"${ro}></div>
+    <div class="field"><label>Fecha de entrega <span class="sol-opt">opcional</span></label>
+      <input id="sol_fecha_entrega" type="date" value="${attr(s.fecha_entrega)}"${ro}></div>
+    <div class="field"><label>Hora de entrega <span class="sol-opt">opcional</span></label>
+      <input id="sol_hora_entrega" type="time" value="${attr(s.hora_entrega)}"${ro}></div>
+    <div class="field full"><label>Observaciones <span class="sol-opt">opcional</span></label>
+      <textarea id="sol_observaciones" rows="2" maxlength="1000"${ro}>${esc(s.observaciones)==='—'?'':attr(s.observaciones)}</textarea></div>`;
+  document.getElementById('solBandejaSel').innerHTML=
+    solOpc(SOL_BANDEJAS, x=>x.codigo, x=>(x.demarcado||('NUT-'+x.codigo))+' — '+(x.nombre||''), '', '— Seleccione una bandeja —');
+  document.getElementById('solAddBox').classList.toggle('hidden', !ed);
+  document.getElementById('solAcciones').classList.toggle('hidden', !ed);
+  renderSolDetalle();
+}
+function renderSolDetalle(){
+  const s=SOL_ACT; if(!s) return;
+  const ed=solEditable(), lista=s.detalle||[];
+  document.getElementById('solDetHead').innerHTML=
+    '<tr><th>Código de bandeja</th><th>Descripción</th>'+(ed?'<th></th>':'')+'</tr>';
+  const b=document.getElementById('solDetBody'); b.innerHTML='';
+  document.getElementById('solDetEmpty').classList.toggle('hidden', lista.length>0);
+  document.getElementById('solDetGrid').classList.toggle('hidden', lista.length===0);
+  document.getElementById('solDetFoot').textContent = lista.length
+    ? (lista.length===1?'1 bandeja':lista.length+' bandejas') : '';
+  lista.forEach((d,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${esc(d.demarcado||d.equipo_codigo)}</td><td>${esc(d.descripcion)}</td>`
+      +(ed?`<td style="white-space:nowrap"><button class="icon-btn danger" onclick="quitarBandejaSolicitud(${i})">🗑️ Eliminar</button></td>`:'');
+    b.appendChild(tr);
+  });
+}
+function agregarBandejaSolicitud(){
+  const sel=document.getElementById('solBandejaSel');
+  const cod=sel.value;
+  if(!cod){ toast('Seleccione una bandeja'); return; }
+  SOL_ACT.detalle=SOL_ACT.detalle||[];
+  if(SOL_ACT.detalle.some(d=>String(d.equipo_codigo)===String(cod))){ toast('Esa bandeja ya está en el detalle'); return; }
+  const b=(SOL_BANDEJAS||[]).find(x=>String(x.codigo)===String(cod));
+  SOL_ACT.detalle.push({equipo_codigo:cod, demarcado:(b&&b.demarcado)||('NUT-'+cod), descripcion:(b&&b.nombre)||null});
+  sel.value='';
+  renderSolDetalle();
+}
+function quitarBandejaSolicitud(i){
+  SOL_ACT.detalle.splice(i,1);
+  renderSolDetalle();
+}
+function solLeerForm(){
+  const v=(id)=>{ const el=document.getElementById(id); return el?el.value.trim():''; };
+  const hospId=v('sol_hospital');
+  const h=(SOL_HOSPITALES||[]).find(x=>String(x.id)===hospId);
+  return {
+    hospital_id: hospId?parseInt(hospId,10):null,
+    hospital: h?h.nombre:null,
+    cirugia: v('sol_cirugia'),
+    fecha_cirugia: v('sol_fecha_cirugia'),
+    hora_cirugia: v('sol_hora_cirugia'),
+    cirujano: v('sol_cirujano'),
+    paciente_cedula: v('sol_paciente_cedula'),
+    paciente_nombre: v('sol_paciente_nombre'),
+    fecha_entrega: v('sol_fecha_entrega'),
+    hora_entrega: v('sol_hora_entrega'),
+    observaciones: v('sol_observaciones'),
+    detalle: (SOL_ACT.detalle||[]).map(d=>({equipo_codigo:d.equipo_codigo, demarcado:d.demarcado, descripcion:d.descripcion}))
+  };
+}
+/* Las mismas reglas que la API, para avisar sin gastar el viaje. La API las
+   vuelve a aplicar: el navegador no es una fuente de verdad. */
+function solValidarEnvio(c){
+  const faltan=[];
+  if(!c.hospital_id) faltan.push('Nombre del hospital');
+  if(!c.cirugia)     faltan.push('Cirugía');
+  if(!c.fecha_cirugia) faltan.push('Fecha de la cirugía');
+  if(!c.cirujano)    faltan.push('Cirujano');
+  const errs=[];
+  if(faltan.length) errs.push('Complete los campos obligatorios: '+faltan.join(', ')+'.');
+  if(!c.detalle.length) errs.push('Agregue al menos una bandeja al detalle.');
+  if(c.fecha_cirugia){
+    const ahora=new Date();
+    const p=n=>String(n).padStart(2,'0');
+    const hoy=ahora.getFullYear()+'-'+p(ahora.getMonth()+1)+'-'+p(ahora.getDate());
+    const hora=p(ahora.getHours())+':'+p(ahora.getMinutes());
+    if(c.fecha_cirugia<hoy) errs.push('La fecha de la cirugía no puede ser anterior a hoy.');
+    else if(c.fecha_cirugia===hoy && c.hora_cirugia && c.hora_cirugia<hora)
+      errs.push('La cirugía es hoy, así que la hora no puede ser anterior a la hora actual ('+hora+').');
+  }
+  return errs;
+}
+async function guardarSolicitud(enviar){
+  if(!solEditable()) return;
+  const cuerpo=solLeerForm();
+  if(enviar){
+    const errs=solValidarEnvio(cuerpo);
+    if(errs.length){ toast(errs[0]); return; }
+  }
+  const btn=document.getElementById(enviar?'solEnviarBtn':'solGuardarBtn');
+  btn.disabled=true;
+  try{
+    if(!SOL_ACT.id){
+      const r=await api('POST','/solicitudes', cuerpo);
+      SOL_ACT=r;
+    }else if(!enviar){
+      SOL_ACT=await api('PUT','/solicitudes/'+SOL_ACT.id, cuerpo);
+    }
+    if(enviar){
+      /* El envio manda el encabezado otra vez: guarda y envia en una sola
+         llamada, para que el usuario no tenga que dar dos botones. */
+      const r=await api('POST','/solicitudes/'+SOL_ACT.id+'/enviar', cuerpo);
+      SOL_ACT=r;
+      const n=r.notificacion||{};
+      toast(n.enviado
+        ? 'Solicitud '+r.codigo+' enviada. Se avisó a '+n.cuentas+(n.cuentas===1?' cuenta.':' cuentas.')
+        : 'Solicitud '+r.codigo+' enviada. '+(n.aviso||'El aviso por correo no salió.'));
+      await loadSolicitudes();
+      solCejilla('Enviada');
+      showOnly('viewSolicitudes');
+      return;
+    }
+    toast('Borrador guardado: '+SOL_ACT.codigo);
+    renderSolicitudDet();
+  }catch(e){ toast('No se pudo guardar: '+e.message); }
+  finally{ btn.disabled=false; }
+}
+/* Borrado en dos toques. Solo aplica a borradores. */
+async function eliminarSolicitud(id){
+  const r=SOL_ROWS.find(x=>x.id===id); if(!r) return;
+  const btn=document.getElementById('solDel-'+id);
+  if(SOL_DEL!==id){
+    SOL_DEL=id;
+    if(btn) btn.textContent='⚠️ Confirmar';
+    clearTimeout(SOL_DEL_T);
+    SOL_DEL_T=setTimeout(()=>{ SOL_DEL=null; if(btn) btn.textContent='🗑️ Eliminar'; }, 4000);
+    return;
+  }
+  clearTimeout(SOL_DEL_T); SOL_DEL=null;
+  if(btn) btn.disabled=true;
+  try{
+    await api('DELETE','/solicitudes/'+id);
+    SOL_ROWS=SOL_ROWS.filter(x=>x.id!==id);
+    toast('Solicitud eliminada: '+r.codigo);
+    renderSolBody();
   }catch(e){ toast('No se pudo eliminar: '+e.message); if(btn) btn.disabled=false; }
 }
 
