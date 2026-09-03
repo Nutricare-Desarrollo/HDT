@@ -115,6 +115,10 @@ tbody td.det-num{width:44px;text-align:right;padding-right:10px;color:var(--mute
 .row-flash td{animation:rowFlash 1.9s ease-out}
 thead tr.filter-row th{background:#0d5478;padding:6px 8px}
 thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;border:1px solid #2a6f95}
+/* Grid de Bandejas: la descripcion es larga y con white-space:nowrap empujaba
+   el resto de las columnas. Se recorta con puntos suspensivos; el texto
+   completo queda en el title de la celda. */
+#banGrid .ban-desc{max-width:280px;overflow:hidden;text-overflow:ellipsis}
 .empty{padding:48px 20px;text-align:center;color:var(--muted)}
 .empty .big{font-size:38px;margin-bottom:8px}
 .grid-foot{padding:11px 14px;color:var(--muted);font-size:13px;font-weight:600;text-align:right}
@@ -3968,7 +3972,7 @@ async function impConfirm(){
 let BAN_ROWS=[], BAN_COLF={}, BAN_ACT=null, BAN_EDIT=null, BAN_DEL=null, BAN_DEL_T=null;
 const BAN_COLS=[
   {k:'demarcado', l:'N° de bandeja'},
-  {k:'nombre',    l:'Descripción'},
+  {k:'nombre',    l:'Descripción', cls:'ban-desc'},
   {k:'categoria', l:'Categoría'},
   {k:'color',     l:'Color'},
   {k:'completa',  l:'Completa'}
@@ -3993,11 +3997,28 @@ function banFiltered(){
     return String(r[k]==null?'':r[k]).toLowerCase().includes(f);
   }));
 }
-function onBanFilter(k,v){ BAN_COLF[k]=v; renderBandejas(); }
-function renderBandejas(){
+/* El encabezado se dibuja UNA sola vez. Si se redibujara en cada tecla se
+   destruiria el input donde el usuario esta escribiendo y se perderia el foco
+   -solo entraria la primera letra-, que es como estaba antes. */
+function renderBanHead(){
   const head=document.getElementById('banHead');
-  head.innerHTML=`<tr>${BAN_COLS.map(c=>`<th>${c.l}</th>`).join('')}<th>Productos</th><th></th></tr>`
-    +`<tr class="filter-row">${BAN_COLS.map(c=>`<th><input placeholder="Filtrar…" oninput="onBanFilter('${c.k}',this.value)" value="${attr(BAN_COLF[c.k])}"></th>`).join('')}<th></th><th></th></tr>`;
+  if(head.dataset.listo) return;
+  head.innerHTML=`<tr>${BAN_COLS.map(c=>`<th${c.cls?' class="'+c.cls+'"':''}>${c.l}</th>`).join('')}<th>Productos</th><th></th></tr>`
+    +`<tr class="filter-row">${BAN_COLS.map(c=>`<th><input placeholder="Filtrar…" autocomplete="off" data-k="${c.k}" oninput="onBanFilter('${c.k}',this.value)" onkeydown="onBanFilterKey(event)" value="${attr(BAN_COLF[c.k])}"></th>`).join('')}<th></th><th></th></tr>`;
+  head.dataset.listo='1';
+}
+function onBanFilter(k,v){ BAN_COLF[k]=v; renderBanBody(); }
+/* Enter aplica el filtro. El filtrado ya es en vivo mientras se escribe, asi
+   que Enter funciona como confirmacion; Escape limpia esa columna. */
+function onBanFilterKey(e){
+  if(e.key==='Enter'){ e.preventDefault(); renderBanBody(); return; }
+  if(e.key==='Escape'){
+    e.preventDefault(); e.target.value='';
+    onBanFilter(e.target.dataset.k, '');
+  }
+}
+function renderBandejas(){ renderBanHead(); renderBanBody(); }
+function renderBanBody(){
   const rows=banFiltered();
   const b=document.getElementById('banBody'); b.innerHTML='';
   document.getElementById('banEmpty').classList.toggle('hidden', BAN_ROWS.length>0);
@@ -4015,6 +4036,8 @@ function renderBandejas(){
       if(c.k==='completa')
         return r.completo ? '<td>Sí</td>'
                           : `<td><b title="${attr(r.motivo_incompleto||'Sin motivo registrado')}">No</b></td>`;
+      // Columna angosta: se recorta con puntos suspensivos y el texto completo va en el title.
+      if(c.cls) return `<td class="${c.cls}" title="${attr(r[c.k])}">${esc(r[c.k])}</td>`;
       return `<td>${esc(r[c.k])}</td>`;
     }).join('');
     const tr=document.createElement('tr');
