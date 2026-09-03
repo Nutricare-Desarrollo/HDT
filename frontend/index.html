@@ -146,6 +146,10 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .sol-add select{flex:1 1 320px;min-width:0}
 .sol-opt{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-left:5px}
 .sol-acciones{margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+/* Combo con filtro: se ve como un campo normal y usa el panel de .ac-box. */
+.cb-box{max-height:300px}
+.cb-input{width:100%}
+.sol-add .field-row,.sol-add .cb-input{flex:1 1 320px;min-width:0}
 .empty{padding:48px 20px;text-align:center;color:var(--muted)}
 .empty .big{font-size:38px;margin-bottom:8px}
 .grid-foot{padding:11px 14px;color:var(--muted);font-size:13px;font-weight:600;text-align:right}
@@ -1270,7 +1274,12 @@ const CATS = {
               ph:'Ej. Dr. Juan Pérez', max:200 },
   // max 60: es lo que aguanta la columna dbo.HojaConsumo.Regimen.
   regimen:  { ruta:'regimenes', etiq:'régimen', plural:'regímenes', lista:[],
-              ph:'Ej. INS', max:60 }
+              ph:'Ej. INS', max:60 },
+  /* La provincia no se pide en este modal -queda nula y se completa desde
+     Mantenimiento > Hospitales-, porque el modal es de un solo campo y lo
+     comparten los tres catalogos. */
+  hospital: { ruta:'hospitales', etiq:'hospital', plural:'hospitales', lista:[],
+              ph:'Ej. Hospital México', max:200 }
 };
 let CAT_KEY=null;   // catálogo abierto en el modal ('cirujano' / 'regimen')
 let CAT_CTX=null;   // id del <select> que lo abrió ('enc_regimen' / 'ver_regimen')
@@ -4810,9 +4819,142 @@ async function eliminarNotificacion(id){
   }catch(e){ toast('No se pudo eliminar: '+e.message); if(btn) btn.disabled=false; }
 }
 
+/* ===== Combo con filtro (Solicitud de Equipo) =====
+   Un <select> nativo no se filtra, y estas listas ya andan por 46 hospitales
+   y 118 bandejas. Este combo es un <input> con panel de opciones filtradas,
+   reusando el look de .ac-box.
+
+   Clave del diseno: el valor elegido vive en el .value del input. Eso lo hace
+   compatible con openCat()/catRefresh() del modal de catalogo compartido, que
+   leen y escriben .value -su el.innerHTML no hace nada en un input-. Asi el
+   boton «+» de Hospital y Cirujano abre el administrador de catalogo que ya
+   existia, sin duplicar nada.
+
+   Para bandejas la etiqueta que se ve ('NUT-0001330 — Set de...') no es el
+   valor ('0001330'), asi que el codigo resuelto se guarda en dataset.val. */
+let CB_ACT=null, CB_IDX=-1, CB_BOX=null;
+
+const SOL_COMBOS={
+  sol_hospital:  { items:()=>(CATS.hospital.lista||[]).map(x=>({val:x.nombre, lab:x.nombre})),
+                   ph:'Escriba para filtrar hospitales…', vacio:'Sin coincidencias en hospitales' },
+  sol_cirujano:  { items:()=>(CATS.cirujano.lista||[]).map(x=>({val:x.nombre, lab:x.nombre})),
+                   ph:'Escriba para filtrar cirujanos…',  vacio:'Sin coincidencias en cirujanos' },
+  solBandejaSel: { items:()=>(SOL_BANDEJAS||[]).map(x=>({val:x.codigo,
+                     lab:(x.demarcado||('NUT-'+x.codigo))+' — '+(x.nombre||'')})),
+                   ph:'Escriba código o descripción…', vacio:'Sin coincidencias en bandejas' }
+};
+
+/* Campo completo. Con boton '+' si el combo tiene catalogo administrable. */
+function cbField(id, valor, opts){
+  const o=opts||{}, cfg=SOL_COMBOS[id];
+  const dis=o.disabled?' disabled':'';
+  const inp=`<input id="${id}" class="cb-input" type="text" autocomplete="off" role="combobox"`
+    + ` placeholder="${attr(cfg.ph)}" value="${attr(valor)}" data-val="${attr(o.val!=null?o.val:valor)}"`
+    + ` oninput="cbAbrir('${id}')" onfocus="cbAbrir('${id}',true)" onkeydown="cbTecla(event,'${id}')" onblur="cbBlur('${id}')"${dis}>`;
+  if(o.cat && !o.disabled){
+    return `<div class="field-row">${inp}`
+      + `<button type="button" class="btn-add" title="Agregar, corregir o desactivar ${attr(o.catEtiq||'')}" onclick="openCat('${o.cat}','${id}')">+</button></div>`;
+  }
+  return inp;
+}
+/* Valor resuelto del combo. Para hospital y cirujano coincide con el texto;
+   para bandejas es el codigo que quedo en dataset.val. */
+function cbValor(id){
+  const el=document.getElementById(id); if(!el) return '';
+  const txt=String(el.value||'').trim();
+  if(!txt) return '';
+  /* Se revalida contra la lista: el usuario pudo escribir algo que ya no
+     calza, o el catalogo pudo cambiar detras (boton '+'). */
+  const hit=SOL_COMBOS[id].items().find(x=>cbNorm(x.lab)===cbNorm(txt) || cbNorm(x.val)===cbNorm(txt));
+  if(hit){ el.dataset.val=hit.val; return hit.val; }
+  return el.dataset.val && String(el.dataset.val).trim() ? String(el.dataset.val).trim() : '';
+}
+function cbBox(){
+  if(!CB_BOX){
+    const d=document.createElement('div');
+    d.className='ac-box cb-box hidden'; d.id='cbBox';
+    // mousedown y no click: hay que elegir antes de que el input pierda el foco.
+    d.addEventListener('mousedown', (e)=>{
+      const it=e.target.closest('.ac-item'); if(!it) return;
+      e.preventDefault(); cbElegir(parseInt(it.dataset.i,10));
+    });
+    document.body.appendChild(d); CB_BOX=d;
+  }
+  return CB_BOX;
+}
+/* Sin tildes y sin mayusculas: nadie escribe «Clínica» con tilde para buscar,
+   y sin esto «clinica» no encontraba «Hospital Clínica Biblica». */
+const cbNorm = (v) => String(v==null?'':v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+function cbFiltrar(id, q){
+  const t=cbNorm(q);
+  const todos=SOL_COMBOS[id].items();
+  if(!t) return todos.slice(0,60);
+  const pre=[], con=[];
+  todos.forEach(x=>{
+    const l=cbNorm(x.lab);
+    if(l.startsWith(t)) pre.push(x); else if(l.includes(t)) con.push(x);
+  });
+  return pre.concat(con).slice(0,60);
+}
+/* todo=true abre con la lista completa. Es lo que hace el foco: si filtrara
+   por el valor ya elegido, el campo se abriria mostrando una sola opcion y no
+   se podria ojear el resto sin borrar primero. Al escribir si se filtra. */
+function cbAbrir(id, todo){
+  const el=document.getElementById(id); if(!el || el.disabled) return;
+  CB_ACT={id, lista:cbFiltrar(id, todo ? '' : el.value)}; CB_IDX=-1;
+  const box=cbBox();
+  box.innerHTML = CB_ACT.lista.length
+    ? CB_ACT.lista.map((x,i)=>`<div class="ac-item" data-i="${i}"><span class="ac-code">${esc(x.lab)}</span></div>`).join('')
+    : `<div class="ac-empty">${esc(SOL_COMBOS[id].vacio)}</div>`;
+  const r=el.getBoundingClientRect();
+  box.style.left=r.left+'px'; box.style.top=(r.bottom+4)+'px'; box.style.width=Math.max(r.width,280)+'px';
+  box.classList.remove('hidden');
+}
+function cbCerrar(){ if(CB_BOX) CB_BOX.classList.add('hidden'); CB_ACT=null; CB_IDX=-1; }
+function cbElegir(i){
+  if(!CB_ACT) return;
+  const x=CB_ACT.lista[i], el=document.getElementById(CB_ACT.id);
+  if(!x||!el) return;
+  el.value=x.lab; el.dataset.val=x.val;
+  el.classList.remove('invalid');
+  cbCerrar(); el.focus();
+}
+function cbMover(d){
+  if(!CB_ACT || !CB_ACT.lista.length) return;
+  CB_IDX=(CB_IDX+d+CB_ACT.lista.length)%CB_ACT.lista.length;
+  const k=CB_BOX.children;
+  for(let i=0;i<k.length;i++) k[i].classList.toggle('active', i===CB_IDX);
+  const e=k[CB_IDX]; if(e&&e.scrollIntoView) e.scrollIntoView({block:'nearest'});
+}
+function cbTecla(e,id){
+  if(e.key==='ArrowDown'){ e.preventDefault(); if(!CB_ACT) cbAbrir(id); cbMover(1); return; }
+  if(e.key==='ArrowUp'){ e.preventDefault(); cbMover(-1); return; }
+  if(e.key==='Enter'){
+    if(CB_ACT && CB_IDX>=0){ e.preventDefault(); cbElegir(CB_IDX); }
+    else if(CB_ACT && CB_ACT.lista.length===1){ e.preventDefault(); cbElegir(0); }
+    return;
+  }
+  if(e.key==='Escape'){ e.preventDefault(); cbCerrar(); }
+}
+/* Al salir del campo: si lo escrito no calza con ninguna opcion, se marca y se
+   limpia el valor resuelto, para no dejar un texto que parezca elegido. */
+function cbBlur(id){
+  setTimeout(()=>{
+    const el=document.getElementById(id); if(!el) return;
+    const txt=String(el.value||'').trim();
+    if(!txt){ el.dataset.val=''; el.classList.remove('invalid'); cbCerrar(); return; }
+    const v=cbValor(id);
+    el.classList.toggle('invalid', !v);
+    if(v){ const hit=SOL_COMBOS[id].items().find(x=>String(x.val)===String(v)); if(hit) el.value=hit.lab; }
+    cbCerrar();
+  }, 120);
+}
+window.addEventListener('scroll', ()=>{ if(CB_ACT) cbCerrar(); }, true);
+window.addEventListener('resize', ()=>{ if(CB_ACT) cbCerrar(); });
+
 /* ===== SOLICITUD DE EQUIPO (Hospital / Administrador) ===== */
 let SOL_ROWS=[], SOL_COLF={}, SOL_CEJILLA='Borrador', SOL_ACT=null, SOL_DEL=null, SOL_DEL_T=null;
-let SOL_HOSPITALES=null, SOL_CIRUJANOS=null, SOL_BANDEJAS=null;
+let SOL_BANDEJAS=null;   // hospitales y cirujanos viven en CATS (los comparte el modal del boton '+')
 const SOL_COLS=[
   {k:'codigo',         l:'Código'},
   {k:'hospital',       l:'Hospital', cls:'sol-hosp'},
@@ -4906,18 +5048,18 @@ function solFechaTxt(f, h){
 }
 
 /* ----- Catalogos del formulario ----- */
+/* Hospitales y cirujanos se leen de CATS, el mismo almacen que usa el modal
+   del boton '+': cuando alguien agrega un hospital ahi, loadCats() refresca
+   CATS.hospital.lista y el combo lo ve sin recargar la pantalla. */
 async function solCatalogos(){
-  const pedir=async(url,dest)=>{ try{ return await api('GET',url); }catch(e){ toast('No se pudo cargar '+dest+': '+e.message); return []; } };
-  const [h,c,b]=await Promise.all([
-    SOL_HOSPITALES ? SOL_HOSPITALES : pedir('/hospitales','hospitales'),
-    SOL_CIRUJANOS  ? SOL_CIRUJANOS  : pedir('/cirujanos','cirujanos'),
-    SOL_BANDEJAS   ? SOL_BANDEJAS   : pedir('/equipos','bandejas')
-  ]);
-  SOL_HOSPITALES=h; SOL_CIRUJANOS=c; SOL_BANDEJAS=b;
+  const faltan = !(CATS.hospital.lista||[]).length || !(CATS.cirujano.lista||[]).length;
+  const tareas=[];
+  if(faltan) tareas.push(loadCats());
+  if(!SOL_BANDEJAS) tareas.push(
+    api('GET','/equipos').then(r=>{ SOL_BANDEJAS=r||[]; })
+                         .catch(e=>{ SOL_BANDEJAS=[]; toast('No se pudo cargar el catálogo de bandejas: '+e.message); }));
+  if(tareas.length) await Promise.all(tareas);
 }
-const solOpc=(lista, valor, texto, sel, vacio) =>
-  `<option value="">${vacio}</option>`+
-  (lista||[]).map(x=>`<option value="${attr(valor(x))}"${String(valor(x))===String(sel==null?'':sel)?' selected':''}>${esc(texto(x))}</option>`).join('');
 
 /* ----- Alta, edicion y consulta ----- */
 function solVacia(){
@@ -4954,9 +5096,9 @@ function renderSolicitudDet(){
     : 'Complete los datos y agregue las bandejas';
   document.getElementById('solForm').innerHTML=`
     <div class="field"><label>Nombre del hospital <span class="req">*</span></label>
-      <select id="sol_hospital"${ro}>${solOpc(SOL_HOSPITALES, x=>x.id, x=>x.nombre, s.hospital_id, '— Seleccione —')}</select></div>
+      ${cbField('sol_hospital', s.hospital, {disabled:!ed, cat:'hospital', catEtiq:'hospital'})}</div>
     <div class="field"><label>Cirujano <span class="req">*</span></label>
-      <select id="sol_cirujano"${ro}>${solOpc(SOL_CIRUJANOS, x=>x.nombre, x=>x.nombre, s.cirujano, '— Seleccione —')}</select></div>
+      ${cbField('sol_cirujano', s.cirujano, {disabled:!ed, cat:'cirujano', catEtiq:'cirujano'})}</div>
     <div class="field full"><label>Cirugía <span class="req">*</span></label>
       <input id="sol_cirugia" type="text" maxlength="400" autocomplete="off" value="${attr(s.cirugia)}"${ro}></div>
     <div class="field"><label>Fecha de la cirugía <span class="req">*</span></label>
@@ -4973,8 +5115,9 @@ function renderSolicitudDet(){
       <input id="sol_hora_entrega" type="time" value="${attr(s.hora_entrega)}"${ro}></div>
     <div class="field full"><label>Observaciones <span class="sol-opt">opcional</span></label>
       <textarea id="sol_observaciones" rows="2" maxlength="1000"${ro}>${esc(s.observaciones)==='—'?'':attr(s.observaciones)}</textarea></div>`;
-  document.getElementById('solBandejaSel').innerHTML=
-    solOpc(SOL_BANDEJAS, x=>x.codigo, x=>(x.demarcado||('NUT-'+x.codigo))+' — '+(x.nombre||''), '', '— Seleccione una bandeja —');
+  document.getElementById('solAddBox').innerHTML = ed
+    ? cbField('solBandejaSel','',{})+'<button class="btn-primary" onclick="agregarBandejaSolicitud()">➕ Agregar</button>'
+    : '';
   document.getElementById('solAddBox').classList.toggle('hidden', !ed);
   document.getElementById('solAcciones').classList.toggle('hidden', !ed);
   renderSolDetalle();
@@ -4998,13 +5141,13 @@ function renderSolDetalle(){
 }
 function agregarBandejaSolicitud(){
   const sel=document.getElementById('solBandejaSel');
-  const cod=sel.value;
-  if(!cod){ toast('Seleccione una bandeja'); return; }
+  const cod=cbValor('solBandejaSel');
+  if(!cod){ toast('Elija una bandeja de la lista'); sel.classList.add('invalid'); return; }
   SOL_ACT.detalle=SOL_ACT.detalle||[];
   if(SOL_ACT.detalle.some(d=>String(d.equipo_codigo)===String(cod))){ toast('Esa bandeja ya está en el detalle'); return; }
   const b=(SOL_BANDEJAS||[]).find(x=>String(x.codigo)===String(cod));
   SOL_ACT.detalle.push({equipo_codigo:cod, demarcado:(b&&b.demarcado)||('NUT-'+cod), descripcion:(b&&b.nombre)||null});
-  sel.value='';
+  sel.value=''; sel.dataset.val=''; sel.classList.remove('invalid');
   renderSolDetalle();
 }
 function quitarBandejaSolicitud(i){
@@ -5013,15 +5156,17 @@ function quitarBandejaSolicitud(i){
 }
 function solLeerForm(){
   const v=(id)=>{ const el=document.getElementById(id); return el?el.value.trim():''; };
-  const hospId=v('sol_hospital');
-  const h=(SOL_HOSPITALES||[]).find(x=>String(x.id)===hospId);
+  /* El combo devuelve el NOMBRE del hospital; el id se resuelve contra el
+     catalogo, que es el que la API espera. */
+  const hospNom=cbValor('sol_hospital');
+  const h=(CATS.hospital.lista||[]).find(x=>String(x.nombre)===String(hospNom));
   return {
-    hospital_id: hospId?parseInt(hospId,10):null,
-    hospital: h?h.nombre:null,
+    hospital_id: h?h.id:null,
+    hospital: hospNom||null,
     cirugia: v('sol_cirugia'),
     fecha_cirugia: v('sol_fecha_cirugia'),
     hora_cirugia: v('sol_hora_cirugia'),
-    cirujano: v('sol_cirujano'),
+    cirujano: cbValor('sol_cirujano'),
     paciente_cedula: v('sol_paciente_cedula'),
     paciente_nombre: v('sol_paciente_nombre'),
     fecha_entrega: v('sol_fecha_entrega'),

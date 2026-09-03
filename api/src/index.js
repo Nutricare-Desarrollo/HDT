@@ -792,6 +792,10 @@ app.http('hospital-update', {
     const id = parseInt(request.params.id, 10);
     if (!id) return json(400, { error: 'Id inválido' });
     const body = await request.json();
+    /* Se puede mandar solo { nombre }, solo { provincia }, solo { activo } o
+       cualquier combinacion. El modal de catalogo compartido manda
+       { activo } suelto para desactivar y { nombre } suelto para corregir,
+       asi que exigir el nombre siempre romperia esa pantalla. */
     const cambiaNombre    = !!body && body.nombre !== undefined;
     const cambiaProvincia = !!body && body.provincia !== undefined;
     const cambiaActivo    = !!body && body.activo !== undefined;
