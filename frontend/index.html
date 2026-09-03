@@ -5124,7 +5124,7 @@ function renderSolicitudDet(){
       <input id="sol_cirugia" type="text" maxlength="400" autocomplete="off" value="${attr(s.cirugia)}"${ro}></div>
     <div class="field"><label>Fecha de la cirugía <span class="req">*</span></label>
       <input id="sol_fecha_cirugia" type="date" value="${attr(s.fecha_cirugia)}"${ro}></div>
-    <div class="field"><label>Hora de la cirugía</label>
+    <div class="field"><label>Hora de la cirugía <span class="req">*</span></label>
       <input id="sol_hora_cirugia" type="time" value="${attr(s.hora_cirugia)}"${ro}></div>
     <div class="field"><label>Cédula del paciente</label>
       <input id="sol_paciente_cedula" type="text" maxlength="60" autocomplete="off" value="${attr(s.paciente_cedula)}"${ro}></div>
@@ -5206,6 +5206,7 @@ function solValidarEnvio(c){
   if(!c.hospital_id) faltan.push('Nombre del hospital');
   if(!c.cirugia)     faltan.push('Cirugía');
   if(!c.fecha_cirugia) faltan.push('Fecha de la cirugía');
+  if(!c.hora_cirugia)  faltan.push('Hora de la cirugía');
   if(!c.cirujano)    faltan.push('Cirujano');
   const errs=[];
   if(faltan.length) errs.push('Complete los campos obligatorios: '+faltan.join(', ')+'.');

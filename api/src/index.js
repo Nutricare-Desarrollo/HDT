@@ -1071,6 +1071,7 @@ function validarParaEnviar(sol, detalle, hoy) {
   if (!sol.hospital)      faltan.push('Nombre del hospital');
   if (!sol.cirugia)       faltan.push('Cirugía');
   if (!sol.fecha_cirugia) faltan.push('Fecha de la cirugía');
+  if (!sol.hora_cirugia)  faltan.push('Hora de la cirugía');
   if (!sol.cirujano)      faltan.push('Cirujano');
   const errs = [];
   if (faltan.length) errs.push('Complete los campos obligatorios: ' + faltan.join(', ') + '.');
@@ -1200,12 +1201,16 @@ async function guardarDetalle(client, id, detalle) {
     /* El color se toma del catálogo cuando el cliente no lo manda: la fuente
        de verdad es cat.Equipo, no el navegador. Queda grabado en la línea
        para que una solicitud enviada conserve el color con que se pidió. */
+    /* El codigo va como $2 y otra vez como $6 a proposito. Reusar $2 dentro de
+       UPPER(TRIM(...)) hacia que Postgres dedujera dos tipos para el mismo
+       parametro -varchar por la columna, text por TRIM- y fallara con
+       «inconsistent types deduced for parameter $2». */
     await client.query(
       `INSERT INTO dbo.SolicitudEquipoDetalle (SolicitudId, EquipoCodigo, Demarcado, Descripcion, Color)
        VALUES ($1,$2,$3,$4,
                COALESCE($5, (SELECT e.Color FROM cat.Equipo e
-                              WHERE UPPER(TRIM(e.Codigo)) = UPPER(TRIM($2)))))`,
-      [id, d.codigo, d.demarcado, d.descripcion, d.color]);
+                              WHERE UPPER(TRIM(e.Codigo)) = UPPER(TRIM($6)))))`,
+      [id, d.codigo, d.demarcado, d.descripcion, d.color, d.codigo]);
   }
 }
 
