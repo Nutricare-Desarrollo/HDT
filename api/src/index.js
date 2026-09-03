@@ -1025,7 +1025,7 @@ app.http('notificacion-delete', {
    a Bodega y el registro es el respaldo de lo que se pidio.
    ============================================================ */
 
-const SOL_ESTADOS = ['Borrador', 'Enviada'];
+const SOL_ESTADOS = ['Borrador', 'Enviada', 'En Preparación'];
 
 /* Fecha y hora actuales en Costa Rica, tomadas de la BASE y no del reloj del
    proceso. Azure corre en UTC: a las 6pm de Costa Rica ya es el dia siguiente
@@ -1130,14 +1130,21 @@ app.http('solicitudes-list', {
       /* Cuantas bandejas lleva cada una, para mostrarlo en el grid sin
          pedir el detalle de cada fila. */
       const ids = r.rows.map((x) => x.id);
-      let conteo = {};
+      let conteo = {}, avance = {};
       if (ids.length) {
         const c = await query(
           `SELECT SolicitudId AS id, COUNT(*)::int AS n FROM dbo.SolicitudEquipoDetalle
             WHERE SolicitudId = ANY($1::int[]) GROUP BY SolicitudId`, [ids]);
         c.rows.forEach((x) => { conteo[x.id] = x.n; });
+        const a = await query(SQL_AVANCE, [ids]);
+        a.rows.forEach((x) => { avance[x.id] = x; });
       }
-      return json(200, r.rows.map((x) => ({ ...x, bandejas: conteo[x.id] || 0 })));
+      return json(200, r.rows.map((x) => {
+        const av = avance[x.id] || { total: 0, alistados: 0 };
+        return { ...x, bandejas: conteo[x.id] || 0,
+                 articulos: av.total, alistados: av.alistados,
+                 porcentaje: pct(av.alistados, av.total) };
+      }));
     } catch (e) {
       context.error(e);
       return json(500, { error: 'No se pudo obtener las solicitudes', detail: e.message });
@@ -1407,6 +1414,195 @@ app.http('solicitud-enviar', {
     }
     const out = await query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
     return json(200, { ...out.rows[0], bandejas: detalle.length, detalle, notificacion: notif });
+  }
+});
+
+
+/* ============================================================
+   Alistado de Bodega
+   Bodega ve las solicitudes que ya salieron del hospital y va marcando
+   los componentes de cada bandeja. El porcentaje se calcula por
+   componente: uno vale uno, sin ponderar por cantidad.
+
+   Los totales salen de cat.EquipoProducto, que es el contenido real de
+   la bandeja. Si una bandeja no tiene componentes registrados, su
+   porcentaje es null y no arrastra el de la solicitud hacia abajo.
+   ============================================================ */
+
+/* Estados en los que la solicitud ya salio del hospital. La cejilla
+   «Enviado» los muestra juntos: para el hospital sigue estando enviada
+   aunque Bodega ya la este alistando. */
+const SOL_ENVIADAS = ['Enviada', 'En Preparación'];
+
+/* Avance por solicitud: componentes marcados sobre el total de las
+   bandejas pedidas. */
+const SQL_AVANCE = `
+  SELECT d.SolicitudId AS id,
+         COUNT(ep.ProductoCodigo)::int AS total,
+         COUNT(a.Id)::int              AS alistados
+    FROM dbo.SolicitudEquipoDetalle d
+    JOIN cat.EquipoProducto ep
+      ON UPPER(TRIM(ep.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo))
+    LEFT JOIN dbo.SolicitudAlisto a
+      ON a.SolicitudId = d.SolicitudId
+     AND UPPER(TRIM(a.EquipoCodigo))   = UPPER(TRIM(d.EquipoCodigo))
+     AND UPPER(TRIM(a.ProductoCodigo)) = UPPER(TRIM(ep.ProductoCodigo))
+   WHERE d.SolicitudId = ANY($1::int[])
+   GROUP BY d.SolicitudId`;
+
+const pct = (alistados, total) => (total > 0 ? Math.round((alistados * 100) / total) : null);
+
+/* GET /api/solicitudes/{id}/bandejas -> bandejas de la solicitud con su
+   avance y cuantos articulos tiene cada una. */
+app.http('solicitud-bandejas', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'solicitudes/{id}/bandejas',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const rol = await getRole(user);
+    if (!puedeSubir(rol) && !puedeBodega(rol)) return json(403, { error: 'Su rol no tiene acceso a las solicitudes' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    try {
+      const r = await query(
+        `SELECT d.EquipoCodigo AS equipo_codigo, d.Demarcado AS demarcado,
+                d.Descripcion AS descripcion, d.Color AS color,
+                COUNT(ep.ProductoCodigo)::int AS articulos,
+                COUNT(a.Id)::int              AS alistados
+           FROM dbo.SolicitudEquipoDetalle d
+           LEFT JOIN cat.EquipoProducto ep
+             ON UPPER(TRIM(ep.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo))
+           LEFT JOIN dbo.SolicitudAlisto a
+             ON a.SolicitudId = d.SolicitudId
+            AND UPPER(TRIM(a.EquipoCodigo))   = UPPER(TRIM(d.EquipoCodigo))
+            AND UPPER(TRIM(a.ProductoCodigo)) = UPPER(TRIM(ep.ProductoCodigo))
+          WHERE d.SolicitudId = $1
+          GROUP BY d.Id, d.EquipoCodigo, d.Demarcado, d.Descripcion, d.Color
+          ORDER BY d.Id`, [id]);
+      return json(200, r.rows.map((x) => ({ ...x, porcentaje: pct(x.alistados, x.articulos) })));
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener las bandejas de la solicitud', detail: e.message });
+    }
+  }
+});
+
+/* GET /api/solicitudes/{id}/bandejas/{codigo}/checklist
+   -> encabezado de la solicitud, datos de la bandeja y sus componentes
+      con el check puesto. Todo lo que necesita la pantalla y tambien el
+      documento para imprimir. */
+app.http('solicitud-checklist', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'solicitudes/{id}/bandejas/{codigo}/checklist',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const rol = await getRole(user);
+    if (!puedeSubir(rol) && !puedeBodega(rol)) return json(403, { error: 'Su rol no tiene acceso a las solicitudes' });
+    const id = parseInt(request.params.id, 10);
+    const cod = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!id || !cod) return json(400, { error: 'Solicitud o bandeja inválida' });
+    try {
+      const s = await query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
+      if (!s.rowCount) return json(404, { error: 'La solicitud no existe' });
+      const b = await query(
+        `SELECT d.EquipoCodigo AS equipo_codigo, d.Demarcado AS demarcado,
+                d.Descripcion AS descripcion, d.Color AS color,
+                e.Categoria AS categoria
+           FROM dbo.SolicitudEquipoDetalle d
+           LEFT JOIN cat.Equipo e ON UPPER(TRIM(e.Codigo)) = UPPER(TRIM(d.EquipoCodigo))
+          WHERE d.SolicitudId = $1 AND UPPER(TRIM(d.EquipoCodigo)) = UPPER(TRIM($2))`, [id, cod]);
+      if (!b.rowCount) return json(404, { error: 'Esa bandeja no está en la solicitud' });
+      /* El Tipo viene de cat.EquipoProducto: es lo que separa las dos
+         secciones del documento, Instrumental e Implantes. */
+      const d = await query(
+        `SELECT ep.ProductoCodigo AS producto, ep.DescripcionProducto AS descripcion,
+                ep.Cantidad::float8 AS cantidad, COALESCE(ep.Tipo, 'SIN TIPO') AS tipo,
+                (a.Id IS NOT NULL) AS alistado
+           FROM cat.EquipoProducto ep
+           LEFT JOIN dbo.SolicitudAlisto a
+             ON a.SolicitudId = $1
+            AND UPPER(TRIM(a.EquipoCodigo))   = UPPER(TRIM($2))
+            AND UPPER(TRIM(a.ProductoCodigo)) = UPPER(TRIM(ep.ProductoCodigo))
+          WHERE UPPER(TRIM(ep.EquipoCodigo)) = UPPER(TRIM($2))
+          ORDER BY COALESCE(ep.Tipo,'SIN TIPO'), ep.ProductoCodigo`, [id, cod]);
+      const alistados = d.rows.filter((x) => x.alistado).length;
+      return json(200, {
+        solicitud: s.rows[0],
+        bandeja: { ...b.rows[0], articulos: d.rowCount, alistados, porcentaje: pct(alistados, d.rowCount) },
+        componentes: d.rows
+      });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener el check list', detail: e.message });
+    }
+  }
+});
+
+/* PUT /api/solicitudes/{id}/bandejas/{codigo}/checklist
+   Body: { productos: ["24267004", ...] } -> los que quedan marcados.
+   Se reescribe el alistado de esa bandeja: lo que no venga, se desmarca. */
+app.http('solicitud-checklist-guardar', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'solicitudes/{id}/bandejas/{codigo}/checklist',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'Solo Bodega puede alistar el equipo' });
+    const id = parseInt(request.params.id, 10);
+    const cod = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!id || !cod) return json(400, { error: 'Solicitud o bandeja inválida' });
+    const body = await request.json();
+    /* Se acepta solo lo que de verdad pertenece a la bandeja: el navegador
+       no decide que es un componente valido. */
+    const pedidos = [...new Set((Array.isArray(body && body.productos) ? body.productos : [])
+      .map((x) => normCod(x)).filter(Boolean))];
+
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      const est = await client.query(`SELECT Estado FROM dbo.SolicitudEquipo WHERE Id = $1 FOR UPDATE`, [id]);
+      if (!est.rowCount) { await client.query('ROLLBACK'); return json(404, { error: 'La solicitud no existe' }); }
+      if (est.rows[0].estado === 'Borrador') {
+        await client.query('ROLLBACK');
+        return json(409, { error: 'La solicitud todavía es un borrador; el hospital no la ha enviado' });
+      }
+      const enBandeja = await client.query(
+        `SELECT ProductoCodigo AS producto FROM cat.EquipoProducto
+          WHERE UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($1))`, [cod]);
+      const validos = new Set(enBandeja.rows.map((x) => normCod(x.producto)));
+      const marcar = pedidos.filter((x) => validos.has(x));
+
+      await client.query(
+        `DELETE FROM dbo.SolicitudAlisto
+          WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))`, [id, cod]);
+      for (const prod of marcar) {
+        await client.query(
+          `INSERT INTO dbo.SolicitudAlisto (SolicitudId, EquipoCodigo, ProductoCodigo, AlistadoPor)
+           VALUES ($1,$2,$3,$4)`, [id, cod, prod, user.name || user.email]);
+      }
+      /* El primer guardado marca que Bodega empezo. No se revierte sola si
+         despues se desmarca todo: el trabajo ya arranco. */
+      let estado = est.rows[0].estado;
+      if (estado === 'Enviada') {
+        await client.query(
+          `UPDATE dbo.SolicitudEquipo
+              SET Estado = 'En Preparación', ActualizadoPor = $1,
+                  FechaActualizacion = (now() at time zone 'utc')
+            WHERE Id = $2`, [user.name || user.email, id]);
+        estado = 'En Preparación';
+      }
+      await client.query('COMMIT');
+      const total = validos.size;
+      return json(200, {
+        estado, alistados: marcar.length, articulos: total, porcentaje: pct(marcar.length, total),
+        ignorados: pedidos.length - marcar.length
+      });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      context.error(e);
+      return json(500, { error: 'No se pudo guardar el alistado', detail: e.message });
+    } finally {
+      client.release();
+    }
   }
 });
 

@@ -147,6 +147,38 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .sol-add select{flex:1 1 320px;min-width:0}
 .sol-opt{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-left:5px}
 .sol-acciones{margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+/* Alisto de Bodega: barra de avance y check list */
+.pct-track{background:#eef3f7;border-radius:6px;height:20px;overflow:hidden;display:inline-block;vertical-align:middle}
+.pct-fill{height:100%;border-radius:6px;display:block;transition:width .18s}
+.pct-num{font-weight:800;text-align:right;display:inline-block}
+.pct-mini{display:inline-flex;align-items:center;gap:8px;min-width:132px;width:100%}
+.pct-mini .pct-track{height:11px;flex:1 1 60px;min-width:46px}
+.pct-mini .pct-num{font-size:13px;min-width:40px}
+#solDetGrid .sol-pct{width:190px}
+#solDetGrid .sol-art{width:90px;text-align:right}
+.alisto-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.alisto-bar .pct-track{flex:1 1 240px;min-width:150px}
+.alisto-bar .pct-num{font-size:17px;min-width:56px}
+.alisto-bar .cnt{color:var(--muted);font-size:13px;font-weight:600}
+.chk-cabe{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:11px 20px}
+.chk-cabe .k{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.chk-cabe .v{font-size:14.5px;margin-top:2px;line-height:1.35}
+#chkGrid tbody tr.chk-row{cursor:pointer}
+#chkGrid tbody tr.chk-row:hover{background:#eef7fd}
+#chkGrid tbody tr.on{background:#e9f8f0}
+#chkGrid tbody tr.on:hover{background:#dcf3e6}
+#chkGrid .chk-num{width:44px;color:var(--muted)}
+#chkGrid .chk-cant{width:92px;text-align:right;white-space:nowrap}
+#chkGrid .chk-box{width:62px;text-align:center;font-size:17px;user-select:none}
+#chkGrid .chk-desc{max-width:520px;overflow:hidden;text-overflow:ellipsis}
+#chkGrid td.chk-sec{background:#f1f7fb;font-weight:700;color:var(--brand-d);text-transform:uppercase;letter-spacing:.05em;font-size:12.5px}
+.chk-ayuda{color:var(--muted);font-size:13px;margin:-4px 0 10px}
+#chkAcciones{position:sticky;bottom:0;z-index:6;justify-content:space-between;align-items:center;
+  margin:12px -4px 0;padding:12px 4px;background:rgba(238,243,247,.93);backdrop-filter:blur(4px);
+  border-top:1px solid var(--line)}
+#chkAcciones .av{display:flex;align-items:center;gap:10px;font-size:13.5px;font-weight:700;color:var(--brand-d)}
+#chkAcciones .av .pct-track{width:120px;height:11px}
+#chkAcciones .btns{display:flex;gap:10px;flex-wrap:wrap}
 /* Combo con filtro: se ve como un campo normal y usa el panel de .ac-box. */
 .cb-box{max-height:300px}
 .cb-input{width:100%}
@@ -792,6 +824,40 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       <div class="sol-acciones" id="solAcciones">
         <button class="btn-ghost" id="solGuardarBtn" onclick="guardarSolicitud(false)">💾 Guardar borrador</button>
         <button class="btn-primary" id="solEnviarBtn" onclick="guardarSolicitud(true)">📤 Enviar solicitud</button>
+      </div>
+    </section>
+
+    <!-- CHECK LIST DE ALISTO — una bandeja de una solicitud (Bodega) -->
+    <section id="viewCheckList" class="hidden">
+      <div class="page-head">
+        <div><h2 id="chkTit">Check list</h2><div class="sub" id="chkSub"></div></div>
+        <button class="btn-ghost" id="chkVolverBtn" onclick="volverDeCheckList()">← Volver a la solicitud</button>
+      </div>
+      <div class="card pad">
+        <div class="section-title" style="margin-top:0">Datos de la cirugía y de la bandeja</div>
+        <div class="chk-cabe" id="chkCabe"></div>
+        <div class="section-title">Avance del alisto</div>
+        <div class="alisto-bar">
+          <span class="pct-track"><span class="pct-fill" id="chkFill" style="width:0%"></span></span>
+          <span class="pct-num" id="chkPct">0%</span>
+          <span class="cnt" id="chkCnt"></span>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <div class="pad" style="padding-bottom:0">
+          <div class="section-title" style="margin-top:0">Componentes de la bandeja</div>
+          <div class="chk-ayuda">Toque una línea para marcarla como alistada. El avance sube al instante; se graba con «Guardar».</div>
+        </div>
+        <div class="tbl-wrap"><table id="chkGrid"><thead id="chkHead"></thead><tbody id="chkBody"></tbody></table></div>
+        <div id="chkEmpty" class="empty hidden"><div class="big">📦</div><div>Esta bandeja no tiene componentes registrados en el catálogo.</div></div>
+        <div class="grid-foot" id="chkFoot"></div>
+      </div>
+      <div class="sol-acciones" id="chkAcciones">
+        <span class="av"><span class="pct-track"><span class="pct-fill" id="chkFill2" style="width:0%"></span></span><span id="chkPct2">0%</span></span>
+        <span class="btns">
+          <button class="btn-ghost" onclick="chkLimpiar()">Desmarcar todo</button>
+          <button class="btn-primary" id="chkGuardarBtn" onclick="guardarCheckList()">💾 Guardar</button>
+        </span>
       </div>
     </section>
 
@@ -1859,7 +1925,7 @@ function navGrupos(){
       {id:'inicio',      ic:'\u{1F3E0}', l:'Inicio',                   fn:showInicio,      ver:()=>true},
       {id:'hojas',       ic:'\u{1F4CB}', l:'Hojas de consumo',         fn:showHojas,       ver:()=>true},
       {id:'pendientes',  ic:'\u{1F552}', l:'Pendientes de reposición', fn:showPendientes,  ver:canSubir},
-      {id:'solicitudes', ic:'\u{1F4E4}', l:'Solicitud de Equipo',     fn:showSolicitudes, ver:canSubir},
+      {id:'solicitudes', ic:'\u{1F4E4}', l:'Solicitud de Equipo',     fn:showSolicitudes, ver:()=>canSubir()||canBodega()},
       {id:'cirugias',    ic:'\u{1F4C5}', l:'Cirugías',                 fn:showCirugias,    ver:canSubir}
     ]},
     { titulo:'BODEGA', items:[
@@ -1901,7 +1967,7 @@ function buildNav(){
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('ovl').classList.toggle('show'); }
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('ovl').classList.remove('show'); }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales','viewNotificaciones','viewSolicitudes','viewSolicitudDet'];
+const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales','viewNotificaciones','viewSolicitudes','viewSolicitudDet','viewCheckList'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
 
 /* ===== INICIO ===== */
@@ -4986,19 +5052,44 @@ const SOL_COLS=[
 /* Solo un borrador se edita o se borra. Una enviada se abre de solo lectura:
    ya salio el aviso a Bodega y el registro es el respaldo de lo que se pidio. */
 const solEditable = () => SOL_ACT && SOL_ACT.estado === 'Borrador';
+/* Para el hospital una solicitud sigue estando «enviada» aunque Bodega ya la
+   este alistando: las dos van en la misma cejilla. */
+const SOL_ENVIADAS = ['Enviada', 'En Preparación'];
+const solEnCejilla = (r, c) => c === 'Enviada' ? SOL_ENVIADAS.includes(r.estado) : r.estado === c;
+/* Bodega no crea ni edita: entra a marcar el alisto de lo que ya se envio. */
+const solAlisto = () => SOL_ACT && SOL_ACT.id && canBodega() && SOL_ENVIADAS.includes(SOL_ACT.estado);
+let SOL_AV = null;      /* avance por bandeja de la solicitud abierta */
+let CHK = null;         /* check list abierto */
+let CHK_ORIG = '';      /* firma de lo grabado, para detectar cambios sin guardar */
+let CHK_SALIR = false, CHK_SALIR_T;
+
+/* Rojo hasta 59, ambar hasta 99, verde en 100: los mismos cortes que usa el
+   aviso de bandeja incompleta. */
+function pctColor(p){ return p >= 100 ? 'var(--ok)' : (p >= 60 ? 'var(--warn)' : 'var(--danger)'); }
+function pctBarra(p){
+  if(p === null || p === undefined) return '<span style="color:var(--muted)">—</span>';
+  return `<span class="pct-mini"><span class="pct-track"><span class="pct-fill" style="width:${p}%;background:${pctColor(p)}"></span></span><span class="pct-num">${p}%</span></span>`;
+}
 
 async function showSolicitudes(){
-  if(!canSubir()){ toast('Su rol no tiene acceso'); showInicio(); return; }
+  if(!canSubir() && !canBodega()){ toast('Su rol no tiene acceso'); showInicio(); return; }
   setTab('solicitudes'); showOnly('viewSolicitudes');
+  /* Bodega solo ve lo enviado: el borrador es del hospital y ni siquiera se
+     le muestra la cejilla. */
+  const soloBodega = !canSubir();
+  document.getElementById('solTab-Borrador').classList.toggle('hidden', soloBodega);
+  if(soloBodega) SOL_CEJILLA='Enviada';
   await loadSolicitudes();
+  solCejilla(SOL_CEJILLA);
 }
 function solCejilla(estado){
   SOL_CEJILLA=estado;
   ['Borrador','Enviada'].forEach(e=>document.getElementById('solTab-'+e).classList.toggle('active', e===estado));
-  document.getElementById('solCrearBtn').classList.toggle('hidden', estado!=='Borrador');
+  document.getElementById('solCrearBtn').classList.toggle('hidden', estado!=='Borrador' || !canSubir());
   document.getElementById('solEmptyTxt').textContent = estado==='Borrador'
     ? 'No hay solicitudes en borrador. Use «Crear solicitud».'
-    : 'Todavía no se ha enviado ninguna solicitud.';
+    : (canSubir() ? 'Todavía no se ha enviado ninguna solicitud.'
+                  : 'Ningún hospital ha enviado solicitudes.');
   renderSolBody();
 }
 async function loadSolicitudes(){
@@ -5008,7 +5099,7 @@ async function loadSolicitudes(){
   finally{ hideLoading(); }
   renderSolicitudes();
 }
-function solDeCejilla(){ return SOL_ROWS.filter(r=>r.estado===SOL_CEJILLA); }
+function solDeCejilla(){ return SOL_ROWS.filter(r=>solEnCejilla(r, SOL_CEJILLA)); }
 function solFiltered(){
   return solDeCejilla().filter(r=> Object.keys(SOL_COLF).every(k=>{
     const f=(SOL_COLF[k]||'').trim().toLowerCase(); if(!f) return true;
@@ -5023,14 +5114,14 @@ function onSolFilterKey(e){
 function renderSolHead(){
   const head=document.getElementById('solHead');
   if(head.dataset.listo) return;
-  head.innerHTML=`<tr>${SOL_COLS.map(c=>`<th${c.cls?' class="'+c.cls+'"':''}>${c.l}</th>`).join('')}<th>Bandejas</th><th></th></tr>`
-    +`<tr class="filter-row">${SOL_COLS.map(c=>`<th><input placeholder="Filtrar…" autocomplete="off" data-k="${c.k}" oninput="onSolFilter('${c.k}',this.value)" onkeydown="onSolFilterKey(event)" value="${attr(SOL_COLF[c.k])}"></th>`).join('')}<th></th><th></th></tr>`;
+  head.innerHTML=`<tr>${SOL_COLS.map(c=>`<th${c.cls?' class="'+c.cls+'"':''}>${c.l}</th>`).join('')}<th>Bandejas</th><th>% Alisto</th><th></th></tr>`
+    +`<tr class="filter-row">${SOL_COLS.map(c=>`<th><input placeholder="Filtrar…" autocomplete="off" data-k="${c.k}" oninput="onSolFilter('${c.k}',this.value)" onkeydown="onSolFilterKey(event)" value="${attr(SOL_COLF[c.k])}"></th>`).join('')}<th></th><th></th><th></th></tr>`;
   head.dataset.listo='1';
 }
 function renderSolicitudes(){ renderSolHead(); renderSolBody(); }
 function renderSolBody(){
   ['Borrador','Enviada'].forEach(e=>{
-    document.getElementById('solN-'+e).textContent = SOL_ROWS.filter(r=>r.estado===e).length;
+    document.getElementById('solN-'+e).textContent = SOL_ROWS.filter(r=>solEnCejilla(r,e)).length;
   });
   const enCejilla=solDeCejilla(), rows=solFiltered();
   const b=document.getElementById('solBody'); b.innerHTML='';
@@ -5041,8 +5132,8 @@ function renderSolBody(){
   foot.textContent = (rows.length===enCejilla.length)
     ? enCejilla.length+(enCejilla.length===1?' solicitud':' solicitudes')
     : rows.length+' de '+enCejilla.length+' solicitudes';
-  if(!rows.length){ b.innerHTML=`<tr><td colspan="${SOL_COLS.length+2}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
-  const editable = SOL_CEJILLA==='Borrador';
+  if(!rows.length){ b.innerHTML=`<tr><td colspan="${SOL_COLS.length+3}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  const editable = SOL_CEJILLA==='Borrador' && canSubir();
   rows.forEach(r=>{
     const tds=SOL_COLS.map(c=>{
       if(c.k==='codigo')
@@ -5054,6 +5145,7 @@ function renderSolBody(){
     }).join('');
     const tr=document.createElement('tr');
     tr.innerHTML=tds+`<td>${r.bandejas}</td>`
+      +`<td>${SOL_CEJILLA==='Borrador' ? '<span style="color:var(--muted)">—</span>' : pctBarra(r.porcentaje)}</td>`
       +`<td style="white-space:nowrap">`
       +`<button class="icon-btn" onclick="abrirSolicitud(${r.id})">${editable?'✏️ Editar':'👁️ Ver'}</button>`
       +(editable ? ` <button class="icon-btn danger" id="solDel-${r.id}" onclick="eliminarSolicitud(${r.id})">🗑️ Eliminar</button>` : '')
@@ -5097,11 +5189,18 @@ async function nuevaSolicitud(){
   renderSolicitudDet();
 }
 async function abrirSolicitud(id){
-  if(!canSubir()){ toast('Su rol no tiene acceso'); return; }
+  if(!canSubir() && !canBodega()){ toast('Su rol no tiene acceso'); return; }
   showLoading('Abriendo la solicitud','Estamos trayendo los datos y el detalle…');
+  SOL_AV=null;
   try{
     const [s]=await Promise.all([ api('GET','/solicitudes/'+id), solCatalogos() ]);
     SOL_ACT=s;
+    /* El avance por bandeja solo lo necesita Bodega, y solo si ya se envio.
+       Si falla, la pantalla igual abre: se pierde el porcentaje, no el dato. */
+    if(canBodega() && SOL_ENVIADAS.includes(s.estado)){
+      try{ SOL_AV=await api('GET','/solicitudes/'+id+'/bandejas'); }
+      catch(e){ toast('No se pudo calcular el avance del alisto: '+e.message); }
+    }
   }catch(e){ toast('No se pudo abrir la solicitud: '+e.message); hideLoading(); return; }
   finally{ hideLoading(); }
   setTab('solicitudes'); showOnly('viewSolicitudDet');
@@ -5113,7 +5212,9 @@ function renderSolicitudDet(){
   const ro = ed ? '' : ' disabled';
   document.getElementById('solDetTit').textContent = s.id ? s.codigo : 'Nueva solicitud';
   document.getElementById('solDetSub').textContent = s.id
-    ? (ed ? 'Borrador — se puede editar' : 'Enviada el '+(s.fecha_envio||'')+' — solo lectura')
+    ? (ed ? 'Borrador — se puede editar'
+          : s.estado+' · enviada el '+(s.fecha_envio||'—')
+            +(solAlisto() ? ' — marque el alisto con «Check list»' : ' — solo lectura'))
     : 'Complete los datos y agregue las bandejas';
   document.getElementById('solForm').innerHTML=`
     <div class="field"><label>Nombre del hospital <span class="req">*</span></label>
@@ -5145,9 +5246,15 @@ function renderSolicitudDet(){
 }
 function renderSolDetalle(){
   const s=SOL_ACT; if(!s) return;
-  const ed=solEditable(), lista=s.detalle||[];
-  document.getElementById('solDetHead').innerHTML=
-    '<tr><th>Código de bandeja</th><th>Color</th><th>Descripción</th>'+(ed?'<th></th>':'')+'</tr>';
+  const ed=solEditable();
+  /* Cuando Bodega abre una solicitud enviada, el mismo grid de abajo pasa a
+     ser el tablero de alisto: las bandejas son las mismas, solo se le suman
+     el avance y el boton que abre el check list. */
+  const al=!!(solAlisto() && SOL_AV);
+  const lista = al ? SOL_AV : (s.detalle||[]);
+  document.getElementById('solDetHead').innerHTML= al
+    ? '<tr><th>Código de bandeja</th><th>Color</th><th>Descripción</th><th class="sol-art">Artículos</th><th class="sol-pct">% alistada</th><th></th></tr>'
+    : '<tr><th>Código de bandeja</th><th>Color</th><th>Descripción</th>'+(ed?'<th></th>':'')+'</tr>';
   const b=document.getElementById('solDetBody'); b.innerHTML='';
   document.getElementById('solDetEmpty').classList.toggle('hidden', lista.length>0);
   document.getElementById('solDetGrid').classList.toggle('hidden', lista.length===0);
@@ -5155,11 +5262,168 @@ function renderSolDetalle(){
     ? (lista.length===1?'1 bandeja':lista.length+' bandejas') : '';
   lista.forEach((d,i)=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${esc(d.demarcado||d.equipo_codigo)}</td><td>${esc(d.color)}</td>`
-      +`<td class="sol-desc" title="${attr(d.descripcion)}">${esc(d.descripcion)}</td>`
-      +(ed?`<td style="white-space:nowrap"><button class="icon-btn danger" onclick="quitarBandejaSolicitud(${i})">🗑️ Eliminar</button></td>`:'');
+    let fila=`<td>${esc(d.demarcado||d.equipo_codigo)}</td><td>${esc(d.color)}</td>`
+      +`<td class="sol-desc" title="${attr(d.descripcion)}">${esc(d.descripcion)}</td>`;
+    if(al){
+      fila+=`<td class="sol-art">${d.articulos||0}</td>`
+        +`<td class="sol-pct">${pctBarra(d.porcentaje)}</td>`
+        +`<td style="white-space:nowrap"><button class="icon-btn" onclick="abrirCheckList('${attr(d.equipo_codigo)}')">✅ Check list</button></td>`;
+    }else if(ed){
+      fila+=`<td style="white-space:nowrap"><button class="icon-btn danger" onclick="quitarBandejaSolicitud(${i})">🗑️ Eliminar</button></td>`;
+    }
+    tr.innerHTML=fila;
     b.appendChild(tr);
   });
+}
+
+/* ===== Check list de una bandeja =====
+   El porcentaje se cuenta por componente: un clic vale uno, sin ponderar
+   por cantidad. Se pinta en el momento y se graba con «Guardar»; hasta
+   entonces nada sale del navegador. */
+async function abrirCheckList(codigo){
+  if(!SOL_ACT || !SOL_ACT.id) return;
+  if(!canBodega()){ toast('Solo Bodega puede alistar el equipo'); return; }
+  showLoading('Abriendo el check list','Estamos trayendo los componentes de la bandeja…');
+  try{
+    CHK=await api('GET','/solicitudes/'+SOL_ACT.id+'/bandejas/'+encodeURIComponent(codigo)+'/checklist');
+  }catch(e){ toast('No se pudo abrir el check list: '+e.message); hideLoading(); return; }
+  finally{ hideLoading(); }
+  (CHK.componentes||[]).forEach(c=>{ c.marcado=!!c.alistado; });
+  CHK_ORIG=chkFirma();
+  chkResetVolver();
+  setTab('solicitudes'); showOnly('viewCheckList');
+  renderCheckList();
+}
+/* Firma de lo marcado: sirve para saber si hay cambios sin guardar. */
+function chkFirma(){ return ((CHK&&CHK.componentes)||[]).filter(c=>c.marcado).map(c=>c.producto).sort().join('|'); }
+function chkResetVolver(){
+  clearTimeout(CHK_SALIR_T); CHK_SALIR=false;
+  const b=document.getElementById('chkVolverBtn');
+  if(b) b.textContent='← Volver a la solicitud';
+}
+/* Salir con cambios pide un segundo toque. La app no usa confirm(). */
+function volverDeCheckList(){
+  if(chkFirma()!==CHK_ORIG && !CHK_SALIR){
+    CHK_SALIR=true;
+    const b=document.getElementById('chkVolverBtn'); if(b) b.textContent='⚠️ Salir sin guardar';
+    clearTimeout(CHK_SALIR_T);
+    CHK_SALIR_T=setTimeout(chkResetVolver, 4500);
+    toast('Hay marcas sin guardar. Toque otra vez para salir y perderlas.');
+    return;
+  }
+  chkResetVolver();
+  abrirSolicitud(SOL_ACT.id);
+}
+function renderCheckList(){
+  if(!CHK) return;
+  const s=CHK.solicitud||{}, b=CHK.bandeja||{};
+  const cod=b.demarcado||b.equipo_codigo||'';
+  document.getElementById('chkTit').textContent='Check list · '+cod;
+  document.getElementById('chkSub').textContent=[s.codigo, s.hospital, b.color].filter(Boolean).join(' · ');
+  document.getElementById('chkCabe').innerHTML=[
+    ['No. de cirugía', s.codigo],
+    ['Hospital', s.hospital],
+    ['Fecha y hora de la cirugía', solFechaTxt(s.fecha_cirugia, s.hora_cirugia)],
+    ['Tipo de cirugía', s.cirugia],
+    ['Cirujano', s.cirujano],
+    ['Paciente', s.paciente_nombre],
+    ['Cédula', s.paciente_cedula],
+    ['No. de caja', cod],
+    ['Descripción de la bandeja', b.descripcion],
+    ['Color', b.color],
+    ['Tipo de insumo', b.categoria]
+  ].map(([k,v])=>`<div><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join('');
+  document.getElementById('chkHead').innerHTML=
+    '<tr><th class="chk-num">#</th><th>Código</th><th class="chk-desc">Descripción</th>'
+    +'<th class="chk-cant">Cantidad</th><th class="chk-box">Check</th></tr>';
+  renderChkBody();
+}
+/* Cantidad tal como vino del catalogo. El 0 se senala: es un dato que hay
+   que corregir en la bandeja, no un error de esta pantalla. */
+function chkCant(v){
+  const n=Number(v);
+  if(!isFinite(n)) return esc(v);
+  if(n===0) return '0 ⚠';
+  return String(Math.round(n*100)/100).replace('.', ',');
+}
+function renderChkBody(){
+  const lista=(CHK&&CHK.componentes)||[];
+  const b=document.getElementById('chkBody'); b.innerHTML='';
+  document.getElementById('chkEmpty').classList.toggle('hidden', lista.length>0);
+  document.getElementById('chkGrid').classList.toggle('hidden', lista.length===0);
+  document.getElementById('chkAcciones').classList.toggle('hidden', lista.length===0);
+  let tipo=null, n=0;
+  lista.forEach((c,i)=>{
+    /* La API ya viene ordenada por Tipo: aca solo se corta la seccion.
+       Son las mismas divisiones del documento impreso. */
+    if(c.tipo!==tipo){
+      tipo=c.tipo;
+      const sec=document.createElement('tr');
+      sec.innerHTML=`<td class="chk-sec" colspan="5">${esc(tipo)}</td>`;
+      b.appendChild(sec);
+    }
+    n++;
+    const tr=document.createElement('tr');
+    tr.className='chk-row'+(c.marcado?' on':'');
+    tr.dataset.i=i;
+    tr.onclick=()=>chkToggle(i);
+    tr.innerHTML=`<td class="chk-num">${n}</td><td>${esc(c.producto)}</td>`
+      +`<td class="chk-desc" title="${attr(c.descripcion)}">${esc(c.descripcion)}</td>`
+      +`<td class="chk-cant">${chkCant(c.cantidad)}</td>`
+      +`<td class="chk-box">${c.marcado?'✅':'⬜'}</td>`;
+    b.appendChild(tr);
+  });
+  chkAvance();
+}
+function chkToggle(i){
+  const c=CHK && CHK.componentes && CHK.componentes[i]; if(!c) return;
+  c.marcado=!c.marcado;
+  const tr=document.querySelector('#chkBody tr[data-i="'+i+'"]');
+  if(tr){
+    tr.classList.toggle('on', c.marcado);
+    tr.lastElementChild.textContent=c.marcado?'✅':'⬜';
+  }
+  chkAvance();
+}
+function chkLimpiar(){
+  ((CHK&&CHK.componentes)||[]).forEach(c=>{ c.marcado=false; });
+  renderChkBody();
+}
+function chkAvance(){
+  const lista=(CHK&&CHK.componentes)||[];
+  const m=lista.filter(c=>c.marcado).length;
+  const p=lista.length ? Math.round(m*100/lista.length) : 0;
+  /* Dos barras iguales: la de arriba y la de la franja pegada abajo, que
+     es la que se ve mientras se marca una bandeja larga. */
+  ['chkFill','chkFill2'].forEach(id=>{
+    const f=document.getElementById(id);
+    f.style.width=p+'%'; f.style.background=pctColor(p);
+  });
+  document.getElementById('chkPct').textContent=p+'%';
+  document.getElementById('chkPct2').textContent=p+'% · '+m+'/'+lista.length;
+  document.getElementById('chkCnt').textContent=lista.length
+    ? m+' de '+lista.length+(lista.length===1?' componente alistado':' componentes alistados') : '';
+  document.getElementById('chkFoot').textContent=lista.length
+    ? (lista.length===1?'1 componente':lista.length+' componentes') : '';
+  const sucio=chkFirma()!==CHK_ORIG;
+  const g=document.getElementById('chkGuardarBtn');
+  if(g) g.textContent = sucio ? '💾 Guardar cambios' : '💾 Guardar';
+  if(!sucio) chkResetVolver();
+}
+async function guardarCheckList(){
+  if(!CHK || !canBodega()) return;
+  const btn=document.getElementById('chkGuardarBtn'); btn.disabled=true;
+  try{
+    const cod=CHK.bandeja.equipo_codigo;
+    const r=await api('PUT','/solicitudes/'+CHK.solicitud.id+'/bandejas/'+encodeURIComponent(cod)+'/checklist',
+      { productos: (CHK.componentes||[]).filter(c=>c.marcado).map(c=>c.producto) });
+    CHK.solicitud.estado=r.estado;
+    if(SOL_ACT) SOL_ACT.estado=r.estado;
+    CHK_ORIG=chkFirma();
+    chkAvance();
+    toast('Alisto guardado: '+r.alistados+' de '+r.articulos+' componentes ('+(r.porcentaje==null?0:r.porcentaje)+'%).');
+  }catch(e){ toast('No se pudo guardar el alisto: '+e.message); }
+  finally{ btn.disabled=false; }
 }
 function agregarBandejaSolicitud(){
   const sel=document.getElementById('solBandejaSel');
