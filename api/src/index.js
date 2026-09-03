@@ -712,18 +712,56 @@ app.http('bandeja-producto-delete', {
    a referenciar estos registros y borrar uno dejaría huérfano el histórico.
    ============================================================ */
 
-const PROVINCIAS = ['San José', 'Alajuela', 'Cartago', 'Heredia', 'Guanacaste', 'Puntarenas', 'Limón'];
-
-/* Corrige la capitalización y las tildes contra la lista cerrada de
-   provincias. Un valor que no calce se rechaza: aquí sí conviene ser
-   estricto, porque la tabla arranca limpia y no hay historia que respetar. */
-function normProvincia(v) {
-  const t = textoONull(v, 40);
-  if (!t) return { ok: true, valor: null };
-  const sinTilde = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-  const m = PROVINCIAS.find((p) => sinTilde(p) === sinTilde(t));
-  return m ? { ok: true, valor: m } : { ok: false, valor: null };
+/* Las provincias viven en cat.Provincia: siete filas fijas, de solo lectura.
+   No hay endpoints de alta, edicion ni borrado a proposito. Se cachean en
+   memoria porque no cambian nunca; antes este listado estaba repetido en el
+   CHECK de la tabla, aca y en el frontend. */
+let PROV_CACHE = null;
+async function provincias() {
+  if (!PROV_CACHE) {
+    const r = await query(`SELECT Id AS id, Nombre AS nombre FROM cat.Provincia ORDER BY Id`);
+    PROV_CACHE = r.rows;
+  }
+  return PROV_CACHE;
 }
+const sinTilde = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+
+/* Resuelve la provincia a su Id. Acepta provincia_id (lo que manda la
+   pantalla) o el nombre (comodo para otros llamadores y para pruebas).
+   id === undefined significa «no la mandaron», distinto de «vacia». */
+async function resolverProvincia(body) {
+  if (body && body.provincia_id !== undefined) {
+    const n = parseInt(body.provincia_id, 10);
+    if (!n) return { ok: true, id: null };
+    const lista = await provincias();
+    return lista.some((p) => p.id === n) ? { ok: true, id: n } : { ok: false, id: null };
+  }
+  if (body && body.provincia !== undefined) {
+    const t = textoONull(body.provincia, 40);
+    if (!t) return { ok: true, id: null };
+    const lista = await provincias();
+    const m = lista.find((p) => sinTilde(p.nombre) === sinTilde(t));
+    return m ? { ok: true, id: m.id } : { ok: false, id: null };
+  }
+  return { ok: true, id: undefined };
+}
+const errProvincia = async () => 'La provincia debe ser una de: ' + (await provincias()).map((p) => p.nombre).join(', ');
+
+/* GET /api/provincias -> el catalogo. Cualquier usuario autenticado: lo
+   necesita el desplegable de Hospitales. Solo lectura. */
+app.http('provincias-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'provincias',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    try {
+      return json(200, await provincias());
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener el catálogo de provincias', detail: e.message });
+    }
+  }
+});
 
 const normNombreHospital = (v) => textoONull(v, 200);
 
@@ -740,10 +778,12 @@ app.http('hospitales-list', {
     }
     try {
       const r = await query(
-        `SELECT Id AS id, Nombre AS nombre, Provincia AS provincia, Activo AS activo
-           FROM cat.Hospital
-          ${todos ? '' : 'WHERE Activo = TRUE'}
-          ORDER BY Nombre`);
+        `SELECT h.Id AS id, h.Nombre AS nombre, h.ProvinciaId AS provincia_id,
+                p.Nombre AS provincia, h.Activo AS activo
+           FROM cat.Hospital h
+           LEFT JOIN cat.Provincia p ON p.Id = h.ProvinciaId
+          ${todos ? '' : 'WHERE h.Activo = TRUE'}
+          ORDER BY h.Nombre`);
       return json(200, r.rows);
     } catch (e) {
       context.error(e);
@@ -762,15 +802,19 @@ app.http('hospital-create', {
     const body = await request.json();
     const nombre = normNombreHospital(body && body.nombre);
     if (!nombre) return json(400, { error: 'El nombre del hospital es obligatorio' });
-    const prov = normProvincia(body && body.provincia);
-    if (!prov.ok) return json(400, { error: 'La provincia debe ser una de: ' + PROVINCIAS.join(', ') });
+    const prov = await resolverProvincia(body);
+    if (!prov.ok) return json(400, { error: await errProvincia() });
     const activo = (body && body.activo !== undefined) ? !!body.activo : true;
     try {
       const r = await query(
-        `INSERT INTO cat.Hospital (Nombre, Provincia, Activo, CreadoPor, FechaActualizacion)
-         VALUES ($1,$2,$3,$4,(now() at time zone 'utc'))
-         RETURNING Id AS id, Nombre AS nombre, Provincia AS provincia, Activo AS activo`,
-        [nombre, prov.valor, activo, user.name || user.email]);
+        `WITH nuevo AS (
+           INSERT INTO cat.Hospital (Nombre, ProvinciaId, Activo, CreadoPor, FechaActualizacion)
+           VALUES ($1,$2,$3,$4,(now() at time zone 'utc'))
+           RETURNING Id, Nombre, ProvinciaId, Activo)
+         SELECT n.Id AS id, n.Nombre AS nombre, n.ProvinciaId AS provincia_id,
+                p.Nombre AS provincia, n.Activo AS activo
+           FROM nuevo n LEFT JOIN cat.Provincia p ON p.Id = n.ProvinciaId`,
+        [nombre, prov.id === undefined ? null : prov.id, activo, user.name || user.email]);
       return json(201, r.rows[0]);
     } catch (e) {
       if (e.code === '23505') return json(400, { error: 'Ya existe un hospital con ese nombre' });
@@ -797,7 +841,7 @@ app.http('hospital-update', {
        { activo } suelto para desactivar y { nombre } suelto para corregir,
        asi que exigir el nombre siempre romperia esa pantalla. */
     const cambiaNombre    = !!body && body.nombre !== undefined;
-    const cambiaProvincia = !!body && body.provincia !== undefined;
+    const cambiaProvincia = !!body && (body.provincia !== undefined || body.provincia_id !== undefined);
     const cambiaActivo    = !!body && body.activo !== undefined;
     if (!cambiaNombre && !cambiaProvincia && !cambiaActivo) return json(400, { error: 'No hay nada que actualizar' });
 
@@ -806,22 +850,26 @@ app.http('hospital-update', {
 
     /* La provincia se puede vaciar a propósito, así que se distingue entre
        «no la mandaron» y «la mandaron vacía»: por eso el flag aparte. */
-    let provincia = null;
+    let provinciaId = null;
     if (cambiaProvincia) {
-      const p = normProvincia(body.provincia);
-      if (!p.ok) return json(400, { error: 'La provincia debe ser una de: ' + PROVINCIAS.join(', ') });
-      provincia = p.valor;
+      const pr = await resolverProvincia(body);
+      if (!pr.ok) return json(400, { error: await errProvincia() });
+      provinciaId = pr.id === undefined ? null : pr.id;
     }
     try {
       const r = await query(
-        `UPDATE cat.Hospital
-            SET Nombre    = COALESCE($1::varchar, Nombre),
-                Provincia = CASE WHEN $2::boolean THEN $3::varchar ELSE Provincia END,
-                Activo    = COALESCE($4::boolean, Activo),
-                ActualizadoPor = $5, FechaActualizacion = (now() at time zone 'utc')
-          WHERE Id = $6
-          RETURNING Id AS id, Nombre AS nombre, Provincia AS provincia, Activo AS activo`,
-        [nombre, cambiaProvincia, provincia, cambiaActivo ? !!body.activo : null,
+        `WITH upd AS (
+           UPDATE cat.Hospital
+              SET Nombre      = COALESCE($1::varchar, Nombre),
+                  ProvinciaId = CASE WHEN $2::boolean THEN $3::smallint ELSE ProvinciaId END,
+                  Activo      = COALESCE($4::boolean, Activo),
+                  ActualizadoPor = $5, FechaActualizacion = (now() at time zone 'utc')
+            WHERE Id = $6
+            RETURNING Id, Nombre, ProvinciaId, Activo)
+         SELECT u.Id AS id, u.Nombre AS nombre, u.ProvinciaId AS provincia_id,
+                p.Nombre AS provincia, u.Activo AS activo
+           FROM upd u LEFT JOIN cat.Provincia p ON p.Id = u.ProvinciaId`,
+        [nombre, cambiaProvincia, provinciaId, cambiaActivo ? !!body.activo : null,
          user.name || user.email, id]);
       if (!r.rowCount) return json(404, { error: 'El hospital no existe' });
       return json(200, r.rows[0]);

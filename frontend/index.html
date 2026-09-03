@@ -4498,7 +4498,16 @@ async function eliminarProducto(prodEnc){
 
 /* ===== HOSPITALES — mantenimiento (solo Bodega / Administrador) ===== */
 let HOS_ROWS=[], HOS_COLF={}, HOS_EDIT=null;
-const HOS_PROVINCIAS=['San José','Alajuela','Cartago','Heredia','Guanacaste','Puntarenas','Limón'];
+/* Las provincias vienen de cat.Provincia via /api/provincias. Antes estaban
+   escritas aca, en la API y en el CHECK de la tabla: tres copias del mismo
+   listado. Es de solo lectura, no hay pantalla para editarlas. */
+let HOS_PROVINCIAS=[];
+async function loadProvincias(){
+  if(HOS_PROVINCIAS.length) return HOS_PROVINCIAS;
+  try{ HOS_PROVINCIAS=await api('GET','/provincias')||[]; }
+  catch(e){ HOS_PROVINCIAS=[]; toast('No se pudo cargar el catálogo de provincias: '+e.message); }
+  return HOS_PROVINCIAS;
+}
 const HOS_COLS=[
   {k:'nombre',    l:'Nombre', cls:'hos-nom'},
   {k:'provincia', l:'Provincia'},
@@ -4507,10 +4516,12 @@ const HOS_COLS=[
 
 /* Opciones de provincia. La vacia existe porque 8 hospitales de la carga
    quedaron sin provincia y no corresponde inventarsela al guardar. */
-function hosProvOpciones(sel){
-  const v=(sel==null?'':String(sel)).trim();
+/* El valor de cada opcion es el Id de cat.Provincia. La vacia existe porque
+   hay hospitales sin provincia y no corresponde inventarsela al guardar. */
+function hosProvOpciones(selId){
+  const v=(selId==null?'':String(selId)).trim();
   return `<option value="">— Sin definir —</option>`
-    + HOS_PROVINCIAS.map(x=>`<option value="${attr(x)}"${x===v?' selected':''}>${esc(x)}</option>`).join('');
+    + HOS_PROVINCIAS.map(x=>`<option value="${attr(x.id)}"${String(x.id)===v?' selected':''}>${esc(x.nombre)}</option>`).join('');
 }
 
 async function showHospitales(){
@@ -4520,6 +4531,7 @@ async function showHospitales(){
 }
 async function loadHospitales(){
   showLoading('Cargando hospitales', 'Estamos trayendo el catálogo…');
+  try{ await loadProvincias(); }catch(e){ /* ya avisa loadProvincias */ }
   try{ HOS_ROWS=await api('GET','/hospitales?todos=1'); }
   catch(e){ HOS_ROWS=[]; toast('Error al cargar hospitales: '+e.message); }
   finally{ hideLoading(); }
@@ -4602,7 +4614,7 @@ function editarHospital(id){
   HOS_EDIT=id;
   document.getElementById('hosModalTit').textContent='Editar hospital';
   document.getElementById('hosNombre').value=r.nombre||'';
-  document.getElementById('hosProvincia').innerHTML=hosProvOpciones(r.provincia);
+  document.getElementById('hosProvincia').innerHTML=hosProvOpciones(r.provincia_id);
   document.getElementById('hosActivo').value=r.activo?'1':'0';
   document.getElementById('hosHint').textContent='';
   document.getElementById('hosModal').classList.remove('hidden');
@@ -4620,9 +4632,10 @@ async function guardarHospital(){
   const rep=HOS_ROWS.find(x=>x.id!==HOS_EDIT && String(x.nombre||'').trim().toLowerCase()===nombre.toLowerCase());
   if(rep){ hint.textContent='Ya existe un hospital con ese nombre.'; hint.className='cat-fhint warn'; return; }
   hint.textContent=''; hint.className='cat-fhint';
+  const prov=document.getElementById('hosProvincia').value;
   const cuerpo={
     nombre,
-    provincia: document.getElementById('hosProvincia').value,
+    provincia_id: prov ? parseInt(prov,10) : null,
     activo: document.getElementById('hosActivo').value==='1'
   };
   const btn=document.getElementById('hosSave'); btn.disabled=true;
