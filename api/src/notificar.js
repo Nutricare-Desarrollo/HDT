@@ -5,8 +5,14 @@
    NOTIF_SOLICITUD_URL del Static Web App y nunca en el codigo ni en el
    frontend. Mismo criterio que DYNAMICS_API_URL y PRODUCTOS_API_URL.
 
-   Cuerpo que espera el flujo:
-     { "Descripcion": "...", "SolicitadoPor": "email", "Cuentas": ["a@x", "b@x"] }
+   Cuerpo que espera el flujo, verificado contra el trigger con Postman
+   (200 OK, {"Resultado":"Enviado"}). Cuentas es un arreglo de OBJETOS con la
+   propiedad email, no de strings:
+     {
+       "Descripcion": "...",
+       "SolicitadoPor": "email",
+       "Cuentas": [{ "email": "a@x" }, { "email": "b@x" }]
+     }
 
    Nada de lo que pasa aca tumba la operacion que lo llamo: si el flujo no
    responde, la solicitud igual queda enviada y el llamador recibe el aviso
@@ -48,13 +54,18 @@ async function notificar({ descripcion, solicitadoPor, cuentas, envName = 'NOTIF
     const res = await postConTimeout(url, {
       Descripcion: String(descripcion || ''),
       SolicitadoPor: String(solicitadoPor || ''),
-      Cuentas: lista
+      Cuentas: lista.map((email) => ({ email }))
     });
     if (!res.ok) {
       const txt = await res.text().catch(() => '');
       if (context) context.error(`El flujo de notificación respondió ${res.status}. ${String(txt).slice(0, 300)}`);
       return { enviado: false, cuentas: lista.length, aviso: `El flujo de notificación respondió ${res.status}; el aviso no salió.` };
     }
+    /* El flujo responde {"Resultado":"Enviado"}. Se considera enviado por el
+       2xx -no por ese texto, para no romperse si el flujo cambia su
+       respuesta-, pero se registra para poder revisarlo en el log del run. */
+    const cuerpo = await res.text().catch(() => '');
+    if (context && cuerpo) context.log('Notificación enviada. Respuesta del flujo: ' + String(cuerpo).slice(0, 200));
     return { enviado: true, cuentas: lista.length, aviso: null };
   } catch (e) {
     const porTimeout = e && e.name === 'AbortError';
