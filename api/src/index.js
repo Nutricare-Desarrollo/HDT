@@ -828,6 +828,136 @@ app.http('hospital-update', {
   }
 });
 
+
+/* ============================================================
+   Notificaciones — cuentas que reciben aviso por evento
+   Mantenimiento solo para Administrador y Bodega.
+   ============================================================ */
+
+const NOTIF_EVENTOS = ['solicitud', 'alistado', 'devolucion', 'liberado'];
+
+/* Validacion deliberadamente permisiva: alcanza para atajar el dedazo
+   («juan@», «juan.nutricare.co.cr») sin pelear con direcciones raras pero
+   validas. Quien manda el correo es Power Automate, no esta API. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function normEmail(v) {
+  const t = String(v == null ? '' : v).trim().toLowerCase();
+  if (!t || t.length > 200 || !EMAIL_RE.test(t)) return null;
+  return t;
+}
+
+/* Los cuatro eventos vienen como booleanos. Devuelve null si no hay
+   ninguno marcado. */
+function leerEventos(body) {
+  const e = {};
+  for (const k of NOTIF_EVENTOS) e[k] = !!(body && body[k]);
+  return NOTIF_EVENTOS.some((k) => e[k]) ? e : null;
+}
+
+/* GET /api/notificaciones -> listado del mantenimiento. */
+app.http('notificaciones-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'notificaciones',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para ver las notificaciones' });
+    try {
+      const r = await query(
+        `SELECT Id AS id, Email AS email, Solicitud AS solicitud, Alistado AS alistado,
+                Devolucion AS devolucion, Liberado AS liberado
+           FROM cat.Notificacion ORDER BY Email`);
+      return json(200, r.rows);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener las notificaciones', detail: e.message });
+    }
+  }
+});
+
+/* POST /api/notificaciones -> agrega una cuenta.
+   Body: { email, solicitud, alistado, devolucion, liberado } */
+app.http('notificacion-create', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'notificaciones',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar las notificaciones' });
+    const body = await request.json();
+    const email = normEmail(body && body.email);
+    if (!email) return json(400, { error: 'Escriba un correo electrónico válido' });
+    const ev = leerEventos(body);
+    if (!ev) return json(400, { error: 'Marque al menos un evento' });
+    try {
+      const r = await query(
+        `INSERT INTO cat.Notificacion (Email, Solicitud, Alistado, Devolucion, Liberado, CreadoPor, FechaActualizacion)
+         VALUES ($1,$2,$3,$4,$5,$6,(now() at time zone 'utc'))
+         RETURNING Id AS id, Email AS email, Solicitud AS solicitud, Alistado AS alistado,
+                   Devolucion AS devolucion, Liberado AS liberado`,
+        [email, ev.solicitud, ev.alistado, ev.devolucion, ev.liberado, user.name || user.email]);
+      return json(201, r.rows[0]);
+    } catch (e) {
+      if (e.code === '23505') return json(400, { error: 'Esa cuenta ya está en el listado' });
+      context.error(e);
+      return json(500, { error: 'No se pudo agregar la cuenta', detail: e.message });
+    }
+  }
+});
+
+/* PUT /api/notificaciones/{id} -> corrige el correo o los eventos. */
+app.http('notificacion-update', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'notificaciones/{id}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar las notificaciones' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    const body = await request.json();
+    const email = normEmail(body && body.email);
+    if (!email) return json(400, { error: 'Escriba un correo electrónico válido' });
+    const ev = leerEventos(body);
+    if (!ev) return json(400, { error: 'Marque al menos un evento' });
+    try {
+      const r = await query(
+        `UPDATE cat.Notificacion
+            SET Email = $1, Solicitud = $2, Alistado = $3, Devolucion = $4, Liberado = $5,
+                ActualizadoPor = $6, FechaActualizacion = (now() at time zone 'utc')
+          WHERE Id = $7
+          RETURNING Id AS id, Email AS email, Solicitud AS solicitud, Alistado AS alistado,
+                    Devolucion AS devolucion, Liberado AS liberado`,
+        [email, ev.solicitud, ev.alistado, ev.devolucion, ev.liberado, user.name || user.email, id]);
+      if (!r.rowCount) return json(404, { error: 'La cuenta no existe' });
+      return json(200, r.rows[0]);
+    } catch (e) {
+      if (e.code === '23505') return json(400, { error: 'Ya hay otra cuenta con ese correo' });
+      context.error(e);
+      return json(500, { error: 'No se pudo actualizar la cuenta', detail: e.message });
+    }
+  }
+});
+
+/* DELETE /api/notificaciones/{id} -> saca la cuenta del listado.
+   Aquí sí se borra: una preferencia de aviso no la referencia nada, así que
+   no hay histórico que proteger. */
+app.http('notificacion-delete', {
+  methods: ['DELETE'], authLevel: 'anonymous', route: 'notificaciones/{id}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar las notificaciones' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    try {
+      const r = await query(`DELETE FROM cat.Notificacion WHERE Id = $1`, [id]);
+      if (!r.rowCount) return json(404, { error: 'La cuenta no existe' });
+      return json(200, { ok: true });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo eliminar la cuenta', detail: e.message });
+    }
+  }
+});
+
 /* ============================================================
    Hojas de consumo — CRUD
    ============================================================ */

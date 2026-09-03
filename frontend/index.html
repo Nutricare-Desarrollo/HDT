@@ -127,6 +127,11 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .hos-off{color:#a3364a}
 .hos-chk{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;color:var(--txt);cursor:pointer;white-space:nowrap}
 .hos-chk input{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
+/* Notificaciones: el correo es la columna larga; los eventos son marcas. */
+#notGrid .not-mail{max-width:340px;overflow:hidden;text-overflow:ellipsis}
+#notGrid .not-si{color:#1c7a54;font-weight:700}
+#notGrid .not-no{color:var(--muted)}
+.not-chks{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:9px 16px;margin-top:2px}
 .empty{padding:48px 20px;text-align:center;color:var(--muted)}
 .empty .big{font-size:38px;margin-bottom:8px}
 .grid-foot{padding:11px 14px;color:var(--muted);font-size:13px;font-weight:600;text-align:right}
@@ -723,6 +728,22 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       </div>
     </section>
 
+    <!-- NOTIFICACIONES — mantenimiento (solo Bodega / Administrador) -->
+    <section id="viewNotificaciones" class="hidden">
+      <div class="page-head">
+        <div><h2>Notificaciones</h2><div class="sub">Cuentas que reciben aviso en cada evento del proceso</div></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn-ghost" onclick="loadNotificaciones()">🔄 Actualizar</button>
+          <button class="btn-primary" onclick="nuevaNotificacion()">➕ Agregar</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap"><table id="notGrid"><thead id="notHead"></thead><tbody id="notBody"></tbody></table></div>
+        <div id="notEmpty" class="empty hidden"><div class="big">✉️</div><div>No hay cuentas configuradas. Use «Agregar» para registrar la primera.</div></div>
+        <div class="grid-foot" id="notFoot"></div>
+      </div>
+    </section>
+
     <!-- REEMPLAZOS / CORRECCIONES (Bodega / Administrador) -->
     <section id="viewReemplazos" class="hidden">
       <div class="page-head">
@@ -790,6 +811,37 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
     <div class="modal-foot">
       <button class="btn-ghost" onclick="cerrarHospital()">Cancelar</button>
       <button class="btn-primary" id="hosSave" onclick="guardarHospital()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- NOTIFICACIONES — alta y edición -->
+<div id="notModal" class="overlay hidden">
+  <div class="modal sm-md">
+    <div class="modal-head">
+      <h3 id="notModalTit">Agregar cuenta</h3>
+      <button class="x" onclick="cerrarNotificacion()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field full">
+        <label>Correo electrónico <span class="req">*</span></label>
+        <input id="notEmail" type="email" maxlength="200" autocomplete="off"
+               placeholder="nombre@nutricare.co.cr" onkeydown="onNotModalKey(event)">
+      </div>
+      <div class="field full" style="margin-top:4px">
+        <label>Eventos que recibe <span class="req">*</span></label>
+        <div class="not-chks">
+          <label class="hos-chk"><input type="checkbox" id="notEvSolicitud"  onchange="onNotEvento()"> Solicitud de equipo</label>
+          <label class="hos-chk"><input type="checkbox" id="notEvAlistado"   onchange="onNotEvento()"> Equipo alistado</label>
+          <label class="hos-chk"><input type="checkbox" id="notEvDevolucion" onchange="onNotEvento()"> Devolución</label>
+          <label class="hos-chk"><input type="checkbox" id="notEvLiberado"   onchange="onNotEvento()"> Equipo liberado</label>
+        </div>
+      </div>
+      <div class="cat-fhint" id="notHint"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="cerrarNotificacion()">Cancelar</button>
+      <button class="btn-primary" id="notSave" onclick="guardarNotificacion()">Guardar</button>
     </div>
   </div>
 </div>
@@ -1746,6 +1798,7 @@ function navGrupos(){
     { titulo:'MANTENIMIENTO', items:[
       {id:'bandejas',    ic:'\u{1F9F0}', l:'Bandejas',                 fn:showBandejas,    ver:canBodega},
       {id:'hospitales',  ic:'\u{1F3E5}', l:'Hospitales',               fn:showHospitales,  ver:canBodega},
+      {id:'notificaciones',ic:'\u2709\uFE0F', l:'Notificaciones',       fn:showNotificaciones, ver:canBodega},
       {id:'config',      ic:'\u2699\uFE0F',  l:'Configuración',            fn:showConfig,      ver:canBodega}
     ]},
     { titulo:'ADMINISTRACIÓN', items:[
@@ -1775,7 +1828,7 @@ function buildNav(){
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('ovl').classList.toggle('show'); }
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('ovl').classList.remove('show'); }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales'];
+const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales','viewNotificaciones'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
 
 /* ===== INICIO ===== */
@@ -4529,6 +4582,169 @@ async function cambiarEstadoHospital(id, activo){
     toast((activo?'Activado: ':'Desactivado: ')+r.nombre);
     renderHosBody();
   }catch(e){ toast('No se pudo cambiar el estado: '+e.message); }
+}
+
+/* ===== NOTIFICACIONES — cuentas por evento (solo Bodega / Administrador) ===== */
+let NOT_ROWS=[], NOT_COLF={}, NOT_EDIT=null, NOT_DEL=null, NOT_DEL_T=null;
+/* Las claves calzan con las columnas de cat.Notificacion y con los checkbox
+   del modal (notEv + la clave capitalizada). */
+const NOT_EVENTOS=[
+  {k:'solicitud',  l:'Solicitud',  el:'notEvSolicitud'},
+  {k:'alistado',   l:'Alistado',   el:'notEvAlistado'},
+  {k:'devolucion', l:'Devolución', el:'notEvDevolucion'},
+  {k:'liberado',   l:'Liberado',   el:'notEvLiberado'}
+];
+const NOT_COLS=[{k:'email', l:'Cuenta', cls:'not-mail'}].concat(
+  NOT_EVENTOS.map(e=>({k:e.k, l:e.l, ev:true})));
+
+async function showNotificaciones(){
+  if(!canBodega()){ toast('Su rol no tiene acceso'); showInicio(); return; }
+  setTab('notificaciones'); showOnly('viewNotificaciones');
+  await loadNotificaciones();
+}
+async function loadNotificaciones(){
+  showLoading('Cargando notificaciones', 'Estamos trayendo las cuentas configuradas…');
+  try{ NOT_ROWS=await api('GET','/notificaciones'); }
+  catch(e){ NOT_ROWS=[]; toast('Error al cargar notificaciones: '+e.message); }
+  finally{ hideLoading(); }
+  renderNotificaciones();
+}
+function notFiltered(){
+  return NOT_ROWS.filter(r=> Object.keys(NOT_COLF).every(k=>{
+    const f=(NOT_COLF[k]||'').trim().toLowerCase(); if(!f) return true;
+    return String(r[k]==null?'':r[k]).toLowerCase().includes(f);
+  }));
+}
+function onNotFilter(k,v){ NOT_COLF[k]=v; renderNotBody(); }
+function onNotFilterKey(e){
+  if(e.key==='Enter'){ e.preventDefault(); renderNotBody(); return; }
+  if(e.key==='Escape'){ e.preventDefault(); e.target.value=''; onNotFilter(e.target.dataset.k,''); }
+}
+/* El encabezado se dibuja una sola vez: redibujarlo en cada tecla haria
+   perder el foco del input de filtro. Las columnas de evento no llevan
+   filtro de texto -son si/no y el ojo las lee mas rapido que un filtro-. */
+function renderNotHead(){
+  const head=document.getElementById('notHead');
+  if(head.dataset.listo) return;
+  head.innerHTML=`<tr>${NOT_COLS.map(c=>`<th${c.cls?' class="'+c.cls+'"':''}>${c.l}</th>`).join('')}<th></th></tr>`
+    +`<tr class="filter-row">${NOT_COLS.map(c=> c.ev ? '<th></th>'
+        : `<th><input placeholder="Filtrar…" autocomplete="off" data-k="${c.k}" oninput="onNotFilter('${c.k}',this.value)" onkeydown="onNotFilterKey(event)" value="${attr(NOT_COLF[c.k])}"></th>`).join('')}<th></th></tr>`;
+  head.dataset.listo='1';
+}
+function renderNotificaciones(){ renderNotHead(); renderNotBody(); }
+function renderNotBody(){
+  const rows=notFiltered();
+  const b=document.getElementById('notBody'); b.innerHTML='';
+  document.getElementById('notEmpty').classList.toggle('hidden', NOT_ROWS.length>0);
+  document.getElementById('notGrid').classList.toggle('hidden', NOT_ROWS.length===0);
+  const foot=document.getElementById('notFoot');
+  if(!NOT_ROWS.length){ foot.textContent=''; return; }
+  const total=NOT_ROWS.length;
+  foot.textContent = (rows.length===total)
+    ? total+(total===1?' cuenta':' cuentas')
+    : rows.length+' de '+total+' cuentas';
+  if(!rows.length){ b.innerHTML=`<tr><td colspan="${NOT_COLS.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  rows.forEach(r=>{
+    const tds=NOT_COLS.map(c=>{
+      if(c.k==='email')
+        return `<td class="not-mail"><span class="link-cell" onclick="editarNotificacion(${r.id})" title="Editar">${esc(r.email)}</span></td>`;
+      // Marca o guion: se lee de un vistazo, sin tener que interpretar «Sí/No».
+      return r[c.k] ? '<td class="not-si">✔</td>' : '<td class="not-no">—</td>';
+    }).join('');
+    const tr=document.createElement('tr');
+    tr.innerHTML=tds
+      +`<td style="white-space:nowrap">`
+      +`<button class="icon-btn" onclick="editarNotificacion(${r.id})">✏️ Editar</button> `
+      +`<button class="icon-btn danger" id="notDel-${r.id}" onclick="eliminarNotificacion(${r.id})">🗑️ Eliminar</button>`
+      +`</td>`;
+    b.appendChild(tr);
+  });
+}
+
+/* ----- Alta y edicion en el mismo modal ----- */
+function notAbrir(titulo){
+  document.getElementById('notModalTit').textContent=titulo;
+  document.getElementById('notHint').textContent='';
+  document.getElementById('notHint').className='cat-fhint';
+  document.getElementById('notModal').classList.remove('hidden');
+  setTimeout(()=>document.getElementById('notEmail').focus(), 30);
+}
+function nuevaNotificacion(){
+  NOT_EDIT=null;
+  document.getElementById('notEmail').value='';
+  NOT_EVENTOS.forEach(e=>{ document.getElementById(e.el).checked=false; });
+  notAbrir('Agregar cuenta');
+}
+function editarNotificacion(id){
+  const r=NOT_ROWS.find(x=>x.id===id); if(!r) return;
+  NOT_EDIT=id;
+  document.getElementById('notEmail').value=r.email||'';
+  NOT_EVENTOS.forEach(e=>{ document.getElementById(e.el).checked=!!r[e.k]; });
+  notAbrir('Editar cuenta');
+}
+function cerrarNotificacion(){ document.getElementById('notModal').classList.add('hidden'); NOT_EDIT=null; }
+function onNotModalKey(e){ if(e.key==='Enter'){ e.preventDefault(); guardarNotificacion(); } }
+/* Al marcar un checkbox se limpia el aviso de «marque al menos uno». */
+function onNotEvento(){
+  const hint=document.getElementById('notHint');
+  if(hint.textContent && NOT_EVENTOS.some(e=>document.getElementById(e.el).checked)){
+    hint.textContent=''; hint.className='cat-fhint';
+  }
+}
+
+async function guardarNotificacion(){
+  const hint=document.getElementById('notHint');
+  const aviso=(m)=>{ hint.textContent=m; hint.className='cat-fhint warn'; };
+  const email=document.getElementById('notEmail').value.trim().toLowerCase();
+  if(!email){ return aviso('El correo electrónico es obligatorio.'); }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ return aviso('Ese correo no tiene un formato válido.'); }
+  /* Aviso local antes de mandarlo: el indice unico de la base tambien lo
+     rechaza, pero es mejor decirlo sin gastar el viaje. */
+  if(NOT_ROWS.some(x=>x.id!==NOT_EDIT && String(x.email||'').toLowerCase()===email)){
+    return aviso('Esa cuenta ya está en el listado.');
+  }
+  const cuerpo={email};
+  NOT_EVENTOS.forEach(e=>{ cuerpo[e.k]=document.getElementById(e.el).checked; });
+  if(!NOT_EVENTOS.some(e=>cuerpo[e.k])){ return aviso('Marque al menos un evento.'); }
+  hint.textContent=''; hint.className='cat-fhint';
+  const btn=document.getElementById('notSave'); btn.disabled=true;
+  try{
+    if(NOT_EDIT){
+      const r=await api('PUT','/notificaciones/'+NOT_EDIT, cuerpo);
+      const i=NOT_ROWS.findIndex(x=>x.id===NOT_EDIT);
+      if(i>=0) NOT_ROWS[i]=r;
+      toast('Cuenta actualizada');
+    }else{
+      const r=await api('POST','/notificaciones', cuerpo);
+      NOT_ROWS.push(r);
+      NOT_ROWS.sort((a,b)=>String(a.email).localeCompare(String(b.email),'es'));
+      toast('Cuenta agregada');
+    }
+    cerrarNotificacion();
+    renderNotBody();
+  }catch(e){ aviso(e.message); }
+  finally{ btn.disabled=false; }
+}
+
+/* Borrado en dos toques, igual que en el detalle de Bandejas. */
+async function eliminarNotificacion(id){
+  const r=NOT_ROWS.find(x=>x.id===id); if(!r) return;
+  const btn=document.getElementById('notDel-'+id);
+  if(NOT_DEL!==id){
+    NOT_DEL=id;
+    if(btn) btn.textContent='⚠️ Confirmar';
+    clearTimeout(NOT_DEL_T);
+    NOT_DEL_T=setTimeout(()=>{ NOT_DEL=null; if(btn) btn.textContent='🗑️ Eliminar'; }, 4000);
+    return;
+  }
+  clearTimeout(NOT_DEL_T); NOT_DEL=null;
+  if(btn) btn.disabled=true;
+  try{
+    await api('DELETE','/notificaciones/'+id);
+    NOT_ROWS=NOT_ROWS.filter(x=>x.id!==id);
+    toast('Cuenta eliminada: '+r.email);
+    renderNotBody();
+  }catch(e){ toast('No se pudo eliminar: '+e.message); if(btn) btn.disabled=false; }
 }
 
 /* ===== Utilidades ===== */
