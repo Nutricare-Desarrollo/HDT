@@ -782,7 +782,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       </div>
       <div class="field">
         <label>Categoría</label>
-        <input id="banNvoCat" type="text" maxlength="60" autocomplete="off" placeholder="Instrumental / Implantes">
+        <select id="banNvoCat"></select>
       </div>
       <div class="field">
         <label>Color de demarcación</label>
@@ -803,8 +803,8 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
 <div id="loadModal" class="overlay hidden">
   <div class="load-modal">
     <div class="spinner"></div>
-    <h3>Procesando la hoja de consumo</h3>
-    <p>Estamos leyendo la imagen y extrayendo los datos. Esto puede tardar unos segundos…</p>
+    <h3 id="loadModalTit">Procesando la hoja de consumo</h3>
+    <p id="loadModalTxt">Estamos leyendo la imagen y extrayendo los datos. Esto puede tardar unos segundos…</p>
   </div>
 </div>
 
@@ -3293,8 +3293,21 @@ async function analizar(){
   }catch(e){ toast('No se pudo leer la hoja: '+e.message); }
   finally{ hideLoading(); btn.disabled=false; btn.textContent='Continuar →'; }
 }
-function showLoading(){ document.getElementById('loadModal').classList.remove('hidden'); }
-function hideLoading(){ document.getElementById('loadModal').classList.add('hidden'); }
+/* Modal de carga. Sin argumentos mantiene el texto de la hoja de consumo, que
+   es como lo llamaba el resto de la app; al cerrarse siempre vuelve a ese
+   texto, asi que una pantalla no le deja el mensaje puesto a otra. */
+const LOAD_TIT_DEF='Procesando la hoja de consumo';
+const LOAD_TXT_DEF='Estamos leyendo la imagen y extrayendo los datos. Esto puede tardar unos segundos…';
+function showLoading(titulo, texto){
+  document.getElementById('loadModalTit').textContent = (titulo===undefined) ? LOAD_TIT_DEF : titulo;
+  document.getElementById('loadModalTxt').textContent = (texto===undefined) ? LOAD_TXT_DEF : texto;
+  document.getElementById('loadModal').classList.remove('hidden');
+}
+function hideLoading(){
+  document.getElementById('loadModal').classList.add('hidden');
+  document.getElementById('loadModalTit').textContent=LOAD_TIT_DEF;
+  document.getElementById('loadModalTxt').textContent=LOAD_TXT_DEF;
+}
 function mergeEnc(base, over){ const o=Object.assign({}, base||{}); if(over) Object.keys(over).forEach(k=>{ if(over[k]!=null && over[k]!=='') o[k]=over[k]; }); return o; }
 function fillStep2(enc, det){
   // Al CREAR (no al completar una pendiente), el N° de hoja se prellena con el
@@ -3970,6 +3983,19 @@ async function impConfirm(){
 
 /* ===== BANDEJAS — catálogo y componentes (solo Bodega / Administrador) ===== */
 let BAN_ROWS=[], BAN_COLF={}, BAN_ACT=null, BAN_EDIT=null, BAN_DEL=null, BAN_DEL_T=null;
+/* Categorias de bandeja: lista corta y cerrada, va como desplegable. */
+const BAN_CATEGORIAS=['Instrumental','Implantes'];
+/* Arma las opciones dejando seleccionada la actual. La opcion vacia existe
+   porque los equipos que ya estaban en cat.Equipo antes de la carga no tienen
+   categoria. Y si un registro trae un valor fuera de la lista, se agrega como
+   opcion para no borrarlo sin querer al guardar. */
+function banCatOpciones(sel){
+  const v=(sel==null?'':String(sel)).trim();
+  const lista=BAN_CATEGORIAS.slice();
+  if(v && !lista.some(x=>x.toLowerCase()===v.toLowerCase())) lista.push(v);
+  return `<option value="">— Sin definir —</option>`
+    + lista.map(x=>`<option value="${attr(x)}"${x.toLowerCase()===v.toLowerCase()?' selected':''}>${esc(x)}</option>`).join('');
+}
 const BAN_COLS=[
   {k:'demarcado', l:'N° de bandeja'},
   {k:'nombre',    l:'Descripción', cls:'ban-desc'},
@@ -3985,8 +4011,10 @@ async function showBandejas(){
   await loadBandejas();
 }
 async function loadBandejas(){
+  showLoading('Cargando bandejas', 'Estamos trayendo el catálogo de bandejas…');
   try{ BAN_ROWS=await api('GET','/bandejas'); }
   catch(e){ BAN_ROWS=[]; toast('Error al cargar bandejas: '+e.message); }
+  finally{ hideLoading(); }
   // Texto, no booleano, para que el filtro de columna se comporte igual que en los otros grids.
   BAN_ROWS.forEach(r=>{ r.completa = r.completo ? 'Sí' : 'No'; });
   renderBandejas();
@@ -4049,7 +4077,8 @@ function renderBanBody(){
 
 /* ----- Nueva bandeja ----- */
 function nuevaBandeja(){
-  ['banNvoNum','banNvoDesc','banNvoCat','banNvoColor'].forEach(id=>{ document.getElementById(id).value=''; });
+  ['banNvoNum','banNvoDesc','banNvoColor'].forEach(id=>{ document.getElementById(id).value=''; });
+  document.getElementById('banNvoCat').innerHTML=banCatOpciones('');
   document.getElementById('banNuevaModal').classList.remove('hidden');
   setTimeout(()=>document.getElementById('banNvoNum').focus(), 30);
 }
@@ -4077,10 +4106,21 @@ async function crearBandeja(){
 /* ----- Edición de una bandeja ----- */
 async function verBandeja(codEnc){
   if(!canBodega()){ toast('Su rol no tiene acceso'); return; }
-  try{ BAN_ACT=await api('GET','/bandejas/'+codEnc); }
-  catch(e){ toast('No se pudo abrir la bandeja: '+e.message); return; }
+  /* La bandeja y su detalle se traen en paralelo con el catalogo de productos,
+     con la pantalla bloqueada: son dos llamadas y el detalle puede traer
+     hasta 171 lineas, asi que sin aviso parece que el clic no hizo nada.
+     El catalogo va con catch propio para que, si ese flujo no responde, la
+     bandeja se abra igual -las descripciones ya vienen de la API. */
+  showLoading('Abriendo la bandeja', 'Estamos trayendo los datos y el listado de componentes…');
+  try{
+    const [b]=await Promise.all([ api('GET','/bandejas/'+codEnc), ensureCatalogo().catch(()=>null) ]);
+    BAN_ACT=b;
+  }catch(e){
+    toast('No se pudo abrir la bandeja: '+e.message); return;
+  }finally{
+    hideLoading();
+  }
   setTab('bandejas'); showOnly('viewBandejaDet');
-  ensureCatalogo().then(()=>{ if(BAN_ACT) renderBandejaProductos(); });
   renderBandejaDet();
 }
 function renderBandejaDet(){
@@ -4093,7 +4133,7 @@ function renderBandejaDet(){
     <div class="field"><label>N° de bandeja</label>
       <input type="text" value="${attr(b.demarcado||b.codigo)}" readonly tabindex="-1"></div>
     <div class="field"><label>Categoría</label>
-      <input id="ban_categoria" type="text" maxlength="60" autocomplete="off" value="${attr(b.categoria)}"></div>
+      <select id="ban_categoria">${banCatOpciones(b.categoria)}</select></div>
     <div class="field"><label>Color de demarcación</label>
       <input id="ban_color" type="text" maxlength="40" autocomplete="off" value="${attr(b.color)}"></div>
     <div class="field"><label>Completa</label>

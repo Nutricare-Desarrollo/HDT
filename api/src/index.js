@@ -447,6 +447,18 @@ function normCantidad(v) {
   return Math.round(n * 100) / 100;
 }
 
+/* Categorias de bandeja. La lista es cerrada y el formulario la ofrece como
+   desplegable, pero la API no la impone: solo corrige la capitalizacion para
+   que no entren variantes como 'INSTRUMENTAL' o 'implantes'. Un valor fuera de
+   la lista se acepta tal cual, porque hay registros anteriores a la carga y no
+   corresponde perderlos en un guardado. */
+const BAN_CATEGORIAS = ['Instrumental', 'Implantes'];
+function normCategoria(v) {
+  const t = textoONull(v, 60);
+  if (!t) return null;
+  return BAN_CATEGORIAS.find((c) => c.toLowerCase() === t.toLowerCase()) || t;
+}
+
 /* El motivo es obligatorio cuando la bandeja se marca incompleta. */
 function validarCompleto(completo, motivo) {
   if (completo === false && !motivo) return 'Indique el motivo por el que la bandeja está incompleta';
@@ -543,7 +555,7 @@ app.http('bandeja-create', {
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,(now() at time zone 'utc'))
          RETURNING Codigo AS codigo, Demarcado AS demarcado, Nombre AS nombre, Categoria AS categoria,
                    Color AS color, Completo AS completo, MotivoIncompleto AS motivo_incompleto`,
-        [codigo, demarcado, nombre, textoONull(body && body.categoria, 60),
+        [codigo, demarcado, nombre, normCategoria(body && body.categoria),
          textoONull(body && body.color, 40), completo, completo ? null : motivo,
          user.name || user.email]);
       return json(201, { ...r.rows[0], productos: 0 });
@@ -581,7 +593,7 @@ app.http('bandeja-update', {
           WHERE Codigo = $8
           RETURNING Codigo AS codigo, Demarcado AS demarcado, Nombre AS nombre, Categoria AS categoria,
                     Color AS color, Completo AS completo, MotivoIncompleto AS motivo_incompleto`,
-        [textoONull(body && body.demarcado, 60), nombre, textoONull(body && body.categoria, 60),
+        [textoONull(body && body.demarcado, 60), nombre, normCategoria(body && body.categoria),
          textoONull(body && body.color, 40), completo, completo ? null : motivo,
          user.name || user.email, codigo]);
       if (!r.rowCount) return json(404, { error: 'La bandeja no existe' });
