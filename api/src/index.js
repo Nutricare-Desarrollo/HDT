@@ -420,6 +420,275 @@ app.http('equipo-productos', {
 });
 
 /* ============================================================
+   Bandejas — catálogo y detalle de productos
+   Pantalla visible solo para Administrador y Bodega, así que todos
+   estos endpoints piden puedeBodega(), incluso los de lectura.
+
+   Se apoya en cat.Equipo / cat.EquipoProducto: es el mismo catálogo,
+   con las columnas Categoria, Completo y Cantidad que agrega la
+   migración 21_BandejaCatalogo.sql.
+   ============================================================ */
+
+/* Misma normalización que equipos/importar, para que los dos caminos
+   produzcan la misma llave: 'NUT- 0001330' -> '0001330'. */
+const normBandeja = (v) => String(v == null ? '' : v).replace(/\s+/g, '').replace(/^nut-?/i, '').toUpperCase();
+
+/* Texto limpio o NULL, recortado al ancho de la columna. */
+const textoONull = (v, max) => {
+  const t = (v == null) ? '' : String(v).replace(/\s+/g, ' ').trim();
+  return t === '' ? null : t.slice(0, max);
+};
+
+/* Cantidad de un producto dentro de la bandeja: mayor que cero, con dos
+   decimales como máximo. Devuelve null si lo que llegó no sirve. */
+function normCantidad(v) {
+  const n = Number(v);
+  if (!isFinite(n) || n <= 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
+/* El motivo es obligatorio cuando la bandeja se marca incompleta. */
+function validarCompleto(completo, motivo) {
+  if (completo === false && !motivo) return 'Indique el motivo por el que la bandeja está incompleta';
+  return null;
+}
+
+/* Descripción oficial del producto. Sale del catálogo (/api/productos) y, si
+   ese flujo no responde, de la que quedó guardada en la carga inicial. */
+function conDescripcion(rows, mapa) {
+  return rows.map((r) => ({
+    ...r,
+    descripcion: (mapa && mapa.get(normCod(r.producto))) || r.descripcion_guardada || null,
+    en_catalogo: !!(mapa && mapa.size && mapa.has(normCod(r.producto)))
+  }));
+}
+
+/* GET /api/bandejas -> listado principal del grid. */
+app.http('bandejas-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'bandejas',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para ver el catálogo de bandejas' });
+    try {
+      const r = await query(
+        `SELECT e.Codigo AS codigo, e.Demarcado AS demarcado, e.Nombre AS nombre,
+                e.Categoria AS categoria, e.Color AS color, e.Completo AS completo,
+                e.MotivoIncompleto AS motivo_incompleto,
+                COALESCE(p.n, 0)::int AS productos
+           FROM cat.Equipo e
+           LEFT JOIN (SELECT EquipoCodigo, COUNT(*) AS n FROM cat.EquipoProducto GROUP BY EquipoCodigo) p
+                  ON p.EquipoCodigo = e.Codigo
+          ORDER BY COALESCE(e.Demarcado, e.Codigo)`);
+      return json(200, r.rows);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener el catálogo de bandejas', detail: e.message });
+    }
+  }
+});
+
+/* GET /api/bandejas/{codigo} -> la bandeja y su listado de componentes. */
+app.http('bandeja-get', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'bandejas/{codigo}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para ver el catálogo de bandejas' });
+    const codigo = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!codigo) return json(400, { error: 'Código de bandeja inválido' });
+    try {
+      const b = await query(
+        `SELECT Codigo AS codigo, Demarcado AS demarcado, Nombre AS nombre, Categoria AS categoria,
+                Color AS color, Completo AS completo, MotivoIncompleto AS motivo_incompleto
+           FROM cat.Equipo WHERE Codigo = $1`, [codigo]);
+      if (!b.rowCount) return json(404, { error: 'La bandeja no existe' });
+      const d = await query(
+        `SELECT ProductoCodigo AS producto, Cantidad::float8 AS cantidad, Tipo AS tipo,
+                DescripcionProducto AS descripcion_guardada
+           FROM cat.EquipoProducto WHERE EquipoCodigo = $1 ORDER BY ProductoCodigo`, [codigo]);
+      const mapa = await mapaCatalogo(context);
+      return json(200, { ...b.rows[0], productos: conDescripcion(d.rows, mapa) });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener la bandeja', detail: e.message });
+    }
+  }
+});
+
+/* POST /api/bandejas -> crea una bandeja.
+   Body: { codigo, demarcado, nombre, categoria, color, completo, motivo_incompleto } */
+app.http('bandeja-create', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'bandejas',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de bandejas' });
+    const body = await request.json();
+    /* El usuario escribe el número visible ('NUT-0001330'); de ahí sale la llave. */
+    const demarcado = textoONull(body && (body.demarcado != null ? body.demarcado : body.codigo), 60);
+    const codigo = normBandeja(body && (body.codigo != null ? body.codigo : body.demarcado));
+    if (!codigo) return json(400, { error: 'El número de bandeja es obligatorio' });
+    if (codigo.length > 40) return json(400, { error: 'El número de bandeja no puede superar los 40 caracteres' });
+    const nombre = textoONull(body && body.nombre, 300);
+    if (!nombre) return json(400, { error: 'La descripción de la bandeja es obligatoria' });
+    const completo = (body && body.completo !== undefined) ? !!body.completo : true;
+    const motivo = textoONull(body && body.motivo_incompleto, 300);
+    const errComp = validarCompleto(completo, motivo);
+    if (errComp) return json(400, { error: errComp });
+    try {
+      const r = await query(
+        `INSERT INTO cat.Equipo (Codigo, Demarcado, Nombre, Categoria, Color, Completo, MotivoIncompleto,
+                                 ActualizadoPor, FechaActualizacion)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,(now() at time zone 'utc'))
+         RETURNING Codigo AS codigo, Demarcado AS demarcado, Nombre AS nombre, Categoria AS categoria,
+                   Color AS color, Completo AS completo, MotivoIncompleto AS motivo_incompleto`,
+        [codigo, demarcado, nombre, textoONull(body && body.categoria, 60),
+         textoONull(body && body.color, 40), completo, completo ? null : motivo,
+         user.name || user.email]);
+      return json(201, { ...r.rows[0], productos: 0 });
+    } catch (e) {
+      if (e.code === '23505') return json(400, { error: 'Ya existe una bandeja con ese número' });
+      context.error(e);
+      return json(500, { error: 'No se pudo crear la bandeja', detail: e.message });
+    }
+  }
+});
+
+/* PUT /api/bandejas/{codigo} -> corrige los datos de la bandeja. El número no
+   se cambia: es la llave del detalle. */
+app.http('bandeja-update', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'bandejas/{codigo}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de bandejas' });
+    const codigo = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!codigo) return json(400, { error: 'Código de bandeja inválido' });
+    const body = await request.json();
+    const nombre = textoONull(body && body.nombre, 300);
+    if (!nombre) return json(400, { error: 'La descripción de la bandeja es obligatoria' });
+    const completo = (body && body.completo !== undefined) ? !!body.completo : true;
+    const motivo = textoONull(body && body.motivo_incompleto, 300);
+    const errComp = validarCompleto(completo, motivo);
+    if (errComp) return json(400, { error: errComp });
+    try {
+      const r = await query(
+        `UPDATE cat.Equipo
+            SET Demarcado = COALESCE($1, Demarcado), Nombre = $2, Categoria = $3, Color = $4,
+                Completo = $5, MotivoIncompleto = $6,
+                ActualizadoPor = $7, FechaActualizacion = (now() at time zone 'utc')
+          WHERE Codigo = $8
+          RETURNING Codigo AS codigo, Demarcado AS demarcado, Nombre AS nombre, Categoria AS categoria,
+                    Color AS color, Completo AS completo, MotivoIncompleto AS motivo_incompleto`,
+        [textoONull(body && body.demarcado, 60), nombre, textoONull(body && body.categoria, 60),
+         textoONull(body && body.color, 40), completo, completo ? null : motivo,
+         user.name || user.email, codigo]);
+      if (!r.rowCount) return json(404, { error: 'La bandeja no existe' });
+      return json(200, r.rows[0]);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo actualizar la bandeja', detail: e.message });
+    }
+  }
+});
+
+/* POST /api/bandejas/{codigo}/productos -> agrega un producto a la bandeja.
+   Body: { producto, cantidad }. La descripción NO se recibe del cliente: sale
+   del catálogo, para que nadie la edite desde la pantalla. */
+app.http('bandeja-producto-create', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'bandejas/{codigo}/productos',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de bandejas' });
+    const codigo = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    const body = await request.json();
+    const producto = normCod(body && body.producto);
+    if (!producto) return json(400, { error: 'El código de producto es obligatorio' });
+    if (producto.length > 60) return json(400, { error: 'El código de producto no puede superar los 60 caracteres' });
+    const cantidad = normCantidad(body && body.cantidad);
+    if (cantidad === null) return json(400, { error: 'La cantidad debe ser un número mayor que cero' });
+    try {
+      const ex = await query(`SELECT 1 FROM cat.Equipo WHERE Codigo = $1`, [codigo]);
+      if (!ex.rowCount) return json(404, { error: 'La bandeja no existe' });
+      /* Validación best-effort, igual que en el guardado de hojas: si el
+         catálogo de productos no responde, no se bloquea el alta. */
+      const mapa = await mapaCatalogo(context);
+      if (mapa.size && !mapa.has(producto)) {
+        return json(400, { error: 'El código ' + producto + ' no existe en el catálogo de productos' });
+      }
+      const r = await query(
+        `INSERT INTO cat.EquipoProducto (EquipoCodigo, ProductoCodigo, Cantidad, DescripcionProducto,
+                                         ActualizadoPor, FechaActualizacion)
+         VALUES ($1,$2,$3,$4,$5,(now() at time zone 'utc'))
+         RETURNING ProductoCodigo AS producto, Cantidad::float8 AS cantidad, Tipo AS tipo,
+                   DescripcionProducto AS descripcion_guardada`,
+        [codigo, producto, cantidad, mapa.get(producto) || null, user.name || user.email]);
+      return json(201, conDescripcion(r.rows, mapa)[0]);
+    } catch (e) {
+      if (e.code === '23505') return json(400, { error: 'Ese producto ya está en la bandeja. Edite la cantidad en lugar de agregarlo otra vez.' });
+      context.error(e);
+      return json(500, { error: 'No se pudo agregar el producto', detail: e.message });
+    }
+  }
+});
+
+/* PUT /api/bandejas/{codigo}/productos/{producto} -> cambia la cantidad. */
+app.http('bandeja-producto-update', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'bandejas/{codigo}/productos/{producto}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de bandejas' });
+    const codigo = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    const producto = normCod(decodeURIComponent(request.params.producto || ''));
+    if (!codigo || !producto) return json(400, { error: 'Bandeja o producto inválido' });
+    const body = await request.json();
+    const cantidad = normCantidad(body && body.cantidad);
+    if (cantidad === null) return json(400, { error: 'La cantidad debe ser un número mayor que cero' });
+    try {
+      const r = await query(
+        `UPDATE cat.EquipoProducto
+            SET Cantidad = $1, ActualizadoPor = $2, FechaActualizacion = (now() at time zone 'utc')
+          WHERE EquipoCodigo = $3 AND ProductoCodigo = $4
+          RETURNING ProductoCodigo AS producto, Cantidad::float8 AS cantidad, Tipo AS tipo,
+                    DescripcionProducto AS descripcion_guardada`,
+        [cantidad, user.name || user.email, codigo, producto]);
+      if (!r.rowCount) return json(404, { error: 'Ese producto no está en la bandeja' });
+      const mapa = await mapaCatalogo(context);
+      return json(200, conDescripcion(r.rows, mapa)[0]);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo actualizar la cantidad', detail: e.message });
+    }
+  }
+});
+
+/* DELETE /api/bandejas/{codigo}/productos/{producto} -> saca el producto. */
+app.http('bandeja-producto-delete', {
+  methods: ['DELETE'], authLevel: 'anonymous', route: 'bandejas/{codigo}/productos/{producto}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de bandejas' });
+    const codigo = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    const producto = normCod(decodeURIComponent(request.params.producto || ''));
+    if (!codigo || !producto) return json(400, { error: 'Bandeja o producto inválido' });
+    try {
+      const r = await query(
+        `DELETE FROM cat.EquipoProducto WHERE EquipoCodigo = $1 AND ProductoCodigo = $2`,
+        [codigo, producto]);
+      if (!r.rowCount) return json(404, { error: 'Ese producto no está en la bandeja' });
+      return json(200, { ok: true });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo eliminar el producto', detail: e.message });
+    }
+  }
+});
+
+/* ============================================================
    Hojas de consumo — CRUD
    ============================================================ */
 const ENC_FIELDS = [

@@ -654,6 +654,46 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       <div class="card pad" id="pedDetBody"></div>
     </section>
 
+    <!-- BANDEJAS — catálogo (solo Bodega / Administrador) -->
+    <section id="viewBandejas" class="hidden">
+      <div class="page-head">
+        <div><h2>Bandejas</h2><div class="sub">Catálogo de bandejas y los productos que lleva cada una</div></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn-ghost" onclick="loadBandejas()">🔄 Actualizar</button>
+          <button class="btn-primary" onclick="nuevaBandeja()">➕ Nueva bandeja</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap"><table id="banGrid"><thead id="banHead"></thead><tbody id="banBody"></tbody></table></div>
+        <div id="banEmpty" class="empty hidden"><div class="big">🧰</div><div>No hay bandejas en el catálogo.</div></div>
+        <div class="grid-foot" id="banFoot"></div>
+      </div>
+    </section>
+
+    <!-- BANDEJA — edición: datos de la bandeja + sus componentes -->
+    <section id="viewBandejaDet" class="hidden">
+      <div class="page-head">
+        <div><h2 id="banDetTit">Bandeja</h2><div class="sub" id="banDetSub"></div></div>
+        <button class="btn-ghost" onclick="showBandejas()">← Volver al listado</button>
+      </div>
+      <div class="card pad">
+        <div class="section-title" style="margin-top:0">Información de la bandeja</div>
+        <div class="form-grid" id="banDetForm"></div>
+        <div style="margin-top:16px;display:flex;justify-content:flex-end">
+          <button class="btn-primary" id="banSaveBtn" onclick="guardarBandeja()">💾 Guardar cambios</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <div class="pad" style="padding-bottom:4px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div class="section-title" style="margin-top:0">Componentes de la bandeja</div>
+          <button class="btn-add" onclick="abrirProducto()">➕ Agregar artículos</button>
+        </div>
+        <div class="tbl-wrap"><table id="banProdGrid"><thead id="banProdHead"></thead><tbody id="banProdBody"></tbody></table></div>
+        <div id="banProdEmpty" class="empty hidden"><div class="big">📦</div><div>Esta bandeja no tiene productos todavía. Use «Agregar artículos».</div></div>
+        <div class="grid-foot" id="banProdFoot"></div>
+      </div>
+    </section>
+
     <!-- REEMPLAZOS / CORRECCIONES (Bodega / Administrador) -->
     <section id="viewReemplazos" class="hidden">
       <div class="page-head">
@@ -693,6 +733,69 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
 </div>
 
 <!-- MODAL cargando -->
+<!-- BANDEJAS — agregar o editar un producto de la bandeja -->
+<div id="banProdModal" class="overlay hidden">
+  <div class="modal sm-md">
+    <div class="modal-head">
+      <h3 id="banProdModalTit">Agregar artículo</h3>
+      <button class="x" onclick="cerrarProducto()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Código de producto <span class="req">*</span></label>
+        <input id="banProdCod" class="code-input" type="text" autocomplete="off"
+               placeholder="Escriba el código o parte de la descripción" oninput="onBanProdCod()">
+        <div class="cat-fhint" id="banProdHint"></div>
+      </div>
+      <div class="field full">
+        <label>Descripción</label>
+        <input id="banProdDesc" type="text" readonly tabindex="-1" placeholder="Se toma del catálogo de productos">
+      </div>
+      <div class="field">
+        <label>Cantidad <span class="req">*</span></label>
+        <input id="banProdCant" type="text" inputmode="decimal" autocomplete="off" value="1"
+               oninput="banSoloCantidad(this)">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="cerrarProducto()">Cancelar</button>
+      <button class="btn-primary" id="banProdSave" onclick="guardarProducto()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- BANDEJAS — nueva bandeja -->
+<div id="banNuevaModal" class="overlay hidden">
+  <div class="modal sm-md">
+    <div class="modal-head">
+      <h3>Nueva bandeja</h3>
+      <button class="x" onclick="cerrarNuevaBandeja()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>N° de bandeja <span class="req">*</span></label>
+        <input id="banNvoNum" type="text" maxlength="60" autocomplete="off" placeholder="NUT-0001330">
+      </div>
+      <div class="field">
+        <label>Categoría</label>
+        <input id="banNvoCat" type="text" maxlength="60" autocomplete="off" placeholder="Instrumental / Implantes">
+      </div>
+      <div class="field">
+        <label>Color de demarcación</label>
+        <input id="banNvoColor" type="text" maxlength="40" autocomplete="off" placeholder="Azul">
+      </div>
+      <div class="field full">
+        <label>Descripción <span class="req">*</span></label>
+        <input id="banNvoDesc" type="text" maxlength="300" autocomplete="off">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="cerrarNuevaBandeja()">Cancelar</button>
+      <button class="btn-primary" id="banNvoSave" onclick="crearBandeja()">Crear bandeja</button>
+    </div>
+  </div>
+</div>
+
 <div id="loadModal" class="overlay hidden">
   <div class="load-modal">
     <div class="spinner"></div>
@@ -1574,6 +1677,7 @@ function buildNav(){
   if(canBodega()) items.push({id:'reemplazos',ic:'🔁',l:'Reemplazos / Correcciones',fn:showReemplazos});
   if(canBodega()) items.push({id:'trabajos',ic:'🧾',l:'Histórico Dynamics',fn:showTrabajos});
   if(canBodega()) items.push({id:'auditoria',ic:'🕵️',l:'Auditoría de cambios',fn:showAuditoria});
+  if(canBodega()) items.push({id:'bandejas',ic:'🧰',l:'Bandejas',fn:showBandejas});
   if(canBodega()) items.push({id:'config',ic:'⚙️',l:'Configuración',fn:showConfig});
   // Usuarios y roles: solo Administrador (se oculta al simular otro rol).
   if(ROL==='Administrador') items.push({id:'usuarios',ic:'👥',l:'Usuarios y roles',fn:showUsuarios});
@@ -1587,7 +1691,7 @@ function buildNav(){
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('ovl').classList.toggle('show'); }
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('ovl').classList.remove('show'); }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria'];
+const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
 
 /* ===== INICIO ===== */
@@ -3858,6 +3962,264 @@ async function impConfirm(){
     impClose(); loadCirugias();
   }catch(e){ toast('No se pudo importar: '+e.message); }
   finally{ btn.disabled=false; btn.textContent='Importar'; }
+}
+
+/* ===== BANDEJAS — catálogo y componentes (solo Bodega / Administrador) ===== */
+let BAN_ROWS=[], BAN_COLF={}, BAN_ACT=null, BAN_EDIT=null, BAN_DEL=null, BAN_DEL_T=null;
+const BAN_COLS=[
+  {k:'demarcado', l:'N° de bandeja'},
+  {k:'nombre',    l:'Descripción'},
+  {k:'categoria', l:'Categoría'},
+  {k:'color',     l:'Color'},
+  {k:'completa',  l:'Completa'}
+];
+
+async function showBandejas(){
+  if(!canBodega()){ toast('Su rol no tiene acceso'); showInicio(); return; }
+  setTab('bandejas'); showOnly('viewBandejas');
+  ensureCatalogo();          // lo necesita el selector de productos; no bloquea el grid
+  await loadBandejas();
+}
+async function loadBandejas(){
+  try{ BAN_ROWS=await api('GET','/bandejas'); }
+  catch(e){ BAN_ROWS=[]; toast('Error al cargar bandejas: '+e.message); }
+  // Texto, no booleano, para que el filtro de columna se comporte igual que en los otros grids.
+  BAN_ROWS.forEach(r=>{ r.completa = r.completo ? 'Sí' : 'No'; });
+  renderBandejas();
+}
+function banFiltered(){
+  return BAN_ROWS.filter(r=> Object.keys(BAN_COLF).every(k=>{
+    const f=(BAN_COLF[k]||'').trim().toLowerCase(); if(!f) return true;
+    return String(r[k]==null?'':r[k]).toLowerCase().includes(f);
+  }));
+}
+function onBanFilter(k,v){ BAN_COLF[k]=v; renderBandejas(); }
+function renderBandejas(){
+  const head=document.getElementById('banHead');
+  head.innerHTML=`<tr>${BAN_COLS.map(c=>`<th>${c.l}</th>`).join('')}<th>Productos</th><th></th></tr>`
+    +`<tr class="filter-row">${BAN_COLS.map(c=>`<th><input placeholder="Filtrar…" oninput="onBanFilter('${c.k}',this.value)" value="${attr(BAN_COLF[c.k])}"></th>`).join('')}<th></th><th></th></tr>`;
+  const rows=banFiltered();
+  const b=document.getElementById('banBody'); b.innerHTML='';
+  document.getElementById('banEmpty').classList.toggle('hidden', BAN_ROWS.length>0);
+  document.getElementById('banGrid').classList.toggle('hidden', BAN_ROWS.length===0);
+  const foot=document.getElementById('banFoot');
+  if(!BAN_ROWS.length){ foot.textContent=''; return; }
+  foot.textContent = rows.length===1?'1 bandeja':(rows.length+' bandejas');
+  if(!rows.length){ b.innerHTML=`<tr><td colspan="${BAN_COLS.length+2}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  rows.forEach(r=>{
+    const enc=encodeURIComponent(r.codigo);
+    const tds=BAN_COLS.map(c=>{
+      if(c.k==='demarcado')
+        return `<td><span class="link-cell" onclick="verBandeja('${enc}')" title="Abrir la bandeja">${esc(r.demarcado||r.codigo)}</span></td>`;
+      // Una bandeja incompleta muestra el motivo al pasar el mouse.
+      if(c.k==='completa')
+        return r.completo ? '<td>Sí</td>'
+                          : `<td><b title="${attr(r.motivo_incompleto||'Sin motivo registrado')}">No</b></td>`;
+      return `<td>${esc(r[c.k])}</td>`;
+    }).join('');
+    const tr=document.createElement('tr');
+    tr.innerHTML=tds+`<td>${r.productos}</td>`
+      +`<td><button class="icon-btn" onclick="verBandeja('${enc}')">✏️ Editar</button></td>`;
+    b.appendChild(tr);
+  });
+}
+
+/* ----- Nueva bandeja ----- */
+function nuevaBandeja(){
+  ['banNvoNum','banNvoDesc','banNvoCat','banNvoColor'].forEach(id=>{ document.getElementById(id).value=''; });
+  document.getElementById('banNuevaModal').classList.remove('hidden');
+  setTimeout(()=>document.getElementById('banNvoNum').focus(), 30);
+}
+function cerrarNuevaBandeja(){ document.getElementById('banNuevaModal').classList.add('hidden'); }
+async function crearBandeja(){
+  const num=document.getElementById('banNvoNum').value.trim();
+  const desc=document.getElementById('banNvoDesc').value.trim();
+  if(!num){ toast('El número de bandeja es obligatorio'); return; }
+  if(!desc){ toast('La descripción de la bandeja es obligatoria'); return; }
+  const btn=document.getElementById('banNvoSave'); btn.disabled=true;
+  try{
+    const r=await api('POST','/bandejas',{
+      codigo:num, demarcado:num, nombre:desc, completo:true,
+      categoria:document.getElementById('banNvoCat').value.trim(),
+      color:document.getElementById('banNvoColor').value.trim()
+    });
+    cerrarNuevaBandeja();
+    toast('Bandeja creada: '+(r.demarcado||r.codigo));
+    await loadBandejas();
+    verBandeja(encodeURIComponent(r.codigo));
+  }catch(e){ toast('No se pudo crear la bandeja: '+e.message); }
+  finally{ btn.disabled=false; }
+}
+
+/* ----- Edición de una bandeja ----- */
+async function verBandeja(codEnc){
+  if(!canBodega()){ toast('Su rol no tiene acceso'); return; }
+  try{ BAN_ACT=await api('GET','/bandejas/'+codEnc); }
+  catch(e){ toast('No se pudo abrir la bandeja: '+e.message); return; }
+  setTab('bandejas'); showOnly('viewBandejaDet');
+  ensureCatalogo().then(()=>{ if(BAN_ACT) renderBandejaProductos(); });
+  renderBandejaDet();
+}
+function renderBandejaDet(){
+  const b=BAN_ACT; if(!b) return;
+  document.getElementById('banDetTit').textContent = b.demarcado || b.codigo;
+  const n=(b.productos||[]).length;
+  document.getElementById('banDetSub').textContent =
+    (b.nombre||'') + ' · ' + (n===1?'1 producto':n+' productos');
+  document.getElementById('banDetForm').innerHTML=`
+    <div class="field"><label>N° de bandeja</label>
+      <input type="text" value="${attr(b.demarcado||b.codigo)}" readonly tabindex="-1"></div>
+    <div class="field"><label>Categoría</label>
+      <input id="ban_categoria" type="text" maxlength="60" autocomplete="off" value="${attr(b.categoria)}"></div>
+    <div class="field"><label>Color de demarcación</label>
+      <input id="ban_color" type="text" maxlength="40" autocomplete="off" value="${attr(b.color)}"></div>
+    <div class="field"><label>Completa</label>
+      <select id="ban_completo" onchange="onBanCompleto()">
+        <option value="1"${b.completo?' selected':''}>Sí</option>
+        <option value="0"${b.completo?'':' selected'}>No</option>
+      </select></div>
+    <div class="field full"><label>Descripción <span class="req">*</span></label>
+      <input id="ban_nombre" type="text" maxlength="300" autocomplete="off" value="${attr(b.nombre)}"></div>
+    <div class="field full${b.completo?' hidden':''}" id="ban_motivo_wrap">
+      <label>Motivo por el que está incompleta <span class="req">*</span></label>
+      <input id="ban_motivo" type="text" maxlength="300" autocomplete="off" value="${attr(b.motivo_incompleto)}"></div>`;
+  renderBandejaProductos();
+}
+function onBanCompleto(){
+  const completo=document.getElementById('ban_completo').value==='1';
+  document.getElementById('ban_motivo_wrap').classList.toggle('hidden', completo);
+}
+async function guardarBandeja(){
+  const b=BAN_ACT; if(!b) return;
+  const completo=document.getElementById('ban_completo').value==='1';
+  const nombre=document.getElementById('ban_nombre').value.trim();
+  const motivo=document.getElementById('ban_motivo').value.trim();
+  if(!nombre){ toast('La descripción de la bandeja es obligatoria'); return; }
+  if(!completo && !motivo){ toast('Indique el motivo por el que la bandeja está incompleta'); return; }
+  const btn=document.getElementById('banSaveBtn'); btn.disabled=true;
+  try{
+    const r=await api('PUT','/bandejas/'+encodeURIComponent(b.codigo), {
+      nombre, completo, motivo_incompleto: motivo,
+      categoria: document.getElementById('ban_categoria').value.trim(),
+      color: document.getElementById('ban_color').value.trim()
+    });
+    BAN_ACT={...r, productos:b.productos};
+    toast('Bandeja actualizada');
+    renderBandejaDet();
+  }catch(e){ toast('No se pudo guardar: '+e.message); }
+  finally{ btn.disabled=false; }
+}
+
+/* ----- Componentes de la bandeja ----- */
+function renderBandejaProductos(){
+  const b=BAN_ACT; if(!b) return;
+  const lista=b.productos||[];
+  document.getElementById('banProdHead').innerHTML=
+    '<tr><th>Código</th><th>Descripción</th><th>Tipo</th><th>Cantidad</th><th></th></tr>';
+  const body=document.getElementById('banProdBody'); body.innerHTML='';
+  document.getElementById('banProdEmpty').classList.toggle('hidden', lista.length>0);
+  document.getElementById('banProdGrid').classList.toggle('hidden', lista.length===0);
+  const foot=document.getElementById('banProdFoot');
+  foot.textContent = lista.length ? (lista.length===1?'1 producto':lista.length+' productos') : '';
+  lista.forEach(p=>{
+    const enc=encodeURIComponent(p.producto);
+    // Un código que ya no está en el catálogo se marca: la descripción viene de la carga inicial.
+    const desc = p.descripcion || catDesc(p.producto);
+    const aviso = (catReady() && !catCodigoValido(p.producto))
+      ? ' <span class="cat-fhint warn" title="El código ya no aparece en el catálogo de productos">⚠</span>' : '';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${esc(p.producto)}${aviso}</td><td>${esc(desc)}</td><td>${esc(p.tipo)}</td>`
+      +`<td>${esc(p.cantidad)}</td>`
+      +`<td style="white-space:nowrap">`
+      +`<button class="icon-btn" onclick="abrirProducto('${enc}')">✏️ Editar</button> `
+      +`<button class="icon-btn danger" id="banDel-${enc}" onclick="eliminarProducto('${enc}')">🗑️ Eliminar</button>`
+      +`</td>`;
+    body.appendChild(tr);
+  });
+}
+function banSoloCantidad(el){
+  // Dígitos y un solo punto decimal.
+  let v=el.value.replace(/[^\d.]/g,'');
+  const i=v.indexOf('.');
+  if(i>=0) v=v.slice(0,i+1)+v.slice(i+1).replace(/\./g,'');
+  if(v!==el.value) el.value=v;
+}
+function abrirProducto(prodEnc){
+  if(!BAN_ACT) return;
+  BAN_EDIT = prodEnc ? decodeURIComponent(prodEnc) : null;
+  const p = BAN_EDIT ? (BAN_ACT.productos||[]).find(x=>x.producto===BAN_EDIT) : null;
+  document.getElementById('banProdModalTit').textContent = BAN_EDIT ? 'Editar artículo' : 'Agregar artículo';
+  const cod=document.getElementById('banProdCod');
+  cod.value = p ? p.producto : '';
+  /* En edición el código es la llave de la línea: se cambia eliminando y volviendo
+     a agregar. Se le quita la clase code-input para que el autocompletado del
+     catálogo no se abra sobre un campo que no se puede escribir. */
+  cod.readOnly = !!BAN_EDIT;
+  cod.className = BAN_EDIT ? '' : 'code-input';
+  document.getElementById('banProdCant').value = p ? p.cantidad : 1;
+  document.getElementById('banProdModal').classList.remove('hidden');
+  onBanProdCod();
+  if(!BAN_EDIT) setTimeout(()=>cod.focus(), 30);
+}
+function cerrarProducto(){
+  document.getElementById('banProdModal').classList.add('hidden');
+  BAN_EDIT=null;
+}
+function onBanProdCod(){
+  const cod=normCod(document.getElementById('banProdCod').value);
+  const desc=document.getElementById('banProdDesc');
+  const hint=document.getElementById('banProdHint');
+  desc.value = cod ? catDesc(cod) : '';
+  if(!cod){ hint.textContent=''; hint.className='cat-fhint'; return; }
+  if(!catReady()){ hint.textContent='El catálogo de productos no está disponible; el código se guarda sin validar.'; hint.className='cat-fhint warn'; return; }
+  if(!CATALOGO.has(cod)){ hint.textContent='Ese código no existe en el catálogo de productos.'; hint.className='cat-fhint warn'; return; }
+  hint.textContent=''; hint.className='cat-fhint';
+}
+async function guardarProducto(){
+  const b=BAN_ACT; if(!b) return;
+  const producto=normCod(document.getElementById('banProdCod').value);
+  const cantidad=parseFloat(document.getElementById('banProdCant').value);
+  if(!producto){ toast('El código de producto es obligatorio'); return; }
+  if(!isFinite(cantidad)||cantidad<=0){ toast('La cantidad debe ser un número mayor que cero'); return; }
+  if(catReady() && !CATALOGO.has(producto)){ toast('Ese código no existe en el catálogo de productos'); return; }
+  const btn=document.getElementById('banProdSave'); btn.disabled=true;
+  try{
+    const base='/bandejas/'+encodeURIComponent(b.codigo)+'/productos';
+    if(BAN_EDIT){
+      const r=await api('PUT', base+'/'+encodeURIComponent(BAN_EDIT), {cantidad});
+      const i=(b.productos||[]).findIndex(x=>x.producto===BAN_EDIT);
+      if(i>=0) b.productos[i]=r;
+      toast('Cantidad actualizada');
+    }else{
+      const r=await api('POST', base, {producto, cantidad});
+      b.productos=(b.productos||[]).concat([r]).sort((x,y)=>String(x.producto).localeCompare(String(y.producto)));
+      toast('Producto agregado');
+    }
+    cerrarProducto();
+    renderBandejaDet();
+  }catch(e){ toast('No se pudo guardar: '+e.message); }
+  finally{ btn.disabled=false; }
+}
+/* Borrado en dos toques: el primero pide confirmación en el mismo botón. */
+async function eliminarProducto(prodEnc){
+  const b=BAN_ACT; if(!b) return;
+  const producto=decodeURIComponent(prodEnc);
+  const btn=document.getElementById('banDel-'+prodEnc);
+  if(BAN_DEL!==producto){
+    BAN_DEL=producto;
+    if(btn) btn.textContent='⚠️ Confirmar';
+    clearTimeout(BAN_DEL_T);
+    BAN_DEL_T=setTimeout(()=>{ BAN_DEL=null; if(btn) btn.textContent='🗑️ Eliminar'; }, 4000);
+    return;
+  }
+  clearTimeout(BAN_DEL_T); BAN_DEL=null;
+  if(btn) btn.disabled=true;
+  try{
+    await api('DELETE','/bandejas/'+encodeURIComponent(b.codigo)+'/productos/'+prodEnc);
+    b.productos=(b.productos||[]).filter(x=>x.producto!==producto);
+    toast('Producto eliminado: '+producto);
+    renderBandejaDet();
+  }catch(e){ toast('No se pudo eliminar: '+e.message); if(btn) btn.disabled=false; }
 }
 
 /* ===== Utilidades ===== */
