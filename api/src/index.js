@@ -1802,8 +1802,21 @@ app.http('solicitud-checklist', {
 });
 
 /* PUT /api/solicitudes/{id}/bandejas/{codigo}/checklist
-   Body: { productos: ["24267004", ...] } -> los que quedan marcados.
-   Se reescribe el alistado de esa bandeja: lo que no venga, se desmarca. */
+   Body: { productos: ["24267004", ...],
+           cantidades: { "24267004": 12, ... } }
+   `productos` son los que quedan marcados: se reescribe el alistado de esa
+   bandeja y lo que no venga se desmarca.
+
+   `cantidades` corrige cuantas piezas LLEVA la bandeja, en
+   cat.EquipoProducto. OJO CON EL ALCANCE: eso es el CATALOGO de la bandeja,
+   compartido por todas las solicitudes, no un dato de esta. Bodega esta
+   corrigiendo el contenido de la NUT, y la correccion vale para las
+   solicitudes futuras de esa bandeja. Es a proposito: nueve lineas vinieron
+   en cero desde SharePoint y esta es otra via para arreglarlas sin ir a la
+   pantalla de Bandejas.
+   Solo se aceptan cantidades mayores que cero, igual que la pantalla de
+   Bandejas: la API no crea ceros nuevos aunque la base los permita para los
+   que ya venian asi. */
 app.http('solicitud-checklist-guardar', {
   methods: ['PUT'], authLevel: 'anonymous', route: 'solicitudes/{id}/bandejas/{codigo}/checklist',
   handler: async (request, context) => {
@@ -1818,6 +1831,17 @@ app.http('solicitud-checklist-guardar', {
        no decide que es un componente valido. */
     const pedidos = [...new Set((Array.isArray(body && body.productos) ? body.productos : [])
       .map((x) => normCod(x)).filter(Boolean))];
+    /* Cantidades a corregir: se normaliza la llave igual que el codigo y se
+       descarta lo que no sea un numero mayor que cero. Un valor invalido se
+       ignora en silencio en vez de tumbar el guardado: perder las marcas por
+       un dedazo en una cantidad seria peor. */
+    const cants = new Map();
+    const cantBody = (body && body.cantidades && typeof body.cantidades === 'object') ? body.cantidades : {};
+    for (const k of Object.keys(cantBody)) {
+      const c = normCod(k);
+      const v = Number(cantBody[k]);
+      if (c && Number.isFinite(v) && v > 0) cants.set(c, Math.round(v * 100) / 100);
+    }
 
     const client = await getClient();
     try {
@@ -1849,6 +1873,23 @@ app.http('solicitud-checklist-guardar', {
           `INSERT INTO dbo.SolicitudAlisto (SolicitudId, EquipoCodigo, ProductoCodigo, AlistadoPor)
            VALUES ($1,$2,$3,$4)`, [id, cod, prod, user.name || user.email]);
       }
+      /* Las cantidades corregidas, solo para los productos que de verdad
+         estan en esta bandeja y solo cuando el valor cambia: asi la bitacora
+         y FechaActualizacion no se mueven por guardar sin tocar nada. */
+      let cantCambiadas = 0;
+      for (const [prod, val] of cants) {
+        if (!validos.has(prod)) continue;
+        const up = await client.query(
+          `UPDATE cat.EquipoProducto
+              SET Cantidad = $1, ActualizadoPor = $2,
+                  FechaActualizacion = (now() at time zone 'utc')
+            WHERE UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($3))
+              AND UPPER(TRIM(ProductoCodigo)) = UPPER(TRIM($4))
+              AND Cantidad <> $1`,
+          [val, user.name || user.email, cod, prod]);
+        cantCambiadas += up.rowCount || 0;
+      }
+
       /* El primer guardado marca que Bodega empezo. No se revierte sola si
          despues se desmarca todo: el trabajo ya arranco. */
       let estado = est.rows[0].estado;
@@ -1864,7 +1905,7 @@ app.http('solicitud-checklist-guardar', {
       const total = validos.size;
       return json(200, {
         estado, alistados: marcar.length, articulos: total, porcentaje: pct(marcar.length, total),
-        ignorados: pedidos.length - marcar.length
+        ignorados: pedidos.length - marcar.length, cantidades_cambiadas: cantCambiadas
       });
     } catch (e) {
       await client.query('ROLLBACK').catch(() => {});

@@ -183,7 +183,11 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 #chkGrid tbody tr.on{background:#e9f8f0}
 #chkGrid tbody tr.on:hover{background:#dcf3e6}
 #chkGrid .chk-num{width:44px;color:var(--muted)}
-#chkGrid .chk-cant{width:92px;text-align:right;white-space:nowrap}
+#chkGrid .chk-cant{width:112px;text-align:right;white-space:nowrap}
+/* Campo de cantidad dentro de la fila. Angosto y a la derecha, para que no
+   parezca un formulario sino la celda de una tabla. */
+#chkGrid .chk-cant-inp{width:84px;padding:5px 7px;text-align:right;font-size:13.5px}
+#chkGrid .chk-cero{font-weight:700}
 #chkGrid .chk-box{width:62px;text-align:center;font-size:17px;user-select:none}
 #chkGrid .chk-desc{max-width:520px;overflow:hidden;text-overflow:ellipsis}
 #chkGrid td.chk-sec{background:#f1f7fb;font-weight:700;color:var(--brand-d);text-transform:uppercase;letter-spacing:.05em;font-size:12.5px}
@@ -548,6 +552,8 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
   }
   #chkGrid.cards td.chk-desc::before{display:none}
   #chkGrid.cards td.chk-cant{grid-area:cant;text-align:left;font-size:13px;white-space:nowrap}
+  /* 16px es el minimo con el que Safari en iPhone NO hace zoom al enfocar. */
+  #chkGrid.cards .chk-cant-inp{width:92px;font-size:16px;padding:8px 9px;text-align:left}
   #chkGrid.cards td.chk-cant::before{display:inline;margin:0 5px 0 0;font-size:10px}
   /* El check crece y se centra en el alto de la tarjeta: es el objetivo del
      dedo y es lo que se escanea de un ojo al bajar la lista. */
@@ -1338,6 +1344,18 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
     <p id="dynMsg">Enviando la información a Dynamics. Este proceso puede tardar varios minutos; por favor no cierres esta ventana…</p>
     <div class="progress-track"><div class="progress-bar"></div></div>
     <p id="dynElapsed" style="color:var(--muted);font-size:13px;margin:4px 0 0">Tiempo transcurrido: 0:00</p>
+  </div>
+</div>
+
+<!-- MODAL detalle de un movimiento de la bitácora. El grid recorta el
+     detalle -son textos como «quedó en Borrador · se descartaron 82 marcas
+     del alisto · avisó a 1 cuenta»- y en la tabla hay que arrastrar de lado
+     para llegar a la columna. Aca se lee completo. -->
+<div id="bitModal" class="overlay hidden">
+  <div class="modal sm-md">
+    <div class="modal-head"><h3>Detalle del movimiento</h3><button class="x" onclick="closeBit()">×</button></div>
+    <div class="modal-body"><div id="bitModalBody" class="kv"></div></div>
+    <div class="modal-foot"><button class="btn-ghost" onclick="closeBit()">Cerrar</button></div>
   </div>
 </div>
 
@@ -5762,8 +5780,14 @@ async function abrirCheckList(codigo){
   setTab('solicitudes'); showOnly('viewCheckList');
   renderCheckList();
 }
-/* Firma de lo marcado: sirve para saber si hay cambios sin guardar. */
-function chkFirma(){ return ((CHK&&CHK.componentes)||[]).filter(c=>c.marcado).map(c=>c.producto).sort().join('|'); }
+/* Firma de lo marcado Y de las cantidades: sirve para saber si hay cambios
+   sin guardar. Las cantidades entran porque tambien se graban con «Guardar»;
+   sin ellas, corregir una cantidad y salir la perdia sin avisar. */
+function chkFirma(){
+  return ((CHK&&CHK.componentes)||[])
+    .map(c=>(c.marcado?'1':'0')+':'+c.producto+':'+c.cantidad)
+    .sort().join('|');
+}
 /* Hay dos botones de volver: el del encabezado y el de la franja pegada
    abajo. El de arriba queda inalcanzable cuando se va por el componente 73
    de una bandeja de 82, que es justo cuando uno quiere salir. El aviso de
@@ -5831,13 +5855,38 @@ function chkDesc(c){
   return d ? esc(d) : '<span class="chk-sindesc">Sin descripción en el catálogo</span>';
 }
 
-/* Cantidad tal como vino del catalogo. El 0 se senala: es un dato que hay
-   que corregir en la bandeja, no un error de esta pantalla. */
+/* Cantidad tal como vino del catalogo, para mostrar. El 0 se senala: es un
+   dato que hay que corregir en la bandeja. */
 function chkCant(v){
   const n=Number(v);
   if(!isFinite(n)) return esc(v);
   if(n===0) return '0 ⚠';
   return String(Math.round(n*100)/100).replace('.', ',');
+}
+/* La celda de cantidad. Con la solicitud abierta es un campo editable: lo que
+   se corrige aca es CUANTAS PIEZAS LLEVA LA BANDEJA, en el catalogo, no un
+   dato de esta solicitud. Vale para las solicitudes futuras de esta NUT.
+   El stopPropagation es imprescindible: la fila entera es el boton de marcar,
+   asi que sin el, tocar el campo para escribir marcaria la linea. */
+function chkCeldaCant(c, i, ro){
+  if(ro) return `<span class="${Number(c.cantidad)===0?'chk-cero':''}">${chkCant(c.cantidad)}</span>`;
+  const v=Number(c.cantidad);
+  return `<input class="chk-cant-inp${v===0?' invalid':''}" type="number" min="0.01" step="0.01"`
+    + ` inputmode="decimal" autocomplete="off" data-i="${i}" value="${attr(isFinite(v)?v:'')}"`
+    + ` title="Cantidad que lleva la bandeja. Se corrige en el catálogo."`
+    + ` onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"`
+    + ` oninput="chkCantInput(${i}, this)">`;
+}
+/* Guarda la cantidad escrita. Vacio o cero se deja como estaba en pantalla y
+   se marca el campo: la API tampoco los acepta, y borrar el campo mientras se
+   escribe no tiene que perder el valor anterior. */
+function chkCantInput(i, el){
+  const c=CHK && CHK.componentes && CHK.componentes[i]; if(!c) return;
+  const v=Number(el.value);
+  const ok=isFinite(v) && v>0;
+  el.classList.toggle('invalid', !ok);
+  if(ok) c.cantidad=Math.round(v*100)/100;
+  chkAvance();
 }
 function renderChkBody(){
   const lista=(CHK&&CHK.componentes)||[];
@@ -5873,7 +5922,7 @@ function renderChkBody(){
     tr.innerHTML=`<td class="chk-num">${n}</td>`
       +`<td class="chk-cod" data-label="Código">${esc(c.producto)}</td>`
       +`<td class="chk-desc" data-label="Descripción" title="${attr(c.descripcion)}">${chkDesc(c)}</td>`
-      +`<td class="chk-cant" data-label="Cantidad">${chkCant(c.cantidad)}</td>`
+      +`<td class="chk-cant" data-label="Cantidad">${chkCeldaCant(c, i, ro)}</td>`
       +`<td class="chk-box">${c.marcado?'✅':'⬜'}</td>`;
     b.appendChild(tr);
   });
@@ -5922,13 +5971,22 @@ async function guardarCheckList(){
   const btn=document.getElementById('chkGuardarBtn'); btn.disabled=true;
   try{
     const cod=CHK.bandeja.equipo_codigo;
+    /* Las cantidades van todas, no solo las tocadas: la API solo escribe las
+       que de verdad cambiaron -compara contra lo que hay- asi que mandarlas
+       completas es mas simple y no genera escrituras de mas. */
+    const cantidades={};
+    (CHK.componentes||[]).forEach(c=>{ cantidades[c.producto]=c.cantidad; });
     const r=await api('PUT','/solicitudes/'+CHK.solicitud.id+'/bandejas/'+encodeURIComponent(cod)+'/checklist',
-      { productos: (CHK.componentes||[]).filter(c=>c.marcado).map(c=>c.producto) });
+      { productos: (CHK.componentes||[]).filter(c=>c.marcado).map(c=>c.producto), cantidades });
     CHK.solicitud.estado=r.estado;
     if(SOL_ACT) SOL_ACT.estado=r.estado;
     CHK_ORIG=chkFirma();
     chkAvance();
-    toast('Alisto guardado: '+r.alistados+' de '+r.articulos+' componentes ('+(r.porcentaje==null?0:r.porcentaje)+'%).');
+    let m='Alisto guardado: '+r.alistados+' de '+r.articulos+' componentes ('+(r.porcentaje==null?0:r.porcentaje)+'%).';
+    if(r.cantidades_cambiadas) m+= r.cantidades_cambiadas===1
+      ? ' Se corrigió 1 cantidad en el catálogo de la bandeja.'
+      : ' Se corrigieron '+r.cantidades_cambiadas+' cantidades en el catálogo de la bandeja.';
+    toast(m);
   }catch(e){ toast('No se pudo guardar el alisto: '+e.message); }
   finally{ btn.disabled=false; }
 }
@@ -6386,7 +6444,7 @@ const CARDS_FILAS = {
   notGrid:     () => [NOT_COLS, {extras:[''], acciones:true}],
   /* La accion es lo que se lee de la fila, asi que hace de titulo; el
      detalle y el usuario se llevan el ancho entero. */
-  bitGrid:     () => [BIT_COLS, {titulo:4, ancho:['detalle','usuario']}],
+  bitGrid:     () => [BIT_COLS, {extras:[''], acciones:true, titulo:4, ancho:['detalle','usuario']}],
   /* Los envios de un pedido no tienen codigo propio: ninguna celda hace de
      titulo y todas llevan su rotulo. */
   envGrid:     () => [['Usuario','Fecha y hora','Cantidad','Lote','Estado','TR'],
@@ -6493,8 +6551,8 @@ function onBitFilterKey(e){
 function renderBitHead(){
   const head=document.getElementById('bitHead');
   if(head.dataset.listo) return;
-  head.innerHTML=`<tr>${BIT_COLS.map(c=>`<th${c.cls?' class="'+c.cls+'"':''}>${c.l}</th>`).join('')}</tr>`
-    +`<tr class="filter-row">${BIT_COLS.map(c=>`<th><input placeholder="Filtrar…" autocomplete="off" data-k="${c.k}" oninput="onBitFilter('${c.k}',this.value)" onkeydown="onBitFilterKey(event)" value="${attr(BIT_COLF[c.k])}"></th>`).join('')}</tr>`;
+  head.innerHTML=`<tr>${BIT_COLS.map(c=>`<th${c.cls?' class="'+c.cls+'"':''}>${c.l}</th>`).join('')}<th></th></tr>`
+    +`<tr class="filter-row">${BIT_COLS.map(c=>`<th><input placeholder="Filtrar…" autocomplete="off" data-k="${c.k}" oninput="onBitFilter('${c.k}',this.value)" onkeydown="onBitFilterKey(event)" value="${attr(BIT_COLF[c.k])}"></th>`).join('')}<th></th></tr>`;
   head.dataset.listo='1';
 }
 function renderBitacora(){ renderBitHead(); renderBitBody(); }
@@ -6508,8 +6566,9 @@ function renderBitBody(){
   foot.textContent = (rows.length===BIT_ROWS.length)
     ? BIT_ROWS.length+(BIT_ROWS.length===1?' movimiento':' movimientos')
     : rows.length+' de '+BIT_ROWS.length+' movimientos';
-  if(!rows.length){ b.innerHTML=`<tr class="aviso"><td colspan="${BIT_COLS.length}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
-  rows.forEach(r=>{
+  if(!rows.length){ b.innerHTML=`<tr class="aviso"><td colspan="${BIT_COLS.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  BIT_VIS=rows;
+  rows.forEach((r,i)=>{
     const tr=document.createElement('tr');
     tr.innerHTML=BIT_COLS.map(c=>{
       /* Un 403 es un intento sin permiso: se marca, porque es lo unico que
@@ -6517,10 +6576,33 @@ function renderBitBody(){
       if(c.k==='accion' && r.http===403)
         return `<td class="${c.cls} bit-nope" title="El rol no tenía permiso">${esc(r.accion)}</td>`;
       return `<td${c.cls?' class="'+c.cls+'"':''} title="${attr(r[c.k])}">${esc(r[c.k])}</td>`;
-    }).join('');
+    }).join('')
+    + `<td style="white-space:nowrap"><button class="icon-btn" onclick="verBitacora(${i})">👁️ Ver</button></td>`;
     b.appendChild(tr);
   });
 }
+/* Las filas que se estan viendo, en el mismo orden que el grid: el boton
+   manda el indice, no el id, para no depender de que la fila siga existiendo
+   en BIT_ROWS despues de un filtro. */
+let BIT_VIS=[];
+function verBitacora(i){
+  const r=BIT_VIS[i]; if(!r) return;
+  const campos=[
+    ['Fecha y hora', r.fecha],
+    ['Usuario', r.usuario],
+    ['Correo', r.usuario_email],
+    ['Rol', r.rol],
+    ['Pantalla', r.pantalla],
+    ['Acción', r.accion + (r.http===403 ? ' — el rol no tenía permiso' : '')],
+    ['Registro', r.registro],
+    ['Detalle', r.detalle],
+    ['Respuesta', 'HTTP ' + r.http]
+  ];
+  document.getElementById('bitModalBody').innerHTML=campos
+    .map(([k,v])=>`<div class="k">${esc(k)}</div><div style="white-space:pre-wrap">${esc(v)}</div>`).join('');
+  document.getElementById('bitModal').classList.remove('hidden');
+}
+function closeBit(){ document.getElementById('bitModal').classList.add('hidden'); }
 
 /* ===== Utilidades ===== */
 function esc(s){ if(s===undefined||s===null||s==='')return '—'; return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
