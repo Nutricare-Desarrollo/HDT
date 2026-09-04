@@ -5573,6 +5573,13 @@ async function despacharSolicitud(){
   }
   solResetDespacho();
   btn.disabled=true;
+  /* El modal de carga, no solo el boton deshabilitado: el despacho son dos
+     llamadas -despachar y volver a pedir el avance- y ADEMAS la API espera al
+     flujo de Power Automate del aviso antes de contestar, con un timeout de
+     20 segundos. Sin el modal parece que el clic no hizo nada y se vuelve a
+     tocar. */
+  showLoading('Enviando el equipo al hospital',
+              'Cerrando el check list y avisando a las cuentas configuradas…');
   try{
     const r=await api('POST','/solicitudes/'+s.id+'/despachar');
     SOL_ACT=r;
@@ -5589,7 +5596,7 @@ async function despacharSolicitud(){
   }catch(e){
     toast('No se pudo enviar al hospital: '+e.message);
     btn.disabled=false;
-  }
+  }finally{ hideLoading(); }
 }
 async function reabrirAlisto(){
   const s=SOL_ACT; if(!s || !s.id || !canBodega()) return;
@@ -5603,6 +5610,7 @@ async function reabrirAlisto(){
   }
   solResetDespacho();
   btn.disabled=true;
+  showLoading('Reabriendo el alisto', 'Devolviendo la solicitud a «En Preparación»…');
   try{
     const r=await api('POST','/solicitudes/'+s.id+'/reabrir');
     SOL_ACT={...SOL_ACT, ...r};
@@ -5612,7 +5620,7 @@ async function reabrirAlisto(){
     toast('Alisto reabierto: '+r.codigo+' volvió a «En Preparación».');
   }catch(e){
     toast('No se pudo reabrir: '+e.message);
-  }finally{ btn.disabled=false; }
+  }finally{ btn.disabled=false; hideLoading(); }
 }
 
 function renderSolDetalle(){
