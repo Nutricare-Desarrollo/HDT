@@ -1514,8 +1514,14 @@ app.http('solicitud-checklist', {
       if (!b.rowCount) return json(404, { error: 'Esa bandeja no está en la solicitud' });
       /* El Tipo viene de cat.EquipoProducto: es lo que separa las dos
          secciones del documento, Instrumental e Implantes. */
+      /* La descripcion se pide como descripcion_guardada a proposito: la
+         oficial la pone conDescripcion() desde el catalogo de productos, y
+         esta queda de respaldo. Leerla directo dejaba en blanco todo
+         componente que entro por 10_EquipoProducto.sql y no venia en el
+         export de SharePoint de la 21: en la bandeja NUT-10104 salian con
+         un «—» por descripcion, en pantalla y en el documento impreso. */
       const d = await query(
-        `SELECT ep.ProductoCodigo AS producto, ep.DescripcionProducto AS descripcion,
+        `SELECT ep.ProductoCodigo AS producto, ep.DescripcionProducto AS descripcion_guardada,
                 ep.Cantidad::float8 AS cantidad, COALESCE(ep.Tipo, 'SIN TIPO') AS tipo,
                 (a.Id IS NOT NULL) AS alistado
            FROM cat.EquipoProducto ep
@@ -1526,10 +1532,14 @@ app.http('solicitud-checklist', {
           WHERE UPPER(TRIM(ep.EquipoCodigo)) = UPPER(TRIM($2))
           ORDER BY COALESCE(ep.Tipo,'SIN TIPO'), ep.ProductoCodigo`, [id, cod]);
       const alistados = d.rows.filter((x) => x.alistado).length;
+      /* Mismo camino que la pantalla de Bandejas: si el flujo de productos no
+         responde, mapaCatalogo() devuelve un Map vacio y conDescripcion() cae
+         en la guardada. El check list nunca se queda sin abrir por eso. */
+      const mapa = await mapaCatalogo(context);
       return json(200, {
         solicitud: s.rows[0],
         bandeja: { ...b.rows[0], articulos: d.rowCount, alistados, porcentaje: pct(alistados, d.rowCount) },
-        componentes: d.rows
+        componentes: conDescripcion(d.rows, mapa)
       });
     } catch (e) {
       context.error(e);

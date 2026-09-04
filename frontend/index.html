@@ -173,6 +173,7 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 #chkGrid .chk-desc{max-width:520px;overflow:hidden;text-overflow:ellipsis}
 #chkGrid td.chk-sec{background:#f1f7fb;font-weight:700;color:var(--brand-d);text-transform:uppercase;letter-spacing:.05em;font-size:12.5px}
 .chk-ayuda{color:var(--muted);font-size:13px;margin:-4px 0 10px}
+.chk-sindesc{color:var(--muted);font-style:italic;font-weight:400}
 #chkAcciones{position:sticky;bottom:0;z-index:6;justify-content:space-between;align-items:center;
   margin:12px -4px 0;padding:12px 4px;background:rgba(238,243,247,.93);backdrop-filter:blur(4px);
   border-top:1px solid var(--line)}
@@ -5472,6 +5473,14 @@ function renderCheckList(){
     +'<th class="chk-cant">Cantidad</th><th class="chk-box">Check</th></tr>';
   renderChkBody();
 }
+/* Descripcion del componente. Si no hay ninguna -catalogo de productos
+   caido y sin descripcion guardada- se dice, en vez de dejar el «—» de esc()
+   haciendo de titulo de la tarjeta sin explicar nada. */
+function chkDesc(c){
+  const d=(c && c.descripcion!=null) ? String(c.descripcion).trim() : '';
+  return d ? esc(d) : '<span class="chk-sindesc">Sin descripción en el catálogo</span>';
+}
+
 /* Cantidad tal como vino del catalogo. El 0 se senala: es un dato que hay
    que corregir en la bandeja, no un error de esta pantalla. */
 function chkCant(v){
@@ -5506,7 +5515,7 @@ function renderChkBody(){
        dato: el thead se oculta y la etiqueta del encabezado se perderia. */
     tr.innerHTML=`<td class="chk-num">${n}</td>`
       +`<td class="chk-cod" data-label="Código">${esc(c.producto)}</td>`
-      +`<td class="chk-desc" data-label="Descripción" title="${attr(c.descripcion)}">${esc(c.descripcion)}</td>`
+      +`<td class="chk-desc" data-label="Descripción" title="${attr(c.descripcion)}">${chkDesc(c)}</td>`
       +`<td class="chk-cant" data-label="Cantidad">${chkCant(c.cantidad)}</td>`
       +`<td class="chk-box">${c.marcado?'✅':'⬜'}</td>`;
     b.appendChild(tr);
@@ -5714,7 +5723,7 @@ function imprimirCheckList(){
     if(c.tipo!==tipo){ tipo=c.tipo; filas+=`<tr class="sec"><td colspan="5">${attr(tipo)}</td></tr>`; }
     n++;
     filas+=`<tr><td class="n">${n}</td><td class="cod">${attr(c.producto)}</td>`
-      +`<td>${attr(c.descripcion)}</td>`
+      +`<td>${attr(c.descripcion)||'sin descripción en el catálogo'}</td>`
       +`<td class="cant">${docCant(c.cantidad)}</td>`
       +`<td class="chk">${docCasilla(c.marcado)}</td></tr>`;
   });
