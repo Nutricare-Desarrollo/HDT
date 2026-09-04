@@ -86,6 +86,22 @@ main{max-width:1200px;width:100%;margin:0 auto;padding:18px 14px 40px}
 .btn-ghost{background:#fff;color:var(--brand);border:1px solid var(--line);padding:11px 15px}
 .btn-ghost:hover{border-color:var(--brand)}
 .btn-danger{background:var(--danger);color:#fff;padding:11px 16px}
+.btn-danger:hover{background:#a02b1f}
+/* Boton de contorno que borra: el mismo .btn-ghost pero en rojo, para que se
+   distinga de «Subir Excel» y «Agregar articulos», que estan al lado. */
+.btn-ghost-danger{color:var(--danger)}
+.btn-ghost-danger:disabled{color:var(--muted);border-color:var(--line)}
+/* Columna del checkbox de seleccion, y la fila marcada. */
+#banProdGrid .bp-chk{width:42px;text-align:center}
+#banProdGrid .bp-chk input{width:17px;height:17px;margin:0;padding:0;cursor:pointer}
+#banProdGrid tbody tr.bp-sel{background:#eef7fd}
+@media(max-width:640px){
+  /* En tarjeta el checkbox se agranda -es el blanco del dedo- y va arriba,
+     antes del codigo, que es el titulo. */
+  #banProdGrid.cards td.bp-chk{order:-2;width:auto;text-align:left}
+  #banProdGrid.cards td.bp-chk input{width:22px;height:22px}
+}
+.btn-ghost-danger:hover{border-color:var(--danger)}
 .btn-dyn{background:#7a3ea8;color:#fff;padding:12px 16px;display:inline-flex;align-items:center;gap:7px}
 .btn-dyn:hover{background:#652f8c}
 .btn-dyn:disabled{opacity:.5;cursor:not-allowed}
@@ -1016,8 +1032,10 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div class="pad" style="padding-bottom:4px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
           <div class="section-title" style="margin-top:0">Componentes de la bandeja</div>
           <button class="btn-ghost" onclick="abrirBanExcel()">📄 Subir Excel</button>
+          <button class="btn-ghost btn-ghost-danger hidden" id="banVaciarBtn" onclick="eliminarSeleccionados()">🗑️ Eliminar seleccionados</button>
           <button class="btn-primary" onclick="abrirProducto()">➕ Agregar artículos</button>
         </div>
+        <div class="pad cat-hint hidden" id="banSinComp" style="padding-top:0;margin:0">Sin componentes no se puede guardar la bandeja. Agregue artículos o cárguelos con «Subir Excel».</div>
         <div class="tbl-wrap"><table id="banProdGrid" class="cards dos"><thead id="banProdHead"></thead><tbody id="banProdBody"></tbody></table></div>
         <div id="banProdEmpty" class="empty hidden"><div class="big">📦</div><div>Esta bandeja no tiene productos todavía. Use «Agregar artículos».</div></div>
         <div class="grid-foot" id="banProdFoot"></div>
@@ -1483,6 +1501,29 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       <button class="btn-ghost" onclick="banXlsPlantilla()">⬇️ Descargar plantilla</button>
       <button class="btn-ghost" onclick="document.getElementById('banXlsInput').click()">Seleccionar archivo…</button>
       <button class="btn-primary hidden" id="banXlsBtn" onclick="banXlsConfirmar()">Cargar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL aviso de eliminar los componentes marcados. No es el segundo-toque
+     de los otros borrados: aca se pueden ir OCHENTA Y DOS lineas de una vez y
+     no se puede deshacer, asi que se pide una confirmacion que se lee. -->
+<div id="banVaciarModal" class="overlay hidden">
+  <div class="modal sm">
+    <div class="modal-head"><h3>Eliminar componentes marcados</h3><button class="x" onclick="closeBanVaciar()">×</button></div>
+    <div class="modal-body">
+      <p style="margin-top:0">Se van a borrar <b id="banVaciarN">todos los componentes</b> de la bandeja
+        <b id="banVaciarCod"></b>.</p>
+      <p><b>Esto no se puede deshacer.</b> Se pueden volver a cargar con «Subir Excel» o
+        agregando los artículos de nuevo.</p>
+      <p class="cat-hint hidden" id="banVaciarTodos" style="margin:0 0 10px">Se marcaron todos: la bandeja
+        va a quedar sin componentes y así no se puede guardar su encabezado.</p>
+      <p style="color:var(--muted);font-size:13px">Las solicitudes que ya se alistaron conservan sus marcas,
+        pero su porcentaje de alisto se recalcula contra el detalle nuevo.</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="closeBanVaciar()">Cancelar</button>
+      <button class="btn-danger" id="banVaciarOk" onclick="confirmarVaciarDetalle()">Sí, eliminar</button>
     </div>
   </div>
 </div>
@@ -4812,6 +4853,14 @@ async function guardarBandeja(){
   const motivo=document.getElementById('ban_motivo').value.trim();
   if(!nombre){ toast('La descripción de la bandeja es obligatoria'); return; }
   if(!completo && !motivo){ toast('Indique el motivo por el que la bandeja está incompleta'); return; }
+  /* Sin componentes no se guarda: una bandeja configurada y sin contenido se
+     puede pedir en una solicitud y no hay nada que alistar. La API valida lo
+     mismo -y solo para la edicion del encabezado, no para el cambio de
+     estado-; esto es para no ir al servidor a que lo rechace. */
+  if(!((BAN_ACT.productos)||[]).length){
+    toast('La bandeja no tiene componentes. Agregue al menos un artículo —o cárguelos con «Subir Excel»— antes de guardar.');
+    return;
+  }
   const btn=document.getElementById('banSaveBtn'); btn.disabled=true;
   try{
     const r=await api('PUT','/bandejas/'+encodeURIComponent(b.codigo), {
@@ -4824,6 +4873,87 @@ async function guardarBandeja(){
     renderBandejaDet();
   }catch(e){ toast('No se pudo guardar: '+e.message); }
   finally{ btn.disabled=false; }
+}
+
+/* ----- Eliminar componentes por seleccion -----
+   Se marcan las lineas con el checkbox y se borran las marcadas. El checkbox
+   del encabezado marca todas, asi que esto tambien cubre «vaciar el detalle»
+   con un solo boton destructivo en vez de dos.
+   La seleccion se guarda por CODIGO de producto, no por indice de fila: el
+   grid se repinta al ordenar o al recargar la bandeja y los indices dejarian
+   de significar lo mismo. */
+let BAN_SEL=new Set();
+function banSelUno(prod, on){
+  if(on) BAN_SEL.add(prod); else BAN_SEL.delete(prod);
+  banSelRefrescar();
+}
+function banSelTodos(on){
+  BAN_SEL = on ? new Set(((BAN_ACT&&BAN_ACT.productos)||[]).map(p=>p.producto)) : new Set();
+  renderBandejaProductos();
+}
+/* Pinta el boton y el estado del «marcar todos» sin repintar la tabla: el
+   repintado en cada clic perderia el scroll en una bandeja de 82 lineas. */
+function banSelRefrescar(){
+  const lista=((BAN_ACT&&BAN_ACT.productos)||[]);
+  const n=BAN_SEL.size;
+  const btn=document.getElementById('banVaciarBtn');
+  if(btn){
+    btn.classList.toggle('hidden', lista.length===0);
+    btn.disabled = n===0;
+    btn.textContent = n ? ('🗑️ Eliminar seleccionados ('+n+')') : '🗑️ Eliminar seleccionados';
+  }
+  const todos=document.getElementById('banProdTodos');
+  if(todos){
+    todos.checked = n>0 && n===lista.length;
+    todos.indeterminate = n>0 && n<lista.length;
+  }
+  document.querySelectorAll('#banProdBody tr').forEach(tr=>{
+    const cb=tr.querySelector('input[type=checkbox]');
+    if(cb) tr.classList.toggle('bp-sel', cb.checked);
+  });
+}
+
+/* ----- Eliminar los seleccionados -----
+   Existe porque el camino normal para recargar una bandeja es vaciarla y
+   volver a subir el Excel, y hacerlo con el Eliminar de cada linea son
+   ochenta y dos clics. Por eso mismo NO usa el segundo-toque de los otros
+   borrados: se pueden ir todas las lineas de una vez y no se puede deshacer,
+   asi que la confirmacion es un modal que se lee. */
+function eliminarSeleccionados(){
+  const b=BAN_ACT; if(!b) return;
+  const n=BAN_SEL.size;
+  if(!n){ toast('Marque primero los componentes que quiere eliminar'); return; }
+  const total=((b.productos)||[]).length;
+  document.getElementById('banVaciarN').textContent = n===1
+    ? '1 componente'
+    : (n===total ? ('los '+n+' componentes') : (n+' componentes'));
+  document.getElementById('banVaciarCod').textContent=b.demarcado||b.codigo;
+  /* Si se marcaron todos, la bandeja queda vacia y con eso no se puede
+     guardar el encabezado: conviene decirlo antes, no despues. */
+  document.getElementById('banVaciarTodos').classList.toggle('hidden', n!==total);
+  document.getElementById('banVaciarOk').disabled=false;
+  document.getElementById('banVaciarModal').classList.remove('hidden');
+}
+function closeBanVaciar(){ document.getElementById('banVaciarModal').classList.add('hidden'); }
+async function confirmarVaciarDetalle(){
+  const b=BAN_ACT; if(!b) return;
+  const productos=[...BAN_SEL];
+  if(!productos.length){ closeBanVaciar(); return; }
+  const btn=document.getElementById('banVaciarOk'); btn.disabled=true;
+  showLoading('Eliminando componentes','Estamos borrando las líneas marcadas…');
+  try{
+    const enc=encodeURIComponent(b.codigo);
+    const r=await api('POST','/bandejas/'+enc+'/productos/eliminar', { productos });
+    closeBanVaciar();
+    BAN_SEL=new Set();
+    await verBandeja(enc);
+    toast('Eliminados: '+r.productos_borrados
+      +(r.productos_borrados===1?' componente. ':' componentes. ')
+      +'Quedan '+r.quedan+'.');
+  }catch(e){
+    toast('No se pudieron eliminar: '+e.message);
+    btn.disabled=false;
+  }finally{ hideLoading(); }
 }
 
 /* ----- Componentes de la bandeja: carga por Excel -----
@@ -4961,13 +5091,29 @@ function closeBanXlsErr(){ document.getElementById('banXlsErrModal').classList.a
 function renderBandejaProductos(){
   const b=BAN_ACT; if(!b) return;
   const lista=b.productos||[];
+  /* El checkbox del encabezado marca o desmarca todo. Con eso, «marcar todos
+     + Eliminar seleccionados» es el «vaciar el detalle» que se pidio primero,
+     sin tener DOS botones destructivos uno al lado del otro. */
   document.getElementById('banProdHead').innerHTML=
-    '<tr><th>Código</th><th>Descripción</th><th>Tipo</th><th>Cantidad</th><th></th></tr>';
+    '<tr><th class="bp-chk"><input type="checkbox" id="banProdTodos" onchange="banSelTodos(this.checked)"'
+    + ' title="Marcar o desmarcar todos"></th>'
+    + '<th>Código</th><th>Descripción</th><th>Tipo</th><th>Cantidad</th><th></th></tr>';
   const body=document.getElementById('banProdBody'); body.innerHTML='';
   document.getElementById('banProdEmpty').classList.toggle('hidden', lista.length>0);
   document.getElementById('banProdGrid').classList.toggle('hidden', lista.length===0);
   const foot=document.getElementById('banProdFoot');
   foot.textContent = lista.length ? (lista.length===1?'1 producto':lista.length+' productos') : '';
+  /* Solo lo que sigue existiendo puede seguir marcado. */
+  BAN_SEL=new Set([...BAN_SEL].filter(x=>lista.some(p=>p.producto===x)));
+  /* Y se avisa ANTES de que toque Guardar y le rebote: el boton queda
+     deshabilitado y dice por que. */
+  const sb=document.getElementById('banSaveBtn');
+  if(sb){
+    sb.disabled = lista.length===0;
+    sb.title = lista.length ? '' : 'Agregue al menos un artículo antes de guardar';
+  }
+  const av=document.getElementById('banSinComp');
+  if(av) av.classList.toggle('hidden', lista.length>0);
   lista.forEach(p=>{
     const enc=encodeURIComponent(p.producto);
     // Un código que ya no está en el catálogo se marca: la descripción viene de la carga inicial.
@@ -4981,7 +5127,11 @@ function renderBandejaProductos(){
     const celdaCant = (cant>0)
       ? `<td>${esc(p.cantidad)}</td>`
       : `<td><b title="Vino sin cantidad registrada desde SharePoint. Edite la línea para poner la cantidad real.">0 ⚠</b></td>`;
-    tr.innerHTML=`<td>${esc(p.producto)}${aviso}</td><td>${esc(desc)}</td><td>${esc(p.tipo)}</td>`
+    const sel=BAN_SEL.has(p.producto);
+    if(sel) tr.className='bp-sel';
+    tr.innerHTML=`<td class="bp-chk"><input type="checkbox" data-p="${attr(p.producto)}"`
+        +` ${sel?'checked':''} onchange="banSelUno('${attr(p.producto)}', this.checked)"></td>`
+      +`<td>${esc(p.producto)}${aviso}</td><td>${esc(desc)}</td><td>${esc(p.tipo)}</td>`
       +celdaCant
       +`<td style="white-space:nowrap">`
       +`<button class="icon-btn" onclick="abrirProducto('${enc}')">✏️ Editar</button> `
@@ -4989,6 +5139,7 @@ function renderBandejaProductos(){
       +`</td>`;
     body.appendChild(tr);
   });
+  banSelRefrescar();
 }
 function banSoloCantidad(el){
   // Dígitos y un solo punto decimal.
@@ -6699,8 +6850,10 @@ const CARDS_FILAS = {
   pedGrid:     () => [PED_COLS, {extras:[''], acciones:true, titulo:3}],
   remGrid:     () => [REM_COLS, {extras:[''], acciones:true, titulo:2, ancho:['diagnostico']}],
   banGrid:     () => [BAN_COLS, {extras:['Productos',''], acciones:true, ancho:['nombre']}],
-  banProdGrid: () => [['Código','Descripción','Tipo','Cantidad'],
-                      {extras:[''], acciones:true, ancho:[1]}],
+  /* La primera celda es el checkbox de seleccion: sin rotulo, y el titulo de
+     la tarjeta pasa a ser el codigo, que es la segunda. */
+  banProdGrid: () => [['','Código','Descripción','Tipo','Cantidad'],
+                      {extras:[''], acciones:true, titulo:1, ancho:[2]}],
   hosGrid:     () => [HOS_COLS, {extras:[''], acciones:true}],
   notGrid:     () => [NOT_COLS, {extras:[''], acciones:true}],
   /* La accion es lo que se lee de la fila, asi que hace de titulo; el

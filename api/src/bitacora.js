@@ -37,6 +37,7 @@ const MAPA = {
   'bandejas/{codigo}':                           { p:'Bandejas',            PUT:'Editó la bandeja',
                                                                             DELETE:'Eliminó la bandeja' },
   'bandejas/{codigo}/productos':                 { p:'Bandejas',            POST:'Agregó un producto a la bandeja' },
+  'bandejas/{codigo}/productos/eliminar':        { p:'Bandejas',            POST:'Eliminó componentes de la bandeja' },
   'bandejas/{codigo}/productos/importar':        { p:'Bandejas',            POST:'Cargó componentes desde Excel' },
   'bandejas/{codigo}/productos/{producto}':      { p:'Bandejas',            PUT:'Cambió la cantidad de un producto',
                                                                             DELETE:'Quitó un producto de la bandeja' },
@@ -94,7 +95,14 @@ function detalleDe(cuerpo) {
   /* Activar y desactivar pasan por el PUT, asi que la accion dice «Editó»:
      el detalle es lo que distingue el movimiento. */
   if (c.activo === false) partes.push('quedó desactivada');
-  if (typeof c.productos_borrados === 'number' && c.productos_borrados > 0) {
+  /* `quedan` distingue los dos borrados que devuelven productos_borrados:
+     borrar la bandeja entera (no manda `quedan`) y eliminar los componentes
+     marcados (si lo manda). Sin el else, el detalle salia repetido. */
+  if (typeof c.productos_borrados === 'number' && typeof c.quedan === 'number') {
+    partes.push(c.productos_borrados
+      + (c.productos_borrados === 1 ? ' componente eliminado, queda ' : ' componentes eliminados, quedan ')
+      + c.quedan);
+  } else if (typeof c.productos_borrados === 'number' && c.productos_borrados > 0) {
     partes.push('con sus ' + c.productos_borrados + ' componentes');
   }
   /* Carga por Excel: el resumen es lo que interesa en la bitacora. */

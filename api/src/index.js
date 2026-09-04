@@ -636,6 +636,22 @@ app.http('bandeja-update', {
        trae el campo- no reactive una bandeja desactivada. */
     const activo = (body && body.activo !== undefined) ? !!body.activo : null;
     try {
+      /* Una bandeja sin componentes no se guarda: no hay nada que alistar ni
+         que verificar, asi que no deberia poder quedar configurada y lista
+         para pedirse.
+         La regla aplica SOLO a la edicion del encabezado, no al cambio de
+         estado. El discriminador es `activo`: la pantalla de edicion no lo
+         manda y el activar/desactivar del listado si. Sin esta distincion,
+         una bandeja vacia no se podria DESACTIVAR, que es exactamente lo que
+         uno quiere hacer con ella. */
+      if (activo === null) {
+        const n = await query(
+          `SELECT COUNT(*)::int AS n FROM cat.EquipoProducto
+            WHERE UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($1))`, [codigo]);
+        if (!n.rows[0].n) {
+          return json(400, { error: 'La bandeja no tiene componentes. Agregue al menos un artículo -o cárguelos con «Subir Excel»- antes de guardar.', sin_componentes: true });
+        }
+      }
       const r = await query(
         `UPDATE cat.Equipo e
             SET Demarcado = COALESCE($1, e.Demarcado), Nombre = $2, Categoria = $3, Color = $4,
@@ -739,6 +755,54 @@ app.http('bandeja-producto-create', {
       if (e.code === '23505') return json(400, { error: 'Ese producto ya está en la bandeja. Edite la cantidad en lugar de agregarlo otra vez.' });
       context.error(e);
       return json(500, { error: 'No se pudo agregar el producto', detail: e.message });
+    }
+  }
+});
+
+/* POST /api/bandejas/{codigo}/productos/eliminar
+   Body: { productos: ["24259105", ...] } -> borra esos componentes.
+
+   Borrado por seleccion, no «vaciar todo». La lista SIEMPRE es explicita: si
+   viene vacia se responde 400 en vez de interpretarla como «todos». Asi
+   ningun body mal armado -ni un fetch a medio escribir- puede vaciar una
+   bandeja de ochenta y dos lineas por accidente. Marcar todo en la pantalla
+   manda los ochenta y dos codigos, que es lo mismo pero dicho.
+
+   No toca el alisto de ninguna solicitud: dbo.SolicitudAlisto guarda el
+   codigo del producto, asi que una solicitud ya alistada conserva sus
+   marcas; lo que cambia es contra que total se calcula el porcentaje. Es la
+   misma consecuencia que borrar un componente suelto, que ya se podia. */
+app.http('bandeja-productos-eliminar', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'bandejas/{codigo}/productos/eliminar',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de bandejas' });
+    const codigo = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!codigo) return json(400, { error: 'Código de bandeja inválido' });
+    let body = {};
+    try { body = await request.json(); } catch { body = {}; }
+    const pedidos = [...new Set((Array.isArray(body && body.productos) ? body.productos : [])
+      .map((x) => normCod(x)).filter(Boolean))];
+    if (!pedidos.length) return json(400, { error: 'No se indicó ningún componente para eliminar' });
+    try {
+      const ex = await query(`SELECT 1 FROM cat.Equipo WHERE Codigo = $1`, [codigo]);
+      if (!ex.rowCount) return json(404, { error: 'La bandeja no existe' });
+      const r = await query(
+        `DELETE FROM cat.EquipoProducto
+          WHERE UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($1))
+            AND UPPER(TRIM(ProductoCodigo)) = ANY($2::text[])`,
+        [codigo, pedidos.map((x) => x.toUpperCase())]);
+      const quedan = await query(
+        `SELECT COUNT(*)::int AS n FROM cat.EquipoProducto
+          WHERE UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($1))`, [codigo]);
+      return json(200, {
+        codigo, productos_borrados: r.rowCount || 0,
+        pedidos: pedidos.length, quedan: quedan.rows[0].n
+      });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudieron eliminar los componentes', detail: e.message });
     }
   }
 });
