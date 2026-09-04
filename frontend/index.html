@@ -179,6 +179,9 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 #chkAcciones .av{display:flex;align-items:center;gap:10px;font-size:13.5px;font-weight:700;color:var(--brand-d)}
 #chkAcciones .av .pct-track{width:120px;height:11px}
 #chkAcciones .btns{display:flex;gap:10px;flex-wrap:wrap}
+/* En escritorio alcanza el boton del encabezado; en el telefono no, por eso
+   el duplicado de la franja se enciende en el @media de mas abajo. */
+.chk-volver-abajo{display:none}
 /* Combo con filtro: se ve como un campo normal y usa el panel de .ac-box. */
 .cb-box{max-height:300px}
 .cb-input{width:100%}
@@ -477,6 +480,23 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
      dedo y es lo que se escanea de un ojo al bajar la lista. */
   #chkGrid.cards td.chk-box{grid-area:box;font-size:30px;line-height:1;align-self:center}
   #chkGrid.cards td.chk-sec{padding:9px 12px;font-size:12px}
+  /* La franja de abajo pasa a tener tres botones y los tres en una linea no
+     caben: sumaban 384px de los 382 utiles a 390px, y aparecia scroll
+     horizontal. Van en dos renglones -Volver comparte el primero con la
+     barra de avance, que es lo que se puede encoger- en la misma altura.
+     Los anchos van en minmax(0,...) para que se compriman en vez de
+     desbordar cuando Guardar pasa a «Guardar cambios» y Volver a «Salir sin
+     guardar», que son las etiquetas largas. */
+  .chk-volver-abajo{display:block}
+  #chkAcciones{
+    display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;
+    margin:12px -4px 0;padding:10px 4px;
+  }
+  #chkAcciones .av{grid-area:1/1;width:auto;margin:0;min-width:0;overflow:hidden}
+  #chkAcciones .av .pct-track{width:auto;flex:1 1 40px;min-width:28px}
+  #chkAcciones .chk-volver-abajo{grid-area:1/2;padding:8px 12px;font-size:13.5px;white-space:nowrap}
+  #chkAcciones .btns{grid-area:2/1/3/3;display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px}
+  #chkAcciones .btns button{padding:11px 10px;font-size:14px;white-space:nowrap}
   /* La ayuda ocupa dos renglones en el telefono: se le baja el cuerpo y se
      le da aire abajo para que no quede pegada a la primera tarjeta. */
   .chk-ayuda{font-size:12.5px;margin:-2px 0 12px}
@@ -953,8 +973,9 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       </div>
       <div class="sol-acciones" id="chkAcciones">
         <span class="av"><span class="pct-track"><span class="pct-fill" id="chkFill2" style="width:0%"></span></span><span id="chkPct2">0%</span></span>
+        <button class="btn-ghost chk-volver-abajo" id="chkVolverBtn2" onclick="volverDeCheckList()">← Volver</button>
         <span class="btns">
-          <button class="btn-ghost" onclick="chkLimpiar()">Desmarcar todo</button>
+          <button class="btn-ghost" id="chkLimpiarBtn" onclick="chkLimpiar()">Desmarcar todo</button>
           <button class="btn-primary" id="chkGuardarBtn" onclick="guardarCheckList()">💾 Guardar</button>
         </span>
       </div>
@@ -5398,16 +5419,27 @@ async function abrirCheckList(codigo){
 }
 /* Firma de lo marcado: sirve para saber si hay cambios sin guardar. */
 function chkFirma(){ return ((CHK&&CHK.componentes)||[]).filter(c=>c.marcado).map(c=>c.producto).sort().join('|'); }
+/* Hay dos botones de volver: el del encabezado y el de la franja pegada
+   abajo. El de arriba queda inalcanzable cuando se va por el componente 73
+   de una bandeja de 82, que es justo cuando uno quiere salir. El aviso de
+   «sin guardar» tiene que aparecer en el que el usuario esta mirando, asi
+   que se pintan los dos siempre. */
+const CHK_VOLVER=[['chkVolverBtn','← Volver a la solicitud'],['chkVolverBtn2','← Volver']];
+function chkPintarVolver(txt){
+  CHK_VOLVER.forEach(([id,base])=>{
+    const b=document.getElementById(id);
+    if(b) b.textContent = (txt===null ? base : txt);
+  });
+}
 function chkResetVolver(){
   clearTimeout(CHK_SALIR_T); CHK_SALIR=false;
-  const b=document.getElementById('chkVolverBtn');
-  if(b) b.textContent='← Volver a la solicitud';
+  chkPintarVolver(null);
 }
 /* Salir con cambios pide un segundo toque. La app no usa confirm(). */
 function volverDeCheckList(){
   if(chkFirma()!==CHK_ORIG && !CHK_SALIR){
     CHK_SALIR=true;
-    const b=document.getElementById('chkVolverBtn'); if(b) b.textContent='⚠️ Salir sin guardar';
+    chkPintarVolver('⚠️ Salir sin guardar');
     clearTimeout(CHK_SALIR_T);
     CHK_SALIR_T=setTimeout(chkResetVolver, 4500);
     toast('Hay marcas sin guardar. Toque otra vez para salir y perderlas.');
