@@ -702,9 +702,36 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
 .cal-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
 .cal-nav{display:flex;gap:6px;align-items:center}
 .cal-title{font-weight:700;color:var(--brand-d);font-size:16px}
+/* Selector de vista: Agenda / Mes / Semana. Segmentado y no tres botones
+   sueltos, porque son opciones excluyentes de LO MISMO. */
+.cal-views{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff}
+.cal-views button{border:0;background:#fff;color:var(--brand-d);font-weight:600;font-size:13px;
+  padding:8px 14px;cursor:pointer;border-radius:0}
+.cal-views button + button{border-left:1px solid var(--line)}
+.cal-views button:hover{background:#eef7fd}
+.cal-views button.on{background:var(--brand);color:#fff}
+.cal-head .cal-views{margin-left:auto}
+.cir-acciones{display:flex;gap:10px;flex-wrap:wrap}
 .mes-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
 .mes-grid .dow{font-size:12px;font-weight:700;color:var(--muted);text-align:center;padding:4px 0}
+.mes-grid .dow .dow-c{display:none}
 .mes-cell{min-height:96px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:4px;display:flex;flex-direction:column;gap:3px;cursor:pointer;overflow:hidden}
+/* Los puntos son el resumen del dia cuando la celda es demasiado angosta para
+   leer el procedimiento. En escritorio no se ven: ahi caben las pastillas. */
+.mes-dots{display:none;gap:3px;flex-wrap:wrap;align-content:flex-start}
+.mes-dots i{width:7px;height:7px;border-radius:50%;background:var(--brand);display:block}
+.mes-dots i.Realizada{background:var(--ok)}
+.mes-dots i.Cancelada{background:var(--danger)}
+.mes-dots b{font-size:9px;font-weight:700;color:var(--muted);line-height:7px}
+/* Tira del mes de la Agenda: la misma cuadricula, pero solo numero y puntos.
+   Sirve para ver de un golpe donde hay cirugias y saltar al dia. */
+.mes-grid.tira{gap:3px;margin-bottom:14px}
+.mes-grid.tira .mes-cell{min-height:38px;padding:3px;gap:2px;align-items:center;justify-content:center;border-radius:7px}
+.mes-grid.tira .mes-cell .dnum{align-self:center;font-size:13px}
+.mes-grid.tira .mes-cell.con{border-color:var(--brand);background:#f2f9fe}
+.mes-grid.tira .mes-dots{display:flex;justify-content:center}
+.mes-grid.tira .cir-pill{display:none}
+.ag-resumen{font-size:13px;color:var(--muted);margin:0 0 10px}
 .mes-cell.otro{background:#f5f7f9;color:var(--muted)}
 .mes-cell.hoy{border-color:var(--accent);box-shadow:0 0 0 2px rgba(18,164,180,.2)}
 .mes-cell .dnum{font-size:12px;font-weight:700;align-self:flex-end}
@@ -719,12 +746,39 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
 .sem-day .srow{display:flex;gap:10px;padding:8px 12px;border-top:1px solid var(--line);cursor:pointer;align-items:center;flex-wrap:wrap}
 .sem-day .srow:hover{background:#f5fafc}
 .sem-day .hora{font-weight:700;color:var(--brand-d);min-width:52px}
+.sem-day .srow-txt{flex:1 1 100%;min-width:0;line-height:1.4}
+.sem-day .srow-sub{color:var(--muted);font-size:12.5px}
 .sem-empty{padding:10px 12px;color:var(--muted);font-size:13px}
 
 @media(max-width:640px){
   main{padding:14px 10px 40px}
   .kv{grid-template-columns:1fr}
   .kv .k{font-weight:700;color:var(--brand-d);margin-top:6px}
+  /* --- Calendario de cirugias en celular ---
+     Siete columnas en 390px dan celdas de ~50px: ahi el procedimiento no se
+     puede leer y las pastillas quedaban en «12:...». Se cambian por puntos y
+     el detalle se ve tocando el dia. */
+  .mes-grid{gap:3px}
+  .mes-grid .dow{font-size:11px}
+  .mes-grid .dow .dow-l{display:none}
+  .mes-grid .dow .dow-c{display:inline}
+  .mes-cell{min-height:46px;padding:3px;gap:2px;align-items:center;justify-content:flex-start}
+  .mes-cell .dnum{align-self:center}
+  .mes-cell .cir-pill{display:none}
+  .mes-cell .mes-mas{display:none}
+  .mes-dots{display:flex;justify-content:center}
+  /* La barra de la pantalla: los tres botones se apilaban en tres filas.
+     Los dos secundarios comparten fila y el de programar queda ancho. */
+  .cir-acciones{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
+  .cir-acciones button{width:100%;justify-content:center;padding:10px 8px}
+  .cir-acciones .btn-primary{grid-column:1 / -1}
+  .cal-head{gap:8px}
+  .cal-head .cal-title{flex:1 1 auto;text-align:right;font-size:15px}
+  .cal-views{display:grid;grid-template-columns:repeat(3,1fr);width:100%}
+  .cal-views button + button{border-left:1px solid var(--line)}
+  .sem-day h4{font-size:13px;line-height:1.35}
+  .sem-day .srow{gap:4px 10px}
+  .sem-day .hora{min-width:46px}
 }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -1195,7 +1249,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
     <section id="viewCirugias" class="hidden">
       <div class="page-head">
         <div><h2>Cirugías</h2><div class="sub">Planeación quirúrgica</div></div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div class="cir-acciones">
           <button class="btn-ghost" onclick="loadCirugias()">🔄 Actualizar</button>
           <button class="btn-ghost" onclick="impOpen()">⬆️ Importar Excel</button>
           <button class="btn-primary" onclick="openCirForm()">＋ Programar cirugía</button>
@@ -1208,7 +1262,11 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
           <button class="btn-ghost" onclick="cirNav(1)">→</button>
         </div>
         <div class="cal-title" id="cirTitle"></div>
-        <div style="margin-left:auto"><button class="btn-ghost" id="cirToggle" onclick="cirToggle()">Ver semana</button></div>
+        <div class="cal-views" id="cirViews">
+          <button data-v="agenda" onclick="cirVista('agenda')">Agenda</button>
+          <button data-v="mes" onclick="cirVista('mes')">Mes</button>
+          <button data-v="semana" onclick="cirVista('semana')">Semana</button>
+        </div>
       </div>
       <div id="cirCal"></div>
     </section>
@@ -4300,10 +4358,20 @@ function openImg(src){ document.getElementById('imgModalBody').innerHTML=`<img s
 function closeImg(){ document.getElementById('imgModal').classList.add('hidden'); document.getElementById('imgModalBody').innerHTML=''; }
 
 /* ===== CIRUGÍAS (calendario) — Hospital / Administrador ===== */
-let CIR_VIEW='mes', CIR_REF=null, CIR_ROWS=[], CIR_EDIT=null, CUR_CIR=null;
+let CIR_VIEW=null, CIR_REF=null, CIR_ROWS=[], CIR_EDIT=null, CUR_CIR=null;
+/* La vista arranca segun el tamano de pantalla -Agenda en celular, Mes en
+   escritorio- pero solo la PRIMERA vez: si el usuario elige una, esa manda
+   para el resto de la sesion. */
+const cirEsMovil = () => window.matchMedia('(max-width:640px)').matches;
+const CIR_MAX_DOTS = 4;   // puntos visibles por dia antes del «+N»
 const CIR_MAX_DIA=5; // cirugías visibles por día en las vistas de mes y semana (el resto va en "Ver más")
 const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const DOW=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+const DOW1=['L','M','M','J','V','S','D'];
+/* Dos rotulos por columna; el CSS muestra el que quepa. En 390px «Lun Mar Mié»
+   ya no cabe sin apretar la celda. */
+const cirEncabezadoDow = () => DOW.map((d,i)=>
+  `<div class="dow"><span class="dow-l">${d}</span><span class="dow-c">${DOW1[i]}</span></div>`).join('');
 const CIR_FORM=[
   {k:'fecha_cirugia',l:'Fecha de cirugía',t:'date',req:true},{k:'hora_inicio',l:'Hora inicio',t:'time'},
   {k:'hora_fin',l:'Hora fin',t:'time'},{k:'tiempo',l:'Tiempo (ej. 2 Hora(s))'},
@@ -4320,11 +4388,23 @@ async function showCirugias(){
   if(!canSubir()){ toast('Su rol no tiene acceso'); showInicio(); return; }
   setTab('cirugias'); showOnly('viewCirugias');
   if(!CIR_REF) CIR_REF=cirTodayStr();
+  if(!CIR_VIEW) CIR_VIEW = cirEsMovil() ? 'agenda' : 'mes';
+  cirPintarVistas();
   await loadCirugias();
+}
+/* Cuantas filas de semana hay que dibujar. Un mes ocupa 4, 5 o 6 semanas segun
+   en que dia caiga el 1; dibujar siempre 6 dejaba una fila entera de dias del
+   mes siguiente, que en celular es puro espacio perdido. */
+function cirSemanasDelMes(ref){
+  const first=new Date(ref.getFullYear(),ref.getMonth(),1);
+  const dias=new Date(ref.getFullYear(),ref.getMonth()+1,0).getDate();
+  return Math.ceil((((first.getDay()+6)%7) + dias) / 7);
 }
 function cirRango(){
   const ref=cirParse(CIR_REF);
-  if(CIR_VIEW==='mes'){
+  /* Agenda y Mes miran el MISMO rango: el mes completo. Solo cambia como se
+     dibuja, asi que navegar y recargar es igual para las dos. */
+  if(CIR_VIEW!=='semana'){
     const first=new Date(ref.getFullYear(),ref.getMonth(),1), last=new Date(ref.getFullYear(),ref.getMonth()+1,0);
     const start=new Date(first); start.setDate(first.getDate()-((first.getDay()+6)%7));
     const end=new Date(last); end.setDate(last.getDate()+(6-((last.getDay()+6)%7)));
@@ -4341,21 +4421,53 @@ async function loadCirugias(){
   renderCir();
 }
 function cirByDay(){ const m={}; CIR_ROWS.forEach(c=>{ const k=c.fecha_cirugia||''; (m[k]=m[k]||[]).push(c); }); return m; }
-function cirNav(dir){ const ref=cirParse(CIR_REF); if(CIR_VIEW==='mes') ref.setMonth(ref.getMonth()+dir); else ref.setDate(ref.getDate()+7*dir); CIR_REF=cirFmt(ref); loadCirugias(); }
+function cirNav(dir){ const ref=cirParse(CIR_REF); if(CIR_VIEW==='semana') ref.setDate(ref.getDate()+7*dir); else ref.setMonth(ref.getMonth()+dir); CIR_REF=cirFmt(ref); loadCirugias(); }
 function cirHoy(){ CIR_REF=cirTodayStr(); loadCirugias(); }
-function cirToggle(){ CIR_VIEW=CIR_VIEW==='mes'?'semana':'mes'; document.getElementById('cirToggle').textContent=CIR_VIEW==='mes'?'Ver semana':'Ver mes'; loadCirugias(); }
-function renderCir(){ CIR_VIEW==='mes'?renderMes():renderSemana(); }
+function cirPintarVistas(){
+  document.querySelectorAll('#cirViews button').forEach(b=>b.classList.toggle('on', b.dataset.v===CIR_VIEW));
+}
+function cirVista(v){
+  if(v===CIR_VIEW) return;
+  const eraSemana = CIR_VIEW==='semana';
+  CIR_VIEW=v; cirPintarVistas();
+  /* Cambiar entre Agenda y Mes no pide datos: es el mismo mes ya cargado.
+     Entrar o salir de Semana si, porque el rango cambia. */
+  if(eraSemana || v==='semana') loadCirugias(); else renderCir();
+}
+function renderCir(){
+  if(CIR_VIEW==='semana') return renderSemana();
+  if(CIR_VIEW==='agenda') return renderAgenda();
+  renderMes();
+}
+/* Resumen del dia para las celdas angostas: un punto por cirugia, con el color
+   del estado, y «+N» si no caben. */
+function cirDots(dia){
+  if(!dia.length) return '';
+  const p=dia.slice(0,CIR_MAX_DOTS).map(c=>`<i class="${esc(c.estado)}" title="${attr((c.hora_inicio||'').slice(0,5)+' '+(c.cirugia||''))}"></i>`).join('');
+  const mas=dia.length>CIR_MAX_DOTS ? `<b>+${dia.length-CIR_MAX_DOTS}</b>` : '';
+  return `<div class="mes-dots">${p}${mas}</div>`;
+}
+/* En celular tocar el dia MUESTRA el dia. Antes abria directo el formulario de
+   cirugia nueva: con celdas de 50px eso se disparaba sin querer, y para ver lo
+   que ya habia programado no quedaba donde tocar. En escritorio se conserva,
+   que ahi el clic en la celda vacia es la forma rapida de programar. */
+function cirTocarDia(ds){
+  if(cirEsMovil() || (cirByDay()[ds]||[]).length) openCirDia(ds);
+  else openCirForm(null, ds);
+}
 function cirPill(c){ return `<div class="cir-pill ${esc(c.estado)}" onclick="event.stopPropagation();openCirDet(${c.id})" title="${attr((c.hora_inicio||'')+' '+(c.cirugia||''))}">${esc((c.hora_inicio||'').slice(0,5))} ${esc(c.cirugia||c.paciente||'Cirugía')}</div>`; }
 function renderMes(){
   const ref=cirParse(CIR_REF); document.getElementById('cirTitle').textContent=MESES[ref.getMonth()]+' '+ref.getFullYear();
   let cur=cirParse(cirRango().desde); const byDay=cirByDay(), hoy=cirTodayStr(), mesRef=ref.getMonth();
-  let html='<div class="mes-grid">'+DOW.map(d=>`<div class="dow">${d}</div>`).join('');
-  for(let w=0;w<6;w++){ for(let d=0;d<7;d++){
+  let html='<div class="mes-grid">'+cirEncabezadoDow();
+  for(let w=0;w<cirSemanasDelMes(ref);w++){ for(let d=0;d<7;d++){
     const ds=cirFmt(cur), otro=cur.getMonth()!==mesRef?' otro':'', esHoy=ds===hoy?' hoy':'';
     const dia=(byDay[ds]||[]).slice().sort((a,b)=>String(a.hora_inicio||'').localeCompare(String(b.hora_inicio||'')));
     let items=dia.slice(0,CIR_MAX_DIA).map(cirPill).join('');
     if(dia.length>CIR_MAX_DIA) items+=`<div class="mes-mas" onclick="event.stopPropagation();openCirDia('${ds}')">Ver más (${dia.length-CIR_MAX_DIA})</div>`;
-    html+=`<div class="mes-cell${otro}${esHoy}" onclick="openCirForm(null,'${ds}')"><span class="dnum">${cur.getDate()}</span>${items}</div>`;
+    /* Se dibujan las DOS cosas y el CSS decide cual se ve segun el ancho. Asi
+       girar el telefono no necesita repintar. */
+    html+=`<div class="mes-cell${otro}${esHoy}" onclick="cirTocarDia('${ds}')"><span class="dnum">${cur.getDate()}</span>${cirDots(dia)}${items}</div>`;
     cur.setDate(cur.getDate()+1);
   } }
   html+='</div>'; document.getElementById('cirCal').innerHTML=html;
@@ -4366,27 +4478,90 @@ function renderSemana(){
   let html='<div class="sem-list">';
   for(let d=0;d<7;d++){
     const ds=cirFmt(cur);
-    const items=(byDay[ds]||[]).slice().sort((a,b)=>String(a.hora_inicio||'').localeCompare(String(b.hora_inicio||'')));
+    const items=cirOrden(byDay[ds]);
     const cnt=items.length?` (${items.length})`:'';
     html+=`<div class="sem-day"><h4>${DOW[d]} ${cur.getDate()} de ${MESES[cur.getMonth()]}${cnt}${ds===hoy?' · hoy':''} <button class="btn-ghost" style="float:right;padding:2px 8px;font-size:12px" onclick="openCirForm(null,'${ds}')">＋</button></h4>`;
     if(!items.length) html+='<div class="sem-empty">Sin cirugías.</div>';
     else {
-      items.slice(0,CIR_MAX_DIA).forEach(c=>{ html+=`<div class="srow" onclick="openCirDet(${c.id})"><span class="hora">${esc((c.hora_inicio||'').slice(0,5)||'—')}</span><span class="cir-pill ${esc(c.estado)}">${esc(c.estado)}</span><span>${esc(c.cirugia||'Cirugía')} · ${esc(c.paciente||'')} · ${esc(c.cirujano||'')}</span></div>`; });
+      items.slice(0,CIR_MAX_DIA).forEach(c=>{ html+=cirFila(c); });
       if(items.length>CIR_MAX_DIA) html+=`<div class="srow" style="justify-content:center;cursor:pointer" onclick="openCirDia('${ds}')"><span class="mes-mas">Ver más (${items.length-CIR_MAX_DIA})</span></div>`;
     }
     html+='</div>'; cur.setDate(cur.getDate()+1);
   }
   html+='</div>'; document.getElementById('cirCal').innerHTML=html;
 }
-/* Modal con TODAS las cirugías de un día (desde el chip "Ver más" de la vista de mes). */
+/* ----- Vista Agenda -----
+   Pensada para el celular: la cuadricula de mes en pantalla angosta deja
+   celdas de ~50px, donde no cabe ni la hora. Aca arriba va una tira del mes
+   -para ubicarse y saltar a un dia- y debajo la lista de los dias que SI
+   tienen cirugias, con hora, procedimiento, paciente y cirujano completos.
+   Los dias vacios no ocupan lugar: eran cinco sextos de la pantalla. */
+function renderAgenda(){
+  const ref=cirParse(CIR_REF);
+  document.getElementById('cirTitle').textContent=MESES[ref.getMonth()]+' '+ref.getFullYear();
+  const byDay=cirByDay(), hoy=cirTodayStr(), mesRef=ref.getMonth();
+  let cur=cirParse(cirRango().desde);
+  let html='<div class="mes-grid tira">'+cirEncabezadoDow();
+  for(let w=0;w<cirSemanasDelMes(ref);w++){ for(let d=0;d<7;d++){
+    const ds=cirFmt(cur), dia=byDay[ds]||[];
+    const cls=(cur.getMonth()!==mesRef?' otro':'')+(ds===hoy?' hoy':'')+(dia.length?' con':'');
+    html+=`<div class="mes-cell${cls}" onclick="cirTocarDia('${ds}')" title="${attr(cirDiaLabel(ds))}">`
+        + `<span class="dnum">${cur.getDate()}</span>${cirDots(dia)}</div>`;
+    cur.setDate(cur.getDate()+1);
+  } }
+  html+='</div>';
+
+  /* Solo los dias DEL MES de referencia: el rango trae el relleno de la
+     primera y ultima semana, y esas cirugias pertenecen al mes vecino. */
+  const dias=Object.keys(byDay).filter(k=>cirParse(k).getMonth()===mesRef).sort();
+  const total=dias.reduce((a,k)=>a+byDay[k].length,0);
+  html+=`<p class="ag-resumen">${total
+    ? '<b>'+total+'</b> '+(total===1?'cirugía':'cirugías')+' en '+MESES[mesRef]+', en '+dias.length+(dias.length===1?' día.':' días.')
+    : 'Sin cirugías programadas en '+MESES[mesRef]+'.'}</p>`;
+  if(!total){
+    html+='<div class="sem-day"><div class="sem-empty" style="text-align:center;padding:22px 12px">'
+        + 'Nada programado este mes.<br><button class="btn-primary" style="margin-top:12px" onclick="openCirForm()">＋ Programar cirugía</button>'
+        + '</div></div>';
+  } else {
+    html+='<div class="sem-list">';
+    dias.forEach(ds=>{
+      const items=cirOrden(byDay[ds]);
+      html+=`<div class="sem-day"><h4>${cirDiaLabel(ds).toUpperCase()} · ${items.length}`
+          + `${ds===hoy?' · HOY':''}`
+          + ` <button class="btn-ghost" style="float:right;padding:2px 8px;font-size:12px" onclick="event.stopPropagation();openCirForm(null,'${ds}')" title="Programar en esta fecha">＋</button></h4>`;
+      items.forEach(c=>{ html+=cirFila(c); });
+      html+='</div>';
+    });
+    html+='</div>';
+  }
+  document.getElementById('cirCal').innerHTML=html;
+}
+const cirOrden = l => (l||[]).slice().sort((a,b)=>String(a.hora_inicio||'').localeCompare(String(b.hora_inicio||'')));
+/* Una sola fila para Semana, Agenda y el modal del dia: antes estaba escrita
+   tres veces y cualquier arreglo habia que hacerlo tres veces. */
+function cirFila(c, alCerrarModal){
+  const antes = alCerrarModal ? 'closeCirDia();' : '';
+  const sub=[c.paciente, c.cirujano, c.ubicacion].filter(Boolean).map(esc).join(' · ');
+  return `<div class="srow" onclick="${antes}openCirDet(${c.id})">`
+    + `<span class="hora">${esc((c.hora_inicio||'').slice(0,5)||'—')}</span>`
+    + `<span class="cir-pill ${esc(c.estado)}">${esc(c.estado)}</span>`
+    + `<span class="srow-txt"><b>${esc(c.cirugia||'Cirugía')}</b>${sub?'<br><span class="srow-sub">'+sub+'</span>':''}</span>`
+    + `</div>`;
+}
+
+/* Modal con TODAS las cirugías de un día (desde la tira, la celda del mes o el
+   chip "Ver más"). Trae el boton de programar: en celular el toque en el dia
+   ya no abre el formulario, asi que este es el camino para agregar. */
 function cirDiaLabel(ds){ const d=cirParse(ds); return DOW[(d.getDay()+6)%7]+' '+d.getDate()+' de '+MESES[d.getMonth()]; }
 function openCirDia(ds){
-  const items=(cirByDay()[ds]||[]).slice().sort((a,b)=>String(a.hora_inicio||'').localeCompare(String(b.hora_inicio||'')));
+  const items=cirOrden(cirByDay()[ds]);
   document.getElementById('cirDiaTitle').textContent='Cirugías · '+cirDiaLabel(ds)+' ('+items.length+')';
   let html='<div class="sem-day" style="border:0">';
-  if(!items.length) html+='<div class="sem-empty">Sin cirugías.</div>';
-  else items.forEach(c=>{ html+=`<div class="srow" onclick="closeCirDia();openCirDet(${c.id})"><span class="hora">${esc((c.hora_inicio||'').slice(0,5)||'—')}</span><span class="cir-pill ${esc(c.estado)}">${esc(c.estado)}</span><span>${esc(c.cirugia||'Cirugía')} · ${esc(c.paciente||'')} · ${esc(c.cirujano||'')}</span></div>`; });
+  if(!items.length) html+='<div class="sem-empty">Sin cirugías programadas este día.</div>';
+  else items.forEach(c=>{ html+=cirFila(c, true); });
   html+='</div>';
+  html+=`<div style="margin-top:14px"><button class="btn-primary" style="width:100%;justify-content:center"`
+      + ` onclick="closeCirDia();openCirForm(null,'${ds}')">＋ Programar cirugía este día</button></div>`;
   document.getElementById('cirDiaBody').innerHTML=html;
   document.getElementById('cirDiaModal').classList.remove('hidden');
 }
