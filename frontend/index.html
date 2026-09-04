@@ -134,9 +134,13 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 #notGrid .not-mail{max-width:340px;overflow:hidden;text-overflow:ellipsis}
 /* Bitácora: usuario, acción y detalle se recortan en la tabla; en tarjeta el
    @media de .cards les devuelve el ancho. */
-#bitGrid .bit-user{max-width:190px;overflow:hidden;text-overflow:ellipsis}
+#bitGrid .bit-user{max-width:170px;overflow:hidden;text-overflow:ellipsis}
 #bitGrid .bit-acc{max-width:260px;overflow:hidden;text-overflow:ellipsis}
-#bitGrid .bit-det{max-width:320px;overflow:hidden;text-overflow:ellipsis}
+/* El detalle es la columna que empujaba la tabla y dejaba el boton «Ver»
+   fuera de la pantalla. Se acorta: el texto completo sigue en el title y,
+   sobre todo, en el modal, que es para lo que existe. */
+#bitGrid .bit-det{max-width:190px;overflow:hidden;text-overflow:ellipsis}
+
 #bitGrid .bit-nope{color:var(--danger);font-weight:700}
 #notGrid .not-si{color:#1c7a54;font-weight:700}
 #notGrid .not-no{color:var(--muted)}
