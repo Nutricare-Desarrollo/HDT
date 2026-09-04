@@ -982,7 +982,8 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
     <section id="viewBandejas" class="hidden">
       <div class="page-head">
         <div><h2>Bandejas</h2><div class="sub">Catálogo de bandejas y los productos que lleva cada una</div></div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <label class="hos-chk"><input type="checkbox" id="banVerInactivas" onchange="renderBanBody()"> Ver desactivadas</label>
           <button class="btn-ghost" onclick="loadBandejas()">🔄 Actualizar</button>
           <button class="btn-primary" onclick="nuevaBandeja()">➕ Nueva bandeja</button>
         </div>
@@ -4534,7 +4535,10 @@ const BAN_COLS=[
   {k:'nombre',    l:'Descripción', cls:'ban-desc'},
   {k:'categoria', l:'Categoría'},
   {k:'color',     l:'Color'},
-  {k:'completa',  l:'Completa'}
+  {k:'completa',  l:'Completa'},
+  /* Activa o desactivada. No es lo mismo que «Completa»: Completa dice si a
+     la bandeja le falta algo, Estado si sigue en el catalogo. */
+  {k:'estado',    l:'Estado'}
 ];
 
 async function showBandejas(){
@@ -4552,7 +4556,13 @@ async function loadBandejas(){
   BAN_ROWS.forEach(r=>{ r.completa = r.completo ? 'Sí' : 'No'; });
   renderBandejas();
 }
-function banFiltered(){ return cardsFiltrar('banGrid', BAN_ROWS, BAN_COLF, BAN_COLS); }
+function banFiltered(){
+  /* El checkbox va antes de los filtros: es el alcance del listado, no un
+     filtro mas. Mismo criterio que Hospitales. */
+  const el=document.getElementById('banVerInactivas');
+  const ver=!!(el && el.checked);
+  return cardsFiltrar('banGrid', BAN_ROWS.filter(r=>ver||r.activo!==false), BAN_COLF, BAN_COLS);
+}
 /* El encabezado se dibuja UNA sola vez. Si se redibujara en cada tecla se
    destruiria el input donde el usuario esta escribiendo y se perderia el foco
    -solo entraria la primera letra-, que es como estaba antes. */
@@ -4562,6 +4572,60 @@ function renderBanHead(){
   head.innerHTML=`<tr>${BAN_COLS.map(c=>`<th${c.cls?' class="'+c.cls+'"':''}>${c.l}</th>`).join('')}<th>Productos</th><th></th></tr>`
     +`<tr class="filter-row">${BAN_COLS.map(c=>`<th><input placeholder="Filtrar…" autocomplete="off" data-k="${c.k}" oninput="onBanFilter('${c.k}',this.value)" onkeydown="onBanFilterKey(event)" value="${attr(BAN_COLF[c.k])}"></th>`).join('')}<th></th><th></th></tr>`;
   head.dataset.listo='1';
+}
+/* Activa o desactiva. Va por el PUT, que solo toca Activo cuando el campo
+   viene en el body: asi guardar desde el modal de edicion no reactiva nada. */
+async function cambiarEstadoBandeja(enc, activo){
+  const cod=decodeURIComponent(enc);
+  const r=BAN_ROWS.find(x=>String(x.codigo)===String(cod)); if(!r) return;
+  try{
+    const upd=await api('PUT','/bandejas/'+enc, {
+      /* El PUT exige la descripcion y valida Completo/motivo, asi que se le
+         reenvia lo que ya tiene la fila: esto no es una edicion, es un
+         cambio de estado. */
+      demarcado:r.demarcado, nombre:r.nombre, categoria:r.categoria, color:r.color,
+      completo:r.completo, motivo_incompleto:r.motivo_incompleto, activo
+    });
+    Object.assign(r, upd);
+    toast((activo?'Bandeja activada: ':'Bandeja desactivada: ')+(r.demarcado||r.codigo));
+    renderBanBody();
+  }catch(e){ toast('No se pudo cambiar el estado: '+e.message); }
+}
+/* Elimina de verdad, y solo si nunca se uso. Pide un segundo toque, igual que
+   los otros borrados de la app: la app no usa confirm().
+   Variable propia y NO la BAN_DEL de arriba, que es la confirmacion de borrar
+   un PRODUCTO de la bandeja: compartirla haria que confirmar un borrado
+   dejara el otro a medio confirmar. */
+let BAN_DELB=null, BAN_DELB_T=null;
+async function eliminarBandeja(enc){
+  const cod=decodeURIComponent(enc);
+  const r=BAN_ROWS.find(x=>String(x.codigo)===String(cod)); if(!r) return;
+  const btn=document.getElementById('banDelBtn-'+enc);
+  if(BAN_DELB!==cod){
+    BAN_DELB=cod;
+    if(btn) btn.textContent='⚠️ Confirmar';
+    toast('Se elimina la bandeja '+(r.demarcado||cod)
+      + (r.productos ? ' y sus '+r.productos+(r.productos===1?' componente':' componentes') : '')
+      + '. Toque otra vez para confirmar.');
+    clearTimeout(BAN_DELB_T);
+    BAN_DELB_T=setTimeout(()=>{ BAN_DELB=null; renderBanBody(); }, 5000);
+    return;
+  }
+  clearTimeout(BAN_DELB_T); BAN_DELB=null;
+  if(btn) btn.disabled=true;
+  try{
+    const out=await api('DELETE','/bandejas/'+enc);
+    BAN_ROWS=BAN_ROWS.filter(x=>String(x.codigo)!==String(cod));
+    renderBanBody();
+    toast('Bandeja eliminada: '+(out.demarcado||cod)
+      + (out.productos_borrados ? ' y sus '+out.productos_borrados+' componentes.' : '.'));
+  }catch(e){
+    /* Si entre el listado y el clic alguien la uso, la API lo ataja con 409 y
+       la fila se recarga para que aparezca «Desactivar» en vez de «Eliminar». */
+    toast('No se pudo eliminar: '+e.message);
+    if(btn) btn.disabled=false;
+    loadBandejas();
+  }
 }
 function onBanFilter(k,v){ BAN_COLF[k]=v; renderBanBody(); }
 /* Enter aplica el filtro. El filtrado ya es en vivo mientras se escribe, asi
@@ -4592,13 +4656,29 @@ function renderBanBody(){
       if(c.k==='completa')
         return r.completo ? '<td>Sí</td>'
                           : `<td><b title="${attr(r.motivo_incompleto||'Sin motivo registrado')}">No</b></td>`;
+      if(c.k==='estado')
+        return r.activo===false ? '<td><b class="hos-off">Desactivada</b></td>' : '<td>Activa</td>';
       // Columna angosta: se recorta con puntos suspensivos y el texto completo va en el title.
       if(c.cls) return `<td class="${c.cls}" title="${attr(r[c.k])}">${esc(r[c.k])}</td>`;
       return `<td>${esc(r[c.k])}</td>`;
     }).join('');
     const tr=document.createElement('tr');
-    tr.innerHTML=tds+`<td>${r.productos}</td>`
-      +`<td><button class="icon-btn" onclick="verBandeja('${enc}')">✏️ Editar</button></td>`;
+    if(r.activo===false) tr.className='hos-row-off';
+    /* Tres acciones posibles y nunca las tres a la vez:
+       - nunca usada  -> Eliminar (se borra de verdad, con sus componentes)
+       - usada        -> Desactivar (el historial no puede quedar huerfano)
+       - desactivada  -> Activar
+       `usada` lo calcula la API: la bandeja aparece en alguna solicitud o
+       como N° de equipo en alguna hoja de consumo. */
+    let acc=`<button class="icon-btn" onclick="verBandeja('${enc}')">✏️ Editar</button>`;
+    if(r.activo===false){
+      acc+=` <button class="icon-btn" onclick="cambiarEstadoBandeja('${enc}',true)">✅ Activar</button>`;
+    }else if(r.usada){
+      acc+=` <button class="icon-btn danger" onclick="cambiarEstadoBandeja('${enc}',false)">🚫 Desactivar</button>`;
+    }else{
+      acc+=` <button class="icon-btn danger" id="banDelBtn-${enc}" onclick="eliminarBandeja('${enc}')">🗑️ Eliminar</button>`;
+    }
+    tr.innerHTML=tds+`<td>${r.productos}</td><td style="white-space:nowrap">${acc}</td>`;
     b.appendChild(tr);
   });
 }
@@ -5176,7 +5256,12 @@ const SOL_COMBOS={
   /* La etiqueta lleva el codigo y el color; la descripcion va en la segunda
      linea. El filtro mira las dos, asi que se puede buscar por codigo, por
      color o por descripcion. */
-  solBandejaSel: { items:()=>(SOL_BANDEJAS||[]).map(x=>({val:x.codigo,
+  /* Solo las ACTIVAS: una bandeja desactivada salio del catalogo y no se
+     puede pedir. Las que ya estan en el detalle de una solicitud vieja se
+     siguen viendo -eso es historia-, esto es solo lo que se ofrece al
+     agregar. La bandera puede venir undefined si la API es anterior a la
+     migracion 31, y entonces se ofrece igual. */
+  solBandejaSel: { items:()=>(SOL_BANDEJAS||[]).filter(x=>x.activo!==false).map(x=>({val:x.codigo,
                      lab:(x.demarcado||('NUT-'+x.codigo))+(x.color?'  ·  '+x.color:''),
                      sub:x.nombre||''})),
                    ph:'Escriba código, color o descripción…', vacio:'Sin coincidencias en bandejas' }

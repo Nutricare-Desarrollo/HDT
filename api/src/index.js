@@ -359,7 +359,14 @@ app.http('equipos-list', {
     const user = getUser(request);
     if (!user) return json(401, { error: 'No autenticado' });
     try {
-      const r = await query(`SELECT Codigo AS codigo, Demarcado AS demarcado, Nombre AS nombre, Color AS color FROM cat.Equipo ORDER BY Codigo`);
+      /* Devuelve TAMBIEN las desactivadas, con su bandera. La hoja de consumo
+         valida el N° de equipo contra este catalogo (equipoValido), asi que
+         filtrarlas aca haria que una bandeja desactivada que aparece en hojas
+         viejas se pintara como invalida. Quien no las quiere -el combo de la
+         solicitud- filtra por activo. */
+      const r = await query(`SELECT Codigo AS codigo, Demarcado AS demarcado, Nombre AS nombre,
+                                    Color AS color, Activo AS activo
+                               FROM cat.Equipo ORDER BY Codigo`);
       return json(200, r.rows);
     } catch (e) {
       context.error(e);
@@ -487,6 +494,30 @@ function conDescripcion(rows, mapa) {
   }));
 }
 
+/* «Usada» = la bandeja aparece en el detalle de alguna Solicitud de Equipo,
+   o como N° de equipo en alguna hoja de consumo. Una bandeja usada NO se
+   borra: se desactiva, para que ningun registro historico quede apuntando a
+   una bandeja que dejo de existir.
+   El numero de equipo de las hojas viene como lo escribio el OCR o Bodega
+   ('NUT-10104', 'nut 10104'), asi que se compara normalizado igual que
+   normBandeja: sin espacios, sin el prefijo NUT- y en mayusculas. Se define
+   una vez y se interpola en las dos consultas para que no se puedan
+   desincronizar.
+   Los espacios se quitan con la clase POSIX [[:space:]] y no con \s: en una
+   cadena SQL con standard_conforming_strings -el default- una barra es
+   literal, asi que '\s' buscaria una barra seguida de s en vez de un
+   espacio. El parentesis que envuelve todo tambien es necesario: sin el,
+   «EXISTS(...) OR EXISTS(...) AS usada» no parsea, el AS se pega al ultimo
+   EXISTS. */
+const SQL_BANDEJA_USADA = `(EXISTS (
+    SELECT 1 FROM dbo.SolicitudEquipoDetalle d
+     WHERE UPPER(TRIM(d.EquipoCodigo)) = UPPER(TRIM(e.Codigo))
+  ) OR EXISTS (
+    SELECT 1 FROM dbo.HojaConsumoDetalle h
+     WHERE UPPER(REGEXP_REPLACE(REGEXP_REPLACE(COALESCE(h.NumeroEquipo,''), '[[:space:]]', '', 'g'),
+                                '^[Nn][Uu][Tt]-?', '')) = UPPER(TRIM(e.Codigo))
+  ))`;
+
 /* GET /api/bandejas -> listado principal del grid. */
 app.http('bandejas-list', {
   methods: ['GET'], authLevel: 'anonymous', route: 'bandejas',
@@ -498,8 +529,9 @@ app.http('bandejas-list', {
       const r = await query(
         `SELECT e.Codigo AS codigo, e.Demarcado AS demarcado, e.Nombre AS nombre,
                 e.Categoria AS categoria, e.Color AS color, e.Completo AS completo,
-                e.MotivoIncompleto AS motivo_incompleto,
-                COALESCE(p.n, 0)::int AS productos
+                e.MotivoIncompleto AS motivo_incompleto, e.Activo AS activo,
+                COALESCE(p.n, 0)::int AS productos,
+                ${SQL_BANDEJA_USADA} AS usada
            FROM cat.Equipo e
            LEFT JOIN (SELECT EquipoCodigo, COUNT(*) AS n FROM cat.EquipoProducto GROUP BY EquipoCodigo) p
                   ON p.EquipoCodigo = e.Codigo
@@ -523,9 +555,11 @@ app.http('bandeja-get', {
     if (!codigo) return json(400, { error: 'Código de bandeja inválido' });
     try {
       const b = await query(
-        `SELECT Codigo AS codigo, Demarcado AS demarcado, Nombre AS nombre, Categoria AS categoria,
-                Color AS color, Completo AS completo, MotivoIncompleto AS motivo_incompleto
-           FROM cat.Equipo WHERE Codigo = $1`, [codigo]);
+        `SELECT e.Codigo AS codigo, e.Demarcado AS demarcado, e.Nombre AS nombre,
+                e.Categoria AS categoria, e.Color AS color, e.Completo AS completo,
+                e.MotivoIncompleto AS motivo_incompleto, e.Activo AS activo,
+                ${SQL_BANDEJA_USADA} AS usada
+           FROM cat.Equipo e WHERE e.Codigo = $1`, [codigo]);
       if (!b.rowCount) return json(404, { error: 'La bandeja no existe' });
       const d = await query(
         `SELECT ProductoCodigo AS producto, Cantidad::float8 AS cantidad, Tipo AS tipo,
@@ -596,23 +630,74 @@ app.http('bandeja-update', {
     const motivo = textoONull(body && body.motivo_incompleto, 300);
     const errComp = validarCompleto(completo, motivo);
     if (errComp) return json(400, { error: errComp });
+    /* Activo es distinto de Completo: Completo dice si a la bandeja le falta
+       algo, Activo si la bandeja sigue en uso en el catalogo. Si no viene en
+       el body no se toca, para que guardar desde el modal de edicion -que no
+       trae el campo- no reactive una bandeja desactivada. */
+    const activo = (body && body.activo !== undefined) ? !!body.activo : null;
     try {
       const r = await query(
-        `UPDATE cat.Equipo
-            SET Demarcado = COALESCE($1, Demarcado), Nombre = $2, Categoria = $3, Color = $4,
-                Completo = $5, MotivoIncompleto = $6,
-                ActualizadoPor = $7, FechaActualizacion = (now() at time zone 'utc')
-          WHERE Codigo = $8
-          RETURNING Codigo AS codigo, Demarcado AS demarcado, Nombre AS nombre, Categoria AS categoria,
-                    Color AS color, Completo AS completo, MotivoIncompleto AS motivo_incompleto`,
+        `UPDATE cat.Equipo e
+            SET Demarcado = COALESCE($1, e.Demarcado), Nombre = $2, Categoria = $3, Color = $4,
+                Completo = $5, MotivoIncompleto = $6, Activo = COALESCE($7, e.Activo),
+                ActualizadoPor = $8, FechaActualizacion = (now() at time zone 'utc')
+          WHERE e.Codigo = $9
+          RETURNING e.Codigo AS codigo, e.Demarcado AS demarcado, e.Nombre AS nombre,
+                    e.Categoria AS categoria, e.Color AS color, e.Completo AS completo,
+                    e.MotivoIncompleto AS motivo_incompleto, e.Activo AS activo`,
         [textoONull(body && body.demarcado, 60), nombre, normCategoria(body && body.categoria),
-         textoONull(body && body.color, 40), completo, completo ? null : motivo,
+         textoONull(body && body.color, 40), completo, completo ? null : motivo, activo,
          user.name || user.email, codigo]);
       if (!r.rowCount) return json(404, { error: 'La bandeja no existe' });
       return json(200, r.rows[0]);
     } catch (e) {
       context.error(e);
       return json(500, { error: 'No se pudo actualizar la bandeja', detail: e.message });
+    }
+  }
+});
+
+/* DELETE /api/bandejas/{codigo} -> borra la bandeja, SOLO si nunca se uso.
+
+   «Usada» es lo que define SQL_BANDEJA_USADA: aparece en el detalle de
+   alguna Solicitud de Equipo, o como N° de equipo en alguna hoja de
+   consumo. Si se uso, no se borra y se responde 409 diciendo que hay que
+   desactivarla: borrarla dejaria registros historicos apuntando a una
+   bandeja que ya no existe.
+   Los componentes de la bandeja SI se borran con ella: cat.EquipoProducto
+   es contenido de la bandeja, no historia de nadie. */
+app.http('bandeja-delete', {
+  methods: ['DELETE'], authLevel: 'anonymous', route: 'bandejas/{codigo}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de bandejas' });
+    const codigo = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!codigo) return json(400, { error: 'Código de bandeja inválido' });
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      const e = await client.query(
+        `SELECT e.Codigo, COALESCE(e.Demarcado, e.Codigo) AS demarcado, ${SQL_BANDEJA_USADA} AS usada
+           FROM cat.Equipo e WHERE e.Codigo = $1 FOR UPDATE`, [codigo]);
+      if (!e.rowCount) { await client.query('ROLLBACK'); return json(404, { error: 'La bandeja no existe' }); }
+      if (e.rows[0].usada) {
+        await client.query('ROLLBACK');
+        return json(409, {
+          error: 'La bandeja ' + e.rows[0].demarcado + ' ya se usó en solicitudes u hojas de consumo, así que no se puede eliminar. Desactívela para sacarla del catálogo sin perder el historial.',
+          usada: true
+        });
+      }
+      const pr = await client.query(`DELETE FROM cat.EquipoProducto WHERE UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($1))`, [codigo]);
+      await client.query(`DELETE FROM cat.Equipo WHERE Codigo = $1`, [codigo]);
+      await client.query('COMMIT');
+      return json(200, { ok: true, codigo, demarcado: e.rows[0].demarcado, productos_borrados: pr.rowCount || 0 });
+    } catch (e2) {
+      await client.query('ROLLBACK').catch(() => {});
+      context.error(e2);
+      return json(500, { error: 'No se pudo eliminar la bandeja', detail: e2.message });
+    } finally {
+      client.release();
     }
   }
 });

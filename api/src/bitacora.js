@@ -34,7 +34,8 @@ const MAPA = {
   'regimenes/{id}':                              { p:'Catálogos',           PUT:'Corrigió un régimen' },
   'equipos/importar':                            { p:'Bandejas',            POST:'Importó el catálogo de equipos' },
   'bandejas':                                    { p:'Bandejas',            POST:'Creó una bandeja' },
-  'bandejas/{codigo}':                           { p:'Bandejas',            PUT:'Editó la bandeja' },
+  'bandejas/{codigo}':                           { p:'Bandejas',            PUT:'Editó la bandeja',
+                                                                            DELETE:'Eliminó la bandeja' },
   'bandejas/{codigo}/productos':                 { p:'Bandejas',            POST:'Agregó un producto a la bandeja' },
   'bandejas/{codigo}/productos/{producto}':      { p:'Bandejas',            PUT:'Cambió la cantidad de un producto',
                                                                             DELETE:'Quitó un producto de la bandeja' },
@@ -89,6 +90,12 @@ function detalleDe(cuerpo) {
   const c = cuerpo && typeof cuerpo === 'object' ? cuerpo : {};
   const partes = [];
   if (c.estado) partes.push('quedó en ' + c.estado);
+  /* Activar y desactivar pasan por el PUT, asi que la accion dice «Editó»:
+     el detalle es lo que distingue el movimiento. */
+  if (c.activo === false) partes.push('quedó desactivada');
+  if (typeof c.productos_borrados === 'number' && c.productos_borrados > 0) {
+    partes.push('con sus ' + c.productos_borrados + ' componentes');
+  }
   if (typeof c.alistados === 'number' && typeof c.articulos === 'number') {
     partes.push(c.alistados + ' de ' + c.articulos + ' componentes');
   }
