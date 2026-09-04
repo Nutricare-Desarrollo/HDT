@@ -1011,6 +1011,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       <div class="card" style="margin-top:16px">
         <div class="pad" style="padding-bottom:4px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
           <div class="section-title" style="margin-top:0">Componentes de la bandeja</div>
+          <button class="btn-ghost" onclick="abrirBanExcel()">📄 Subir Excel</button>
           <button class="btn-primary" onclick="abrirProducto()">➕ Agregar artículos</button>
         </div>
         <div class="tbl-wrap"><table id="banProdGrid" class="cards dos"><thead id="banProdHead"></thead><tbody id="banProdBody"></tbody></table></div>
@@ -1450,6 +1451,46 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       <button class="btn-ghost" onclick="closeCir()">Cancelar</button>
       <button class="btn-primary" id="cirSaveBtn" onclick="guardarCir()">Guardar</button>
     </div>
+  </div>
+</div>
+
+<!-- MODAL cargar componentes de una bandeja desde Excel -->
+<div id="banXlsModal" class="overlay hidden">
+  <div class="modal">
+    <div class="modal-head"><h3>Subir Excel · Componentes de la bandeja</h3><button class="x" onclick="closeBanExcel()">×</button></div>
+    <div class="modal-body">
+      <p style="margin-top:0">El archivo debe tener los <b>mismos encabezados de columna</b> que la
+        plantilla (primera fila). Las columnas que no coincidan se ignoran.</p>
+      <p>Las columnas son <b>Código</b> (obligatoria), <b>Cantidad</b> (obligatoria, mayor que cero)
+        y <b>Tipo</b> (opcional: es lo que separa las secciones del check list, por ejemplo
+        «Instrumental» o «Implantes»).</p>
+      <p>Cada <b>Código</b> debe existir en el catálogo de productos; si no, esa fila se rechaza y se
+        te muestra con su número de línea. <b>Las demás se cargan igual</b>, así que no hay que
+        corregir el archivo entero por una fila.</p>
+      <p><b>Agrega y actualiza, no borra:</b> el código que no está se agrega, el que ya está
+        actualiza su cantidad y tipo, y lo que la bandeja tiene y no viene en el archivo
+        <b>se queda</b>. Si un código aparece dos veces en el archivo, gana la última fila.</p>
+      <p style="color:var(--muted);font-size:13px">Descargá la plantilla para partir del formato
+        correcto: se genera con los componentes que la bandeja ya tiene.</p>
+      <input type="file" id="banXlsInput" accept=".xlsx,.xls,.csv" onchange="banXlsParse(this)" style="display:none">
+      <div id="banXlsPreview" style="margin-top:12px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="banXlsPlantilla()">⬇️ Descargar plantilla</button>
+      <button class="btn-ghost" onclick="document.getElementById('banXlsInput').click()">Seleccionar archivo…</button>
+      <button class="btn-primary hidden" id="banXlsBtn" onclick="banXlsConfirmar()">Cargar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL líneas rechazadas de la carga por Excel. Aparte del de carga a
+     proposito: reescribir el contenido del otro lo dejaba roto para el resto
+     de la sesion, porque su cuerpo es markup estatico. -->
+<div id="banXlsErrModal" class="overlay hidden">
+  <div class="modal">
+    <div class="modal-head"><h3>Líneas rechazadas</h3><button class="x" onclick="closeBanXlsErr()">×</button></div>
+    <div class="modal-body"><div id="banXlsErrBody"></div></div>
+    <div class="modal-foot"><button class="btn-primary" onclick="closeBanXlsErr()">Entendido</button></div>
   </div>
 </div>
 
@@ -4780,6 +4821,137 @@ async function guardarBandeja(){
   }catch(e){ toast('No se pudo guardar: '+e.message); }
   finally{ btn.disabled=false; }
 }
+
+/* ----- Componentes de la bandeja: carga por Excel -----
+   El archivo se lee EN EL NAVEGADOR con SheetJS -el mismo que ya usaba la
+   importacion de cirugias- y se manda como JSON. Por eso no hay dependencia
+   nueva en la API: api/package.json sigue con @azure/functions y pg.
+   La plantilla tambien se genera aca, con lo que la bandeja ya tiene, para
+   que corregir cantidades sea bajar, editar y subir. */
+let BAN_XLS=[];
+const BAN_XLS_COLS=['Código','Cantidad','Tipo'];
+function abrirBanExcel(){
+  if(!BAN_ACT){ toast('Abra una bandeja primero'); return; }
+  BAN_XLS=[];
+  document.getElementById('banXlsPreview').innerHTML='';
+  document.getElementById('banXlsBtn').classList.add('hidden');
+  document.getElementById('banXlsInput').value='';
+  document.getElementById('banXlsModal').classList.remove('hidden');
+}
+function closeBanExcel(){ document.getElementById('banXlsModal').classList.add('hidden'); BAN_XLS=[]; }
+/* La plantilla sale con los componentes actuales: asi sirve para corregir
+   cantidades en masa, no solo para cargar de cero. Si la bandeja esta vacia,
+   va una fila de ejemplo para que se vea el formato. */
+function banXlsPlantilla(){
+  if(typeof XLSX==='undefined'){ toast('No se pudo cargar el lector de Excel (revisá tu conexión a internet).'); return; }
+  const lista=(BAN_ACT && BAN_ACT.productos)||[];
+  const filas = lista.length
+    ? lista.map(p=>({'Código':p.producto, 'Cantidad':p.cantidad, 'Tipo':p.tipo||''}))
+    : [{'Código':'24267001', 'Cantidad':1, 'Tipo':'Instrumental'}];
+  const ws=XLSX.utils.json_to_sheet(filas, {header:BAN_XLS_COLS});
+  ws['!cols']=[{wch:16},{wch:10},{wch:18}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Componentes');
+  const cod=(BAN_ACT.demarcado||BAN_ACT.codigo||'bandeja').replace(/[^A-Za-z0-9_-]/g,'_');
+  XLSX.writeFile(wb, 'componentes_'+cod+'.xlsx');
+}
+/* Busca la columna por su encabezado, sin tildes ni mayusculas: «Codigo»,
+   «CÓDIGO» y «código» son la misma. */
+function banXlsCol(H, alts){
+  const norm=(v)=>String(v==null?'':v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
+  for(let i=0;i<H.length;i++){ const h=norm(H[i]); if(alts.some(a=>h===a || h.startsWith(a))) return i; }
+  return -1;
+}
+function banXlsParse(input){
+  const f=(input.files||[])[0]; if(!f) return;
+  if(typeof XLSX==='undefined'){ toast('No se pudo cargar el lector de Excel (revisá tu conexión a internet).'); return; }
+  const prev=document.getElementById('banXlsPreview');
+  prev.innerHTML='Leyendo…'; BAN_XLS=[];
+  const rdr=new FileReader();
+  rdr.onload=()=>{
+    try{
+      const wb=XLSX.read(rdr.result,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:''});
+      if(!rows.length){ prev.innerHTML='<div class="empty" style="padding:14px">El archivo está vacío.</div>'; return; }
+      const H=rows[0]||[];
+      const cCod=banXlsCol(H,['codigo','cod']), cCant=banXlsCol(H,['cantidad','cant']), cTipo=banXlsCol(H,['tipo']);
+      if(cCod<0 || cCant<0){
+        prev.innerHTML='<div class="err-detail">No se encontraron las columnas <b>Código</b> y <b>Cantidad</b> en la primera fila. '
+          +'Descargá la plantilla y usá esos encabezados.</div>';
+        return;
+      }
+      for(let r=1;r<rows.length;r++){
+        const row=rows[r]||[];
+        const g=(i)=> (i>=0 && row[i]!=null) ? row[i] : '';
+        const cod=String(g(cCod)).trim();
+        const cant=g(cCant);
+        if(!cod && String(cant).trim()==='') continue;   // fila vacía
+        BAN_XLS.push({ linea:r+1, producto:cod, cantidad:cant, tipo:String(g(cTipo)).trim() });
+      }
+      banXlsPreview();
+    }catch(e){
+      prev.innerHTML='<div class="err-detail">No se pudo leer el archivo: '+esc(e.message)+'</div>';
+    }
+  };
+  rdr.readAsArrayBuffer(f);
+}
+function banXlsPreview(){
+  const prev=document.getElementById('banXlsPreview');
+  const btn=document.getElementById('banXlsBtn');
+  if(!BAN_XLS.length){
+    prev.innerHTML='<div class="empty" style="padding:14px">No se leyó ninguna línea con datos.</div>';
+    btn.classList.add('hidden'); return;
+  }
+  /* Lo que se puede avisar ANTES de mandar: cantidad invalida y codigo que no
+     esta en el catalogo. Lo demas lo valida la API, que es la que manda. */
+  const malas=BAN_XLS.filter(x=>{ const n=Number(x.cantidad); return !isFinite(n)||n<=0; });
+  const fuera=catReady() ? BAN_XLS.filter(x=>!catCodigoValido(x.producto)) : [];
+  let html=`<div style="margin-bottom:8px"><b>${BAN_XLS.length}</b> línea(s) leída(s).</div>`;
+  if(malas.length) html+=`<div class="err-detail" style="margin:0 0 8px">${malas.length} con cantidad inválida (se van a rechazar): `
+    +malas.slice(0,8).map(x=>'línea '+x.linea).join(', ')+(malas.length>8?'…':'')+'</div>';
+  if(fuera.length) html+=`<div class="err-detail" style="margin:0 0 8px">${fuera.length} con un código que no está en el catálogo de productos (se van a rechazar): `
+    +fuera.slice(0,8).map(x=>esc(x.producto)).join(', ')+(fuera.length>8?'…':'')+'</div>';
+  html+='<div class="tbl-wrap" style="max-height:260px;overflow:auto"><table><thead><tr><th>Línea</th><th>Código</th><th>Cantidad</th><th>Tipo</th></tr></thead><tbody>';
+  BAN_XLS.slice(0,120).forEach(x=>{ html+=`<tr><td>${x.linea}</td><td>${esc(x.producto)}</td><td>${esc(x.cantidad)}</td><td>${esc(x.tipo)}</td></tr>`; });
+  html+='</tbody></table></div>';
+  if(BAN_XLS.length>120) html+=`<div class="sub" style="margin-top:6px">Se muestran las primeras 120 de ${BAN_XLS.length}.</div>`;
+  prev.innerHTML=html;
+  btn.classList.remove('hidden');
+}
+async function banXlsConfirmar(){
+  if(!BAN_ACT || !BAN_XLS.length) return;
+  const btn=document.getElementById('banXlsBtn'); btn.disabled=true;
+  showLoading('Cargando los componentes','Estamos guardando las líneas del archivo…');
+  try{
+    const enc=encodeURIComponent(BAN_ACT.codigo);
+    const r=await api('POST','/bandejas/'+enc+'/productos/importar', { productos: BAN_XLS });
+    closeBanExcel();
+    await verBandeja(enc);
+    let m='Carga lista: '+r.agregados+' agregado(s), '+r.actualizados+' actualizado(s)';
+    m += r.rechazados ? ' y '+r.rechazados+' rechazado(s).' : '.';
+    toast(m);
+    /* Los rechazos se muestran en la pantalla, no solo en el toast: son la
+       lista de lo que hay que corregir en el archivo. */
+    if(r.errores && r.errores.length) banXlsRechazos(r.errores, r.rechazados);
+  }catch(e){
+    toast('No se pudo cargar el archivo: '+e.message);
+    btn.disabled=false;
+  }finally{ hideLoading(); }
+}
+/* Los rechazos quedan a la vista, con linea y motivo, para poder corregir el
+   archivo sin adivinar. En su propio modal: el de carga tiene cuerpo estatico
+   y reescribirlo lo dejaba roto para el resto de la sesion. */
+function banXlsRechazos(errores, total){
+  const filas=errores.map(e=>`<tr><td>${esc(e.linea)}</td><td>${esc(e.producto||'')}</td><td>${esc(e.error)}</td></tr>`).join('');
+  document.getElementById('banXlsErrBody').innerHTML=
+    `<p style="margin-top:0">Se cargó todo lo demás. Estas ${total} línea(s) no entraron:</p>`
+    +'<div class="tbl-wrap" style="max-height:320px;overflow:auto"><table><thead><tr><th>Línea</th><th>Código</th><th>Motivo</th></tr></thead><tbody>'
+    +filas+'</tbody></table></div>'
+    +(errores.length<total?`<div class="sub" style="margin-top:6px">Se muestran las primeras ${errores.length} de ${total}.</div>`:'');
+  document.getElementById('banXlsErrModal').classList.remove('hidden');
+}
+function closeBanXlsErr(){ document.getElementById('banXlsErrModal').classList.add('hidden'); }
 
 /* ----- Componentes de la bandeja ----- */
 function renderBandejaProductos(){

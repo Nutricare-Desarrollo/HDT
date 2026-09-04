@@ -37,6 +37,7 @@ const MAPA = {
   'bandejas/{codigo}':                           { p:'Bandejas',            PUT:'Editó la bandeja',
                                                                             DELETE:'Eliminó la bandeja' },
   'bandejas/{codigo}/productos':                 { p:'Bandejas',            POST:'Agregó un producto a la bandeja' },
+  'bandejas/{codigo}/productos/importar':        { p:'Bandejas',            POST:'Cargó componentes desde Excel' },
   'bandejas/{codigo}/productos/{producto}':      { p:'Bandejas',            PUT:'Cambió la cantidad de un producto',
                                                                             DELETE:'Quitó un producto de la bandeja' },
   'hospitales':                                  { p:'Hospitales',          POST:'Agregó un hospital' },
@@ -95,6 +96,11 @@ function detalleDe(cuerpo) {
   if (c.activo === false) partes.push('quedó desactivada');
   if (typeof c.productos_borrados === 'number' && c.productos_borrados > 0) {
     partes.push('con sus ' + c.productos_borrados + ' componentes');
+  }
+  /* Carga por Excel: el resumen es lo que interesa en la bitacora. */
+  if (typeof c.agregados === 'number' || typeof c.actualizados === 'number') {
+    partes.push((c.agregados || 0) + ' agregados, ' + (c.actualizados || 0) + ' actualizados'
+      + (c.rechazados ? ', ' + c.rechazados + ' rechazados' : ''));
   }
   if (typeof c.alistados === 'number' && typeof c.articulos === 'number') {
     partes.push(c.alistados + ' de ' + c.articulos + ' componentes');

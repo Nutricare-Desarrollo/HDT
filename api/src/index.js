@@ -743,6 +743,98 @@ app.http('bandeja-producto-create', {
   }
 });
 
+/* POST /api/bandejas/{codigo}/productos/importar
+   Carga masiva de componentes desde el Excel que arma la pantalla.
+   Body: { productos: [ { producto, cantidad, tipo } ] }
+
+   El Excel se lee EN EL NAVEGADOR con SheetJS, que ya venia cargado para
+   importar cirugias, y llega aca como JSON. Asi no hay dependencia nueva en
+   api/package.json, que sigue con @azure/functions y pg nada mas.
+
+   AGREGA Y ACTUALIZA, NO BORRA: el codigo que no esta se agrega, el que ya
+   esta actualiza cantidad y tipo, y lo que no viene en el archivo se queda.
+   Decision de Luis, y es la segura: un archivo incompleto no vacia la
+   bandeja.
+
+   Cada fila se decide sola. Un codigo que no existe en el catalogo de
+   productos, o una cantidad que no es un numero mayor que cero, se rechaza
+   y se devuelve en `errores` con su numero de fila para que la pantalla los
+   muestre; el resto se carga igual. Rechazar el archivo entero por una fila
+   mala obligaria a corregir y volver a subir todo, y estos archivos traen
+   ochenta lineas. */
+app.http('bandeja-productos-importar', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'bandejas/{codigo}/productos/importar',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de bandejas' });
+    const codigo = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!codigo) return json(400, { error: 'Código de bandeja inválido' });
+    let body = {};
+    try { body = await request.json(); } catch { body = {}; }
+    const filas = Array.isArray(body && body.productos) ? body.productos : [];
+    if (!filas.length) return json(400, { error: 'El archivo no trae ninguna línea para cargar' });
+    if (filas.length > 3000) return json(400, { error: 'El archivo trae demasiadas líneas (máximo 3000)' });
+
+    const client = await getClient();
+    try {
+      const ex = await client.query(`SELECT 1 FROM cat.Equipo WHERE Codigo = $1`, [codigo]);
+      if (!ex.rowCount) { client.release(); return json(404, { error: 'La bandeja no existe' }); }
+      /* Validacion best-effort, igual que el alta de uno: si el catalogo de
+         productos no responde, no se bloquea la carga. */
+      const mapa = await mapaCatalogo(context);
+
+      const errores = [];
+      const buenas = new Map();   // producto -> { cantidad, tipo }
+      filas.forEach((f, i) => {
+        const linea = (f && f.linea) || (i + 2);   // +2: fila 1 son los encabezados
+        const prod = normCod(f && f.producto);
+        if (!prod) { errores.push({ linea, error: 'Sin código de producto' }); return; }
+        if (prod.length > 60) { errores.push({ linea, producto: prod, error: 'El código supera los 60 caracteres' }); return; }
+        const cant = normCantidad(f && f.cantidad);
+        if (cant === null) { errores.push({ linea, producto: prod, error: 'La cantidad debe ser un número mayor que cero' }); return; }
+        if (mapa.size && !mapa.has(prod)) {
+          errores.push({ linea, producto: prod, error: 'No existe en el catálogo de productos' });
+          return;
+        }
+        /* Un codigo repetido dentro del mismo archivo: gana la ultima fila,
+           que es lo que espera quien acaba de corregirla mas abajo. */
+        buenas.set(prod, { cantidad: cant, tipo: textoONull(f && f.tipo, 40) });
+      });
+
+      let agregados = 0, actualizados = 0;
+      await client.query('BEGIN');
+      for (const [prod, v] of buenas) {
+        const up = await client.query(
+          `UPDATE cat.EquipoProducto
+              SET Cantidad = $1, Tipo = COALESCE($2, Tipo),
+                  ActualizadoPor = $3, FechaActualizacion = (now() at time zone 'utc')
+            WHERE UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($4))
+              AND UPPER(TRIM(ProductoCodigo)) = UPPER(TRIM($5))`,
+          [v.cantidad, v.tipo, user.name || user.email, codigo, prod]);
+        if (up.rowCount) { actualizados++; continue; }
+        await client.query(
+          `INSERT INTO cat.EquipoProducto (EquipoCodigo, ProductoCodigo, Cantidad, Tipo,
+                                           DescripcionProducto, ActualizadoPor, FechaActualizacion)
+           VALUES ($1,$2,$3,$4,$5,$6,(now() at time zone 'utc'))`,
+          [codigo, prod, v.cantidad, v.tipo, mapa.get(prod) || null, user.name || user.email]);
+        agregados++;
+      }
+      await client.query('COMMIT');
+      return json(200, {
+        codigo, agregados, actualizados,
+        rechazados: errores.length, leidas: filas.length, errores: errores.slice(0, 100)
+      });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      context.error(e);
+      return json(500, { error: 'No se pudo cargar el archivo', detail: e.message });
+    } finally {
+      client.release();
+    }
+  }
+});
+
 /* PUT /api/bandejas/{codigo}/productos/{producto} -> cambia la cantidad. */
 app.http('bandeja-producto-update', {
   methods: ['PUT'], authLevel: 'anonymous', route: 'bandejas/{codigo}/productos/{producto}',
