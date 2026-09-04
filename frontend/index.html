@@ -4968,11 +4968,20 @@ function abrirBanExcel(){
   if(!BAN_ACT){ toast('Abra una bandeja primero'); return; }
   BAN_XLS=[];
   document.getElementById('banXlsPreview').innerHTML='';
-  document.getElementById('banXlsBtn').classList.add('hidden');
+  /* El boton se deshabilita mientras se sube y NO se vuelve a habilitar al
+     terminar bien -a proposito, para que el doble clic no cargue dos veces-.
+     Por eso se reinicia ACA: si no, la segunda carga de la sesion encontraba
+     el «Cargar» gris y no habia forma de subir otro archivo sin refrescar. */
+  const bx=document.getElementById('banXlsBtn');
+  bx.classList.add('hidden'); bx.disabled=false;
   document.getElementById('banXlsInput').value='';
   document.getElementById('banXlsModal').classList.remove('hidden');
 }
-function closeBanExcel(){ document.getElementById('banXlsModal').classList.add('hidden'); BAN_XLS=[]; }
+function closeBanExcel(){
+  document.getElementById('banXlsModal').classList.add('hidden');
+  document.getElementById('banXlsBtn').disabled=false;
+  BAN_XLS=[];
+}
 /* La plantilla sale con los componentes actuales: asi sirve para corregir
    cantidades en masa, no solo para cargar de cero. Si la bandeja esta vacia,
    va una fila de ejemplo para que se vea el formato. */
@@ -5051,7 +5060,7 @@ function banXlsPreview(){
   html+='</tbody></table></div>';
   if(BAN_XLS.length>120) html+=`<div class="sub" style="margin-top:6px">Se muestran las primeras 120 de ${BAN_XLS.length}.</div>`;
   prev.innerHTML=html;
-  btn.classList.remove('hidden');
+  btn.classList.remove('hidden'); btn.disabled=false;
 }
 async function banXlsConfirmar(){
   if(!BAN_ACT || !BAN_XLS.length) return;
