@@ -803,7 +803,10 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
     <section id="viewSolicitudDet" class="hidden">
       <div class="page-head">
         <div><h2 id="solDetTit">Solicitud de Equipo</h2><div class="sub" id="solDetSub"></div></div>
-        <button class="btn-ghost" onclick="showSolicitudes()">← Volver al listado</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn-ghost hidden" id="solPrintBtn" onclick="imprimirSolicitud()">🖨️ Imprimir solicitud</button>
+          <button class="btn-ghost" onclick="showSolicitudes()">← Volver al listado</button>
+        </div>
       </div>
       <div class="card pad">
         <div class="section-title" style="margin-top:0">Datos de la cirugía</div>
@@ -831,7 +834,10 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
     <section id="viewCheckList" class="hidden">
       <div class="page-head">
         <div><h2 id="chkTit">Check list</h2><div class="sub" id="chkSub"></div></div>
-        <button class="btn-ghost" id="chkVolverBtn" onclick="volverDeCheckList()">← Volver a la solicitud</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn-ghost" onclick="imprimirCheckList()">🖨️ Imprimir check list</button>
+          <button class="btn-ghost" id="chkVolverBtn" onclick="volverDeCheckList()">← Volver a la solicitud</button>
+        </div>
       </div>
       <div class="card pad">
         <div class="section-title" style="margin-top:0">Datos de la cirugía y de la bandeja</div>
@@ -5242,6 +5248,9 @@ function renderSolicitudDet(){
     : '';
   document.getElementById('solAddBox').classList.toggle('hidden', !ed);
   document.getElementById('solAcciones').classList.toggle('hidden', !ed);
+  /* Imprimir solo lo que ya existe en la base: un borrador sin guardar no
+     tiene consecutivo, y un papel con el codigo en blanco no sirve. */
+  document.getElementById('solPrintBtn').classList.toggle('hidden', !s.id);
   renderSolDetalle();
 }
 function renderSolDetalle(){
@@ -5425,6 +5434,240 @@ async function guardarCheckList(){
   }catch(e){ toast('No se pudo guardar el alisto: '+e.message); }
   finally{ btn.disabled=false; }
 }
+/* ===== Documentos para imprimir: Solicitud de Equipo y Check List =====
+   Mismo mecanismo que imprimirDoc() de la hoja de consumo: se arma el HTML
+   completo, se abre en una ventana y el navegador imprime. No pasa por la
+   API -los datos ya estan en SOL_ACT y en CHK-, asi que tambien sirve en el
+   celular, donde el dialogo del sistema ofrece «Guardar como PDF».
+   Se descarto generar el PDF en la API: habria que meter una dependencia
+   nueva en api/package.json (hoy solo @azure/functions y pg) para producir
+   lo mismo que el navegador ya imprime. */
+
+/* Estilo comun de los dos documentos: el aire del formato oficial de la hoja
+   de consumo -cajas de borde grueso redondeado, encabezado de tabla en
+   negro- para que los tres papeles del proceso se vean de la misma familia. */
+const DOC_CSS = `
+@page{size:A4 portrait;margin:10mm}
+*{box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:11px;
+     -webkit-print-color-adjust:exact;print-color-adjust:exact}
+table{border-collapse:collapse;width:100%}
+.doc>*{margin-bottom:6px}
+.doc>*:last-child{margin-bottom:0}
+.top{display:flex;align-items:flex-end;gap:12px;border-bottom:2px solid #000;padding-bottom:5px}
+.top .marca{flex:1}
+.top .nut{font-family:Georgia,'Times New Roman',serif;font-style:italic;font-weight:bold;font-size:30px;line-height:1}
+.top .htr{font-weight:bold;font-size:10px;letter-spacing:.6px;margin-top:2px}
+.top .tit{text-align:right}
+.top .tit .t{font-weight:bold;font-size:15px;letter-spacing:.6px}
+.top .tit .s{font-size:11px;font-weight:bold;margin-top:2px}
+.box{border:1.5px solid #000;border-radius:8px;overflow:hidden}
+.datos{table-layout:fixed}
+.datos th{background:#cfcfcf;font-size:8.5px;font-weight:bold;letter-spacing:.4px;text-transform:uppercase;
+          text-align:left;padding:3px 7px;border-right:1px solid #000;border-bottom:1px solid #000}
+.datos td{font-size:11px;padding:4px 7px;border-right:1px solid #000;height:21px;vertical-align:middle}
+.datos th:last-child,.datos td:last-child{border-right:0}
+.datos tr.sep th{border-top:1px solid #000}
+.det tr.ident th{background:#fff;color:#000;border:1px solid #000;padding:4px 9px;font-size:10.5px}
+.det tr.ident .fx{display:flex;align-items:center;gap:14px;text-align:left}
+.det tr.ident .desc{flex:1;font-weight:bold;font-size:11px}
+.det tr.ident .av{font-weight:bold;white-space:nowrap}
+.swatch{display:inline-block;width:32px;height:13px;border:1px solid #000;vertical-align:-2px;margin-right:5px}
+.detwrap{border-radius:8px;overflow:hidden}
+.det{table-layout:fixed}
+.det thead{display:table-header-group}
+.det th{background:#000;color:#fff;font-size:9px;font-weight:bold;text-align:center;
+        padding:4px 3px;border:1px solid #000;line-height:1.1}
+.det td{border:1px solid #000;height:17px;padding:1px 5px;font-size:10px}
+.det tr{page-break-inside:avoid}
+.det tr.sec td{background:#cfcfcf;font-weight:bold;font-size:10px;letter-spacing:.6px;
+               text-transform:uppercase;page-break-after:avoid}
+.det .n{text-align:center}
+.det .cant{text-align:center}
+.det .chk{text-align:center;padding:1px}
+/* La casilla se dibuja con borde, no con un caracter de cuadro: no todas las
+   fuentes de impresion traen U+2610 y saldria en blanco. */
+.det .chk i{display:inline-block;width:13px;height:13px;border:1.2px solid #000;font-style:normal;
+            font-family:'Segoe UI Symbol','Apple Symbols','DejaVu Sans',Arial,sans-serif;
+            font-size:11px;line-height:12px;font-weight:bold}
+.det .vacia td{height:19px}
+.obs{border:1.5px solid #000;border-radius:8px;min-height:54px;padding:3px 9px;
+     font-size:8.5px;font-weight:bold;letter-spacing:.4px}
+.obs .txt{font-weight:normal;font-size:10px;letter-spacing:0;margin-top:3px;white-space:pre-wrap}
+.firmas{display:flex;gap:8px}
+.firmas .f{flex:1;border:1.5px solid #000;border-radius:8px;height:54px;padding:3px 9px;
+           font-size:8.5px;font-weight:bold;letter-spacing:.4px}
+.pie{font-size:8px;color:#444;text-align:right}
+`;
+
+/* Encabezado comun. */
+function docTop(titulo, sub){
+  return `<div class="top">`
+    +`<div class="marca"><div class="nut">Nutricare</div><div class="htr">HOSPITAL DEL TRAUMA INS</div></div>`
+    +`<div class="tit"><div class="t">${attr(titulo)}</div><div class="s">${attr(sub)}</div></div></div>`;
+}
+
+/* Bloque de datos: rotulo gris arriba, valor abajo, en filas de `cols`.
+   Un valor vacio deja la celda en blanco a proposito -no pone «—»-: el
+   documento tambien se imprime para llenarlo a mano. */
+function docDatos(campos, cols){
+  let h='';
+  for(let i=0;i<campos.length;i+=cols){
+    const fila=campos.slice(i, i+cols);
+    while(fila.length<cols) fila.push(['','']);
+    h+=`<tr${i?' class="sep"':''}>`+fila.map(c=>`<th>${attr(c[0])}</th>`).join('')+`</tr>`
+      +`<tr>`+fila.map(c=>`<td>${attr(c[1])}</td>`).join('')+`</tr>`;
+  }
+  return `<div class="box"><table class="datos">${h}</table></div>`;
+}
+
+/* El color es el identificador de la copia de la bandeja: dos equipos con el
+   mismo contenido solo se distinguen por el. En el papel va pintado y
+   escrito, porque la impresora de bodega puede ser en blanco y negro. */
+function docColor(nombre){
+  const st=equipoColorStyle(nombre);
+  const m=st ? `<span class="swatch" style="background:${st.background}"></span>` : '';
+  return m+(attr(nombre)||'sin color');
+}
+
+/* Pie: quien imprimio y cuando. Es lo que permite saber, con dos hojas
+   iguales sobre la mesa, cual es la vigente. */
+function docPie(){
+  const d=new Date(), p=(x)=>String(x).padStart(2,'0');
+  const t=p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());
+  return `<div class="pie">Impreso el ${t}${USER&&USER.name?' por '+attr(USER.name):''} · Aplicación HDT</div>`;
+}
+
+/* 'YYYY-MM-DD HH:MM' -> 'DD/MM/YYYY HH:MM'. La API manda el registro y el
+   envio ya formateados por to_char, pero en orden ISO. */
+function docFechaHora(v){
+  const t=String(v==null?'':v).trim();
+  const m=t.match(/^(\d{4})-(\d{2})-(\d{2})[ T]?(\d{2}:\d{2})?/);
+  return m ? (m[3]+'/'+m[2]+'/'+m[1]+(m[4]?' '+m[4]:'')) : t;
+}
+
+/* Casilla para marcar a mano (o ya marcada). */
+function docCasilla(marcado){ return `<i>${marcado?'&#10003;':'&nbsp;'}</i>`; }
+
+function docImprimir(titulo, cuerpo){
+  const doc=`<!doctype html><html lang="es"><head><meta charset="utf-8">`
+    +`<title>${attr(titulo)}</title><style>${DOC_CSS}</style></head>`
+    +`<body><div class="doc">${cuerpo}</div>`
+    +`<script>window.onload=function(){setTimeout(function(){window.print();},150);};<\/script>`
+    +`</body></html>`;
+  const w=window.open('','_blank');
+  if(!w){ toast('El navegador bloqueó la ventana de impresión. Permití los pop-ups e intentá de nuevo.'); return; }
+  w.document.open(); w.document.write(doc); w.document.close();
+}
+
+/* Cantidad tal como vino del catalogo, igual que en pantalla: el 0 se senala
+   porque es un dato que hay que corregir en la bandeja. */
+function docCant(v){
+  const n=Number(v);
+  if(!isFinite(n)) return attr(v);
+  if(n===0) return '0 &#9888;';
+  return String(Math.round(n*100)/100).replace('.', ',');
+}
+
+/* Imprime el check list de la bandeja abierta. Sale aunque no haya nada
+   marcado: el documento en blanco es la hoja que Bodega se lleva a la
+   estanteria, y las marcas que ya esten puestas viajan impresas. */
+function imprimirCheckList(){
+  if(!CHK){ toast('Abra el check list de una bandeja para imprimirlo'); return; }
+  const s=CHK.solicitud||{}, b=CHK.bandeja||{}, lista=CHK.componentes||[];
+  const cod=b.demarcado||b.equipo_codigo||'';
+  const marcados=lista.filter(c=>c.marcado).length;
+
+  let filas='', tipo=null, n=0;
+  lista.forEach(c=>{
+    /* La API viene ordenada por Tipo: aca solo se corta la seccion. Son las
+       mismas divisiones que en pantalla (Instrumental, Implantes). */
+    if(c.tipo!==tipo){ tipo=c.tipo; filas+=`<tr class="sec"><td colspan="5">${attr(tipo)}</td></tr>`; }
+    n++;
+    filas+=`<tr><td class="n">${n}</td><td class="cod">${attr(c.producto)}</td>`
+      +`<td>${attr(c.descripcion)}</td>`
+      +`<td class="cant">${docCant(c.cantidad)}</td>`
+      +`<td class="chk">${docCasilla(c.marcado)}</td></tr>`;
+  });
+  if(!lista.length){
+    filas=`<tr><td colspan="5" style="height:44px;text-align:center">`
+      +`Esta bandeja no tiene componentes registrados en el catálogo.</td></tr>`;
+  }
+
+  const cuerpo =
+    docTop('CHECK LIST DE BANDEJA', [s.codigo, cod].filter(Boolean).join(' · '))
+    + docDatos([['No. de cirugía', s.codigo], ['Tipo de insumo', b.categoria], ['No. de caja', cod]], 3)
+    + docDatos([['Hospital', s.hospital],
+                ['Fecha y hora de la cirugía', solFechaTxt(s.fecha_cirugia, s.hora_cirugia)],
+                ['Tipo de cirugía', s.cirugia],
+                ['Cirujano', s.cirujano],
+                ['Paciente', s.paciente_nombre],
+                ['Cédula', s.paciente_cedula]], 3)
+    + `<div class="detwrap"><table class="det">`
+      + `<colgroup><col style="width:26px"><col style="width:80px"><col>`
+        + `<col style="width:58px"><col style="width:46px"></colgroup><thead>`
+      + `<tr class="ident"><th colspan="5"><div class="fx">`
+        + `<span class="desc">${attr(cod)} · ${attr(b.descripcion)||'bandeja sin descripción'}</span>`
+        + `<span>Color: ${docColor(b.color)}</span>`
+        + `<span class="av">Alistados: ${marcados} de ${lista.length}</span></div></th></tr>`
+      + `<tr><th class="n">#</th><th class="cod">CÓDIGO</th><th>DESCRIPCIÓN</th>`
+      + `<th class="cant">CANTIDAD</th><th class="chk">CHECK</th></tr></thead>`
+      + `<tbody>${filas}</tbody></table></div>`
+    + `<div class="obs">OBSERVACIONES${s.observaciones?`<div class="txt">${attr(s.observaciones)}</div>`:''}</div>`
+    + `<div class="firmas"><div class="f">ALISTADO POR</div><div class="f">REVISADO POR</div>`
+      + `<div class="f">RECIBIDO EN HOSPITAL</div></div>`
+    + docPie();
+
+  docImprimir('Check list '+cod+(s.codigo?' — '+s.codigo:''), cuerpo);
+}
+
+/* Imprime la solicitud abierta. Un borrador sin guardar no tiene consecutivo
+   ni respaldo en la base: el boton no se dibuja hasta que exista el id,
+   igual que el Imprimir de la hoja de consumo. */
+function imprimirSolicitud(){
+  const s=SOL_ACT;
+  if(!s || !s.id){ toast('Primero guarde la solicitud: solo se imprime una solicitud ya registrada.'); return; }
+  /* Las bandejas salen del detalle guardado y no de SOL_AV: el documento es
+     lo que se pidio, no lo que Bodega lleva alistado. */
+  const lista=s.detalle||[];
+  let filas='';
+  lista.forEach((d,i)=>{
+    filas+=`<tr><td class="n">${i+1}</td>`
+      +`<td class="cod">${attr(d.demarcado||d.equipo_codigo)}</td>`
+      +`<td>${attr(d.descripcion)}</td></tr>`;
+  });
+  /* Renglones en blanco: la solicitud impresa se usa tambien para anotar a
+     mano una bandeja que se agrega en el mostrador. */
+  const MIN=8;
+  for(let i=lista.length;i<Math.max(MIN, lista.length+2);i++){
+    filas+=`<tr class="vacia"><td class="n">${i+1}</td><td class="cod"></td><td></td></tr>`;
+  }
+
+  const cuerpo =
+    docTop('SOLICITUD DE EQUIPO', s.codigo)
+    + docDatos([['No. de solicitud', s.codigo], ['Estado', s.estado], ['Registrada el', docFechaHora(s.fecha_registro)],
+                ['Hospital', s.hospital],
+                ['Fecha y hora de la cirugía', solFechaTxt(s.fecha_cirugia, s.hora_cirugia)],
+                ['Tipo de cirugía', s.cirugia],
+                ['Cirujano', s.cirujano],
+                ['Paciente', s.paciente_nombre],
+                ['Cédula', s.paciente_cedula],
+                ['Fecha y hora de entrega', solFechaTxt(s.fecha_entrega, s.hora_entrega)],
+                ['Solicitada por', s.creado_por],
+                ['Enviada el', docFechaHora(s.fecha_envio)]], 3)
+    + `<div class="detwrap"><table class="det">`
+      + `<colgroup><col style="width:26px"><col style="width:118px"><col></colgroup><thead><tr>`
+      + `<th class="n">#</th><th class="cod">CÓDIGO DE BANDEJA</th>`
+      + `<th>DESCRIPCIÓN</th></tr></thead>`
+      + `<tbody>${filas}</tbody></table></div>`
+    + `<div class="obs">OBSERVACIONES${s.observaciones?`<div class="txt">${attr(s.observaciones)}</div>`:''}</div>`
+    + `<div class="firmas"><div class="f">SOLICITADO POR (HOSPITAL)</div>`
+      + `<div class="f">ALISTADO POR (BODEGA)</div><div class="f">RECIBIDO POR</div></div>`
+    + docPie();
+
+  docImprimir('Solicitud de equipo '+(s.codigo||s.id), cuerpo);
+}
+
 function agregarBandejaSolicitud(){
   const sel=document.getElementById('solBandejaSel');
   const cod=cbValor('solBandejaSel');
