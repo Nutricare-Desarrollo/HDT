@@ -79,9 +79,13 @@ async function notificar({ descripcion, solicitadoPor, cuentas, envName = 'NOTIF
   }
 }
 
-/* Cuentas suscritas a un evento. Columnas validas: Solicitud, Alistado,
-   Devolucion, Liberado. El nombre NO viene del cliente. */
-const EVENTOS = { solicitud: 'Solicitud', alistado: 'Alistado', devolucion: 'Devolucion', liberado: 'Liberado' };
+/* Cuentas suscritas a un evento. El nombre NO viene del cliente: se
+   interpola en el SQL, asi que solo puede salir de esta tabla.
+   Ojo con los dos parecidos: `devolucion` es el hospital devolviendo el
+   EQUIPO despues de la cirugia, y `devuelta` es Bodega devolviendo la
+   SOLICITUD al hospital para que le haga cambios. */
+const EVENTOS = { solicitud: 'Solicitud', alistado: 'Alistado', devolucion: 'Devolucion',
+                  liberado: 'Liberado', devuelta: 'Devuelta' };
 
 async function cuentasDe(query, evento) {
   const col = EVENTOS[evento];

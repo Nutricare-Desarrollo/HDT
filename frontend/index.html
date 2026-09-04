@@ -1041,6 +1041,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div><h2 id="solDetTit">Solicitud de Equipo</h2><div class="sub" id="solDetSub"></div></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn-ghost hidden" id="solPrintBtn" onclick="imprimirSolicitud()">🖨️ Imprimir solicitud</button>
+          <button class="btn-ghost hidden" id="solDevolverBtn" onclick="devolverSolicitud()">↩️ Devolver al hospital</button>
           <button class="btn-ghost hidden" id="solReabrirBtn" onclick="reabrirAlisto()">↩️ Reabrir alisto</button>
           <button class="btn-ghost" onclick="showSolicitudes()">← Volver al listado</button>
         </div>
@@ -1218,6 +1219,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
           <label class="hos-chk"><input type="checkbox" id="notEvAlistado"   onchange="onNotEvento()"> Equipo alistado</label>
           <label class="hos-chk"><input type="checkbox" id="notEvDevolucion" onchange="onNotEvento()"> Devolución</label>
           <label class="hos-chk"><input type="checkbox" id="notEvLiberado"   onchange="onNotEvento()"> Equipo liberado</label>
+          <label class="hos-chk"><input type="checkbox" id="notEvDevuelta"   onchange="onNotEvento()"> Solicitud devuelta al hospital</label>
         </div>
       </div>
       <div class="cat-fhint" id="notHint"></div>
@@ -4954,11 +4956,15 @@ async function cambiarEstadoHospital(id, activo){
 let NOT_ROWS=[], NOT_COLF={}, NOT_EDIT=null, NOT_DEL=null, NOT_DEL_T=null;
 /* Las claves calzan con las columnas de cat.Notificacion y con los checkbox
    del modal (notEv + la clave capitalizada). */
+/* Ojo con los dos parecidos: «Devolución» es el hospital devolviendo el
+   EQUIPO despues de la cirugia, y «Devuelta» es Bodega devolviendo la
+   SOLICITUD al hospital para que le haga cambios. */
 const NOT_EVENTOS=[
   {k:'solicitud',  l:'Solicitud',  el:'notEvSolicitud'},
   {k:'alistado',   l:'Alistado',   el:'notEvAlistado'},
   {k:'devolucion', l:'Devolución', el:'notEvDevolucion'},
-  {k:'liberado',   l:'Liberado',   el:'notEvLiberado'}
+  {k:'liberado',   l:'Liberado',   el:'notEvLiberado'},
+  {k:'devuelta',   l:'Devuelta',   el:'notEvDevuelta'}
 ];
 const NOT_COLS=[{k:'email', l:'Cuenta', cls:'not-mail'}].concat(
   NOT_EVENTOS.map(e=>({k:e.k, l:e.l, ev:true})));
@@ -5528,6 +5534,9 @@ function renderSolDespacho(){
   const puede = !!(solAlisto() && SOL_AV);
   document.getElementById('solDespachoAcciones').classList.toggle('hidden', !puede);
   document.getElementById('solReabrirBtn').classList.toggle('hidden', !(solDespachada() && canBodega()));
+  /* Devolver solo mientras la solicitud sea alistable. Despachada NO: el
+     equipo ya salio, y para eso esta «Reabrir alisto». */
+  document.getElementById('solDevolverBtn').classList.toggle('hidden', !solAlisto());
   solResetDespacho();
   if(!puede) return;
   /* La nota dice, antes de tocar el boton, por que no se va a poder enviar o
@@ -5554,12 +5563,55 @@ function renderSolDespacho(){
 }
 /* Enviar y reabrir piden un segundo toque, igual que salir del check list con
    marcas sin guardar: la app no usa confirm(). */
-let SOL_DESP=false, SOL_DESP_T=null, SOL_REAB=false, SOL_REAB_T=null;
+let SOL_DESP=false, SOL_DESP_T=null, SOL_REAB=false, SOL_REAB_T=null, SOL_DEV=false, SOL_DEV_T=null;
 function solResetDespacho(){
   clearTimeout(SOL_DESP_T); SOL_DESP=false;
   clearTimeout(SOL_REAB_T); SOL_REAB=false;
+  clearTimeout(SOL_DEV_T);  SOL_DEV=false;
   const d=document.getElementById('solDespacharBtn'); if(d) d.textContent='📦 Enviar a hospital';
   const r=document.getElementById('solReabrirBtn');   if(r) r.textContent='↩️ Reabrir alisto';
+  const v=document.getElementById('solDevolverBtn');  if(v) v.textContent='↩️ Devolver al hospital';
+}
+/* Devuelve la solicitud al hospital para que le haga cambios. Vuelve a
+   Borrador -el unico estado editable- y el alisto marcado SE DESCARTA: el
+   hospital puede cambiar las bandejas, y unas marcas puestas contra un
+   pedido distinto no son un dato sino un dato equivocado.
+   El segundo toque avisa cuantas marcas se van a perder: es trabajo de
+   alguien y tiene que verlo antes de confirmar, no despues. */
+async function devolverSolicitud(){
+  const s=SOL_ACT; if(!s || !s.id || !canBodega()) return;
+  const btn=document.getElementById('solDevolverBtn');
+  if(!SOL_DEV){
+    SOL_DEV=true;
+    btn.textContent='⚠️ Confirmar devolución';
+    const marcas=(SOL_AV||[]).reduce((a,b)=>a+(b.alistados||0),0);
+    toast('La solicitud vuelve a Borrador para que el hospital la edite'
+      + (marcas ? ', y se pierden las '+marcas+(marcas===1?' marca':' marcas')+' del alisto' : '')
+      + '. Toque otra vez para confirmar.');
+    clearTimeout(SOL_DEV_T); SOL_DEV_T=setTimeout(solResetDespacho, 6000);
+    return;
+  }
+  solResetDespacho();
+  btn.disabled=true;
+  showLoading('Devolviendo la solicitud al hospital',
+              'Descartando el alisto y avisando a las cuentas configuradas…');
+  try{
+    const r=await api('POST','/solicitudes/'+s.id+'/devolver');
+    /* Ya no es de Bodega: se sale al listado, porque en Borrador esta
+       pantalla es del hospital y Bodega no tiene nada que hacer aca. */
+    const fila=SOL_ROWS.find(x=>x.id===s.id);
+    if(fila){ fila.estado=r.estado; fila.fecha_envio=null; fila.alistados=0; fila.porcentaje=0; }
+    let m='Solicitud '+r.codigo+' devuelta al hospital.';
+    if(r.alisto_borrado) m+=' Se descartaron '+r.alisto_borrado+(r.alisto_borrado===1?' marca':' marcas')+' del alisto.';
+    if(r.notificacion && !r.notificacion.enviado) m+=' '+(r.notificacion.aviso||'No se pudo enviar el aviso.');
+    else if(r.notificacion && r.notificacion.cuentas) m+=' Se avisó a '+r.notificacion.cuentas+(r.notificacion.cuentas===1?' cuenta.':' cuentas.');
+    hideLoading();
+    showSolicitudes();
+    toast(m);
+  }catch(e){
+    toast('No se pudo devolver al hospital: '+e.message);
+    btn.disabled=false;
+  }finally{ hideLoading(); }
 }
 async function despacharSolicitud(){
   const s=SOL_ACT; if(!s || !s.id || !canBodega()) return;

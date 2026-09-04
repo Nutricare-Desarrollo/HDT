@@ -887,7 +887,7 @@ app.http('hospital-update', {
    Mantenimiento solo para Administrador y Bodega.
    ============================================================ */
 
-const NOTIF_EVENTOS = ['solicitud', 'alistado', 'devolucion', 'liberado'];
+const NOTIF_EVENTOS = ['solicitud', 'alistado', 'devolucion', 'liberado', 'devuelta'];
 
 /* Validacion deliberadamente permisiva: alcanza para atajar el dedazo
    («juan@», «juan.nutricare.co.cr») sin pelear con direcciones raras pero
@@ -917,7 +917,7 @@ app.http('notificaciones-list', {
     try {
       const r = await query(
         `SELECT Id AS id, Email AS email, Solicitud AS solicitud, Alistado AS alistado,
-                Devolucion AS devolucion, Liberado AS liberado
+                Devolucion AS devolucion, Liberado AS liberado, Devuelta AS devuelta
            FROM cat.Notificacion ORDER BY Email`);
       return json(200, r.rows);
     } catch (e) {
@@ -942,11 +942,12 @@ app.http('notificacion-create', {
     if (!ev) return json(400, { error: 'Marque al menos un evento' });
     try {
       const r = await query(
-        `INSERT INTO cat.Notificacion (Email, Solicitud, Alistado, Devolucion, Liberado, CreadoPor, FechaActualizacion)
-         VALUES ($1,$2,$3,$4,$5,$6,(now() at time zone 'utc'))
+        `INSERT INTO cat.Notificacion (Email, Solicitud, Alistado, Devolucion, Liberado, Devuelta, CreadoPor, FechaActualizacion)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,(now() at time zone 'utc'))
          RETURNING Id AS id, Email AS email, Solicitud AS solicitud, Alistado AS alistado,
-                   Devolucion AS devolucion, Liberado AS liberado`,
-        [email, ev.solicitud, ev.alistado, ev.devolucion, ev.liberado, user.name || user.email]);
+                   Devolucion AS devolucion, Liberado AS liberado, Devuelta AS devuelta`,
+        [email, ev.solicitud, ev.alistado, ev.devolucion, ev.liberado, ev.devuelta,
+         user.name || user.email]);
       return json(201, r.rows[0]);
     } catch (e) {
       if (e.code === '23505') return json(400, { error: 'Esa cuenta ya está en el listado' });
@@ -974,11 +975,12 @@ app.http('notificacion-update', {
       const r = await query(
         `UPDATE cat.Notificacion
             SET Email = $1, Solicitud = $2, Alistado = $3, Devolucion = $4, Liberado = $5,
-                ActualizadoPor = $6, FechaActualizacion = (now() at time zone 'utc')
-          WHERE Id = $7
+                Devuelta = $6, ActualizadoPor = $7, FechaActualizacion = (now() at time zone 'utc')
+          WHERE Id = $8
           RETURNING Id AS id, Email AS email, Solicitud AS solicitud, Alistado AS alistado,
-                    Devolucion AS devolucion, Liberado AS liberado`,
-        [email, ev.solicitud, ev.alistado, ev.devolucion, ev.liberado, user.name || user.email, id]);
+                    Devolucion AS devolucion, Liberado AS liberado, Devuelta AS devuelta`,
+        [email, ev.solicitud, ev.alistado, ev.devolucion, ev.liberado, ev.devuelta,
+         user.name || user.email, id]);
       if (!r.rowCount) return json(404, { error: 'La cuenta no existe' });
       return json(200, r.rows[0]);
     } catch (e) {
@@ -1541,6 +1543,88 @@ app.http('solicitud-despachar', {
       notif = { enviado: false, cuentas: 0, aviso: 'No se pudo preparar el aviso; el equipo quedó enviado al hospital.' };
     }
     return json(200, { ...sol, bandejas: detalle.length, detalle, avisos, notificacion: notif });
+  }
+});
+
+/* POST /api/solicitudes/{id}/devolver
+   Bodega regresa la solicitud al hospital para que le haga cambios. Es el
+   caso que la seccion 5.4 del documento de requerimientos dejaba por
+   definir: que pasa cuando una solicitud ya enviada tiene que modificarse.
+
+   Vuelve a 'Borrador', que es el UNICO estado que el hospital puede editar,
+   y con eso reaparece en su cejilla Borrador.
+
+   EL ALISTO SE DESCARTA. Decision de Luis, y es la que calza con volver a
+   Borrador: el hospital puede cambiar las bandejas, y unas marcas puestas
+   contra un pedido distinto no son un dato, son un dato equivocado. Bodega
+   vuelve a marcar desde cero cuando la solicitud regrese.
+
+   FechaEnvio se limpia: un Borrador con fecha de envio se contradice, y el
+   reenvio la vuelve a poner. */
+app.http('solicitud-devolver', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'solicitudes/{id}/devolver',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'Solo Bodega puede devolver la solicitud al hospital' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+
+    const client = await getClient();
+    let sol, detalle, borradas = 0;
+    try {
+      await client.query('BEGIN');
+      const est = await client.query(`SELECT Estado FROM dbo.SolicitudEquipo WHERE Id = $1 FOR UPDATE`, [id]);
+      if (!est.rowCount) { await client.query('ROLLBACK'); return json(404, { error: 'La solicitud no existe' }); }
+      const estado = est.rows[0].estado;
+      if (estado === 'Borrador') {
+        await client.query('ROLLBACK');
+        return json(409, { error: 'La solicitud ya está en Borrador: el hospital la puede editar' });
+      }
+      /* Despachada NO se devuelve: el equipo ya salio del almacen. Para eso
+         esta «Reabrir alisto», que la trae de vuelta a En Preparación. */
+      if (!SOL_ALISTABLES.includes(estado)) {
+        await client.query('ROLLBACK');
+        return json(409, { error: 'La solicitud está en ' + estado + '. Use «Reabrir alisto» antes de devolverla al hospital.' });
+      }
+
+      const del = await client.query(`DELETE FROM dbo.SolicitudAlisto WHERE SolicitudId = $1`, [id]);
+      borradas = del.rowCount || 0;
+      await client.query(
+        `UPDATE dbo.SolicitudEquipo
+            SET Estado = 'Borrador', FechaEnvio = NULL, ActualizadoPor = $1,
+                FechaActualizacion = (now() at time zone 'utc')
+          WHERE Id = $2`, [user.name || user.email, id]);
+
+      const s = await client.query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
+      const d = await client.query(
+        `SELECT EquipoCodigo AS equipo_codigo, Demarcado AS demarcado, Descripcion AS descripcion,
+                Color AS color
+           FROM dbo.SolicitudEquipoDetalle WHERE SolicitudId = $1 ORDER BY Id`, [id]);
+      sol = s.rows[0]; detalle = d.rows;
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      context.error(e);
+      return json(500, { error: 'No se pudo devolver la solicitud al hospital', detail: e.message });
+    } finally {
+      client.release();
+    }
+
+    /* Despues del commit y sin poder tumbarlo, igual que los otros avisos. */
+    let notif = { enviado: false, cuentas: 0, aviso: null };
+    try {
+      const cuentas = await cuentasDe(query, 'devuelta');
+      notif = await notificar({
+        descripcion: 'Solicitud devuelta al hospital para cambios — ' + resumenSolicitud(sol, detalle),
+        solicitadoPor: user.email,
+        cuentas
+      }, context);
+    } catch (e) {
+      context.error('Fallo al preparar la notificación de devolución: ' + e.message);
+      notif = { enviado: false, cuentas: 0, aviso: 'No se pudo preparar el aviso; la solicitud quedó en Borrador.' };
+    }
+    return json(200, { ...sol, bandejas: detalle.length, detalle, alisto_borrado: borradas, notificacion: notif });
   }
 });
 
