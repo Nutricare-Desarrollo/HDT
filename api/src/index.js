@@ -1025,7 +1025,12 @@ app.http('notificacion-delete', {
    a Bodega y el registro es el respaldo de lo que se pidio.
    ============================================================ */
 
-const SOL_ESTADOS = ['Borrador', 'Enviada', 'En Preparación'];
+const SOL_ESTADOS = ['Borrador', 'Enviada', 'En Preparación', 'Enviado a Hospital'];
+/* Estados en los que Bodega todavia puede marcar el alisto. Despachada la
+   solicitud, el check list queda de solo lectura: es el registro de con que
+   salio el equipo. */
+const SOL_ALISTABLES = ['Enviada', 'En Preparación'];
+const SOL_DESPACHADA = 'Enviado a Hospital';
 
 /* Fecha y hora actuales en Costa Rica, tomadas de la BASE y no del reloj del
    proceso. Azure corre en UTC: a las 6pm de Costa Rica ya es el dia siguiente
@@ -1110,7 +1115,11 @@ const SOL_SELECT = `SELECT s.Id AS id, s.Codigo AS codigo, s.Estado AS estado,
        s.Observaciones AS observaciones,
        s.CreadoPor AS creado_por, s.CreadoPorEmail AS creado_por_email,
        to_char(s.FechaCreacion, 'YYYY-MM-DD HH24:MI') AS fecha_registro,
-       to_char(s.FechaEnvio, 'YYYY-MM-DD HH24:MI') AS fecha_envio
+       to_char(s.FechaEnvio, 'YYYY-MM-DD HH24:MI') AS fecha_envio,
+       /* Ultimo movimiento. Con el estado 'Enviado a Hospital' es la fecha en
+          que Bodega despacho: no hace falta columna nueva -ni migracion- para
+          poder mostrarla. */
+       to_char(s.FechaActualizacion, 'YYYY-MM-DD HH24:MI') AS fecha_actualizacion
   FROM dbo.SolicitudEquipo s`;
 
 /* GET /api/solicitudes?estado=Borrador -> listado de una cejilla. */
@@ -1419,6 +1428,155 @@ app.http('solicitud-enviar', {
 
 
 /* ============================================================
+   Despacho al hospital
+   Bodega cierra el alisto y el equipo sale. Es la transicion que la
+   Tabla 6 del documento de requerimientos llama «Equipo Alistado»:
+   avisa a las cuentas configuradas para ese evento.
+   ============================================================ */
+
+/* Avance por bandeja de una solicitud, para validar el despacho. Devuelve una
+   fila por bandeja pedida, con cuantos componentes tiene y cuantos van
+   marcados. Un LEFT JOIN, no un JOIN: la bandeja sin componentes en el
+   catalogo tiene que aparecer igual, con articulos = 0. */
+const SQL_AVANCE_BANDEJA = `
+  SELECT d.EquipoCodigo AS codigo,
+         COALESCE(d.Demarcado, d.EquipoCodigo) AS demarcado,
+         COUNT(ep.ProductoCodigo)::int AS articulos,
+         COUNT(a.Id)::int              AS alistados
+    FROM dbo.SolicitudEquipoDetalle d
+    LEFT JOIN cat.EquipoProducto ep
+      ON UPPER(TRIM(ep.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo))
+    LEFT JOIN dbo.SolicitudAlisto a
+      ON a.SolicitudId = d.SolicitudId
+     AND UPPER(TRIM(a.EquipoCodigo))   = UPPER(TRIM(d.EquipoCodigo))
+     AND UPPER(TRIM(a.ProductoCodigo)) = UPPER(TRIM(ep.ProductoCodigo))
+   WHERE d.SolicitudId = $1
+   GROUP BY d.Id, d.EquipoCodigo, d.Demarcado
+   ORDER BY d.Id`;
+
+/* POST /api/solicitudes/{id}/despachar
+   Cierra el alisto y pasa la solicitud a «Enviado a Hospital».
+
+   La regla: toda bandeja QUE TENGA componentes en el catalogo necesita al
+   menos uno marcado. Una bandeja sin componentes registrados no se puede
+   alistar -no hay nada que marcar-, asi que no bloquea: sale en `avisos`
+   para que la pantalla lo advierta antes de despachar. Bloquearla dejaria la
+   solicitud trabada hasta que alguien complete el catalogo. */
+app.http('solicitud-despachar', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'solicitudes/{id}/despachar',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'Solo Bodega puede enviar el equipo al hospital' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+
+    const client = await getClient();
+    let sol, detalle, avisos = [];
+    try {
+      await client.query('BEGIN');
+      const est = await client.query(`SELECT Estado FROM dbo.SolicitudEquipo WHERE Id = $1 FOR UPDATE`, [id]);
+      if (!est.rowCount) { await client.query('ROLLBACK'); return json(404, { error: 'La solicitud no existe' }); }
+      const estado = est.rows[0].estado;
+      if (estado === SOL_DESPACHADA) {
+        await client.query('ROLLBACK');
+        return json(409, { error: 'La solicitud ya se envió al hospital' });
+      }
+      if (!SOL_ALISTABLES.includes(estado)) {
+        await client.query('ROLLBACK');
+        return json(409, { error: 'La solicitud está en estado ' + estado + ': el hospital todavía no la envió' });
+      }
+
+      const av = await client.query(SQL_AVANCE_BANDEJA, [id]);
+      if (!av.rowCount) {
+        await client.query('ROLLBACK');
+        return json(400, { error: 'La solicitud no tiene bandejas' });
+      }
+      const sinAlistar = av.rows.filter((b) => b.articulos > 0 && b.alistados === 0);
+      if (sinAlistar.length) {
+        await client.query('ROLLBACK');
+        const nombres = sinAlistar.map((b) => b.demarcado).join(', ');
+        return json(400, {
+          error: sinAlistar.length === 1
+            ? 'La bandeja ' + nombres + ' no tiene ningún componente alistado.'
+            : 'Estas bandejas no tienen ningún componente alistado: ' + nombres + '.',
+          bandejas: sinAlistar.map((b) => b.demarcado)
+        });
+      }
+      avisos = av.rows.filter((b) => b.articulos === 0).map((b) => b.demarcado);
+
+      await client.query(
+        `UPDATE dbo.SolicitudEquipo
+            SET Estado = $1, ActualizadoPor = $2,
+                FechaActualizacion = (now() at time zone 'utc')
+          WHERE Id = $3`, [SOL_DESPACHADA, user.name || user.email, id]);
+
+      const s = await client.query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
+      const d = await client.query(
+        `SELECT EquipoCodigo AS equipo_codigo, Demarcado AS demarcado, Descripcion AS descripcion,
+                Color AS color
+           FROM dbo.SolicitudEquipoDetalle WHERE SolicitudId = $1 ORDER BY Id`, [id]);
+      sol = s.rows[0]; detalle = d.rows;
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      context.error(e);
+      return json(500, { error: 'No se pudo enviar la solicitud al hospital', detail: e.message });
+    } finally {
+      client.release();
+    }
+
+    /* El aviso va DESPUES del commit y no puede tumbar el despacho, igual que
+       en el envio del hospital: el equipo ya salio. */
+    let notif = { enviado: false, cuentas: 0, aviso: null };
+    try {
+      const cuentas = await cuentasDe(query, 'alistado');
+      notif = await notificar({
+        descripcion: 'Equipo alistado — ' + resumenSolicitud(sol, detalle),
+        solicitadoPor: user.email,
+        cuentas
+      }, context);
+    } catch (e) {
+      context.error('Fallo al preparar la notificación de alistado: ' + e.message);
+      notif = { enviado: false, cuentas: 0, aviso: 'No se pudo preparar el aviso; el equipo quedó enviado al hospital.' };
+    }
+    return json(200, { ...sol, bandejas: detalle.length, detalle, avisos, notificacion: notif });
+  }
+});
+
+/* POST /api/solicitudes/{id}/reabrir
+   Devuelve una solicitud despachada a «En Preparación» para corregir el
+   alisto. No se avisa a nadie: el aviso de alistado ya salio y un segundo
+   correo diciendo lo contrario confunde mas que ayuda. Queda el registro en
+   ActualizadoPor. */
+app.http('solicitud-reabrir', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'solicitudes/{id}/reabrir',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'Solo Bodega puede reabrir el alisto' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inválido' });
+    try {
+      const r = await query(
+        `UPDATE dbo.SolicitudEquipo
+            SET Estado = 'En Preparación', ActualizadoPor = $1,
+                FechaActualizacion = (now() at time zone 'utc')
+          WHERE Id = $2 AND Estado = $3
+          RETURNING Id`, [user.name || user.email, id, SOL_DESPACHADA]);
+      if (!r.rowCount) {
+        return json(409, { error: 'Solo se puede reabrir una solicitud que ya se envió al hospital' });
+      }
+      const out = await query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
+      return json(200, out.rows[0]);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo reabrir el alisto', detail: e.message });
+    }
+  }
+});
+
+/* ============================================================
    Alistado de Bodega
    Bodega ve las solicitudes que ya salieron del hospital y va marcando
    los componentes de cada bandeja. El porcentaje se calcula por
@@ -1574,6 +1732,13 @@ app.http('solicitud-checklist-guardar', {
       if (est.rows[0].estado === 'Borrador') {
         await client.query('ROLLBACK');
         return json(409, { error: 'La solicitud todavía es un borrador; el hospital no la ha enviado' });
+      }
+      /* El check list de una solicitud ya despachada es solo lectura. La
+         pantalla tambien lo impide, pero la regla vive aca: es el registro de
+         con que salio el equipo del almacen. */
+      if (est.rows[0].estado === SOL_DESPACHADA) {
+        await client.query('ROLLBACK');
+        return json(409, { error: 'La solicitud ya se envió al hospital: el check list quedó cerrado. Use «Reabrir alisto» si necesita corregirlo.' });
       }
       const enBandeja = await client.query(
         `SELECT ProductoCodigo AS producto FROM cat.EquipoProducto

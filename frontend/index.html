@@ -149,6 +149,8 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .sol-add{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0 4px}
 .sol-add select{flex:1 1 320px;min-width:0}
 .sol-opt{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-left:5px}
+.sol-despacho-nota{flex:1 1 240px;min-width:0;color:var(--muted);font-size:13px;line-height:1.35}
+.sol-despacho-nota b{color:var(--danger)}
 .sol-acciones{margin-top:18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}
 /* Alisto de Bodega: barra de avance y check list */
 .pct-track{background:#eef3f7;border-radius:6px;height:20px;overflow:hidden;display:inline-block;vertical-align:middle}
@@ -168,6 +170,10 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .chk-cabe .v{font-size:14.5px;margin-top:2px;line-height:1.35}
 #chkGrid tbody tr.chk-row{cursor:pointer}
 #chkGrid tbody tr.chk-row:hover{background:#eef7fd}
+/* Solo lectura: sin mano y sin hover, para que no invite a tocar. */
+#chkGrid tbody tr.chk-row.ro{cursor:default}
+#chkGrid tbody tr.chk-row.ro:hover{background:transparent}
+#chkGrid tbody tr.chk-row.ro.on:hover{background:#e9f8f0}
 #chkGrid tbody tr.on{background:#e9f8f0}
 #chkGrid tbody tr.on:hover{background:#dcf3e6}
 #chkGrid .chk-num{width:44px;color:var(--muted)}
@@ -1015,6 +1021,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       <div class="tabs" id="solTabs">
         <button class="tab active" id="solTab-Borrador" onclick="solCejilla('Borrador')">Borrador<span class="n" id="solN-Borrador">0</span></button>
         <button class="tab" id="solTab-Enviada" onclick="solCejilla('Enviada')">Enviado<span class="n" id="solN-Enviada">0</span></button>
+        <button class="tab hidden" id="solTab-Despachada" onclick="solCejilla(SOL_DESPACHADA)">Enviado a Hospital<span class="n" id="solN-Despachada">0</span></button>
       </div>
       <div class="card">
         <div class="pad" style="padding-bottom:0">
@@ -1034,6 +1041,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div><h2 id="solDetTit">Solicitud de Equipo</h2><div class="sub" id="solDetSub"></div></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn-ghost hidden" id="solPrintBtn" onclick="imprimirSolicitud()">🖨️ Imprimir solicitud</button>
+          <button class="btn-ghost hidden" id="solReabrirBtn" onclick="reabrirAlisto()">↩️ Reabrir alisto</button>
           <button class="btn-ghost" onclick="showSolicitudes()">← Volver al listado</button>
         </div>
       </div>
@@ -1056,6 +1064,12 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       <div class="sol-acciones" id="solAcciones">
         <button class="btn-ghost" id="solGuardarBtn" onclick="guardarSolicitud(false)">💾 Guardar borrador</button>
         <button class="btn-primary" id="solEnviarBtn" onclick="guardarSolicitud(true)">📤 Enviar solicitud</button>
+      </div>
+      <!-- Despacho de Bodega. Franja aparte de la del hospital: son roles y
+           momentos distintos, y nunca se ven las dos a la vez. -->
+      <div class="sol-acciones hidden" id="solDespachoAcciones">
+        <span class="sol-despacho-nota" id="solDespachoNota"></span>
+        <button class="btn-primary" id="solDespacharBtn" onclick="despacharSolicitud()">📦 Enviar a hospital</button>
       </div>
     </section>
 
@@ -1081,7 +1095,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       <div class="card" style="margin-top:16px">
         <div class="pad" style="padding-bottom:0">
           <div class="section-title" style="margin-top:0">Componentes de la bandeja</div>
-          <div class="chk-ayuda">Toque una línea para marcarla como alistada. El avance sube al instante; se graba con «Guardar».</div>
+          <div class="chk-ayuda" id="chkAyuda">Toque una línea para marcarla como alistada. El avance sube al instante; se graba con «Guardar».</div>
         </div>
         <div class="tbl-wrap"><table id="chkGrid" class="cards"><thead id="chkHead"></thead><tbody id="chkBody"></tbody></table></div>
         <div id="chkEmpty" class="empty hidden"><div class="big">📦</div><div>Esta bandeja no tiene componentes registrados en el catálogo.</div></div>
@@ -5250,12 +5264,41 @@ const SOL_COLS=[
 /* Solo un borrador se edita o se borra. Una enviada se abre de solo lectura:
    ya salio el aviso a Bodega y el registro es el respaldo de lo que se pidio. */
 const solEditable = () => SOL_ACT && SOL_ACT.estado === 'Borrador';
-/* Para el hospital una solicitud sigue estando «enviada» aunque Bodega ya la
-   este alistando: las dos van en la misma cejilla. */
-const SOL_ENVIADAS = ['Enviada', 'En Preparación'];
-const solEnCejilla = (r, c) => c === 'Enviada' ? SOL_ENVIADAS.includes(r.estado) : r.estado === c;
+/* Con el estado «Enviado a Hospital» aparecen TRES preguntas distintas que
+   antes contestaba una sola constante. Separarlas es lo que hace que el
+   hospital no vea desaparecer su solicitud y que Bodega no pueda seguir
+   marcando despues de despachar.
+
+   1. SOL_POST_HOSPITAL — que ve el hospital en su cejilla «Enviado». Todo lo
+      que ya salio de sus manos, incluido lo despachado: para el hospital la
+      solicitud no puede desaparecer de la pantalla.
+   2. SOL_ALISTABLES — que puede marcar Bodega. Despachada la solicitud, el
+      check list se cierra: es el registro de con que salio el equipo.
+   3. SOL_DESPACHADA — el estado final del alisto, que para Bodega tiene su
+      propia cejilla. */
+const SOL_DESPACHADA = 'Enviado a Hospital';
+const SOL_ALISTABLES = ['Enviada', 'En Preparación'];
+const SOL_POST_HOSPITAL = SOL_ALISTABLES.concat([SOL_DESPACHADA]);
+/* La cejilla «Enviado» significa cosas distintas segun quien mira: para el
+   hospital es «ya la envie» -y sigue ahi aunque Bodega la despache, no le
+   puede desaparecer-, y para Bodega es «me falta trabajarla», porque lo
+   despachado tiene cejilla propia.
+
+   La reparticion se decide por canBodega() y NO por canSubir(): el
+   Administrador cumple las dos condiciones, y con canSubir() la misma
+   solicitud se contaba en las DOS cejillas a la vez. Quien ve la cejilla
+   «Enviado a Hospital» no debe ver lo despachado tambien en «Enviado». */
+const solEnCejilla = (r, c) => {
+  if(c === SOL_DESPACHADA) return r.estado === SOL_DESPACHADA;
+  if(c === 'Enviada') return (canBodega() ? SOL_ALISTABLES : SOL_POST_HOSPITAL).includes(r.estado);
+  return r.estado === c;
+};
 /* Bodega no crea ni edita: entra a marcar el alisto de lo que ya se envio. */
-const solAlisto = () => SOL_ACT && SOL_ACT.id && canBodega() && SOL_ENVIADAS.includes(SOL_ACT.estado);
+const solAlisto = () => SOL_ACT && SOL_ACT.id && canBodega() && SOL_ALISTABLES.includes(SOL_ACT.estado);
+/* El tablero de alisto se SIGUE mostrando despachada la solicitud, pero de
+   solo lectura: el avance y el check list son el respaldo de la entrega. */
+const solVerAlisto = () => SOL_ACT && SOL_ACT.id && canBodega() && SOL_POST_HOSPITAL.includes(SOL_ACT.estado);
+const solDespachada = () => SOL_ACT && SOL_ACT.estado === SOL_DESPACHADA;
 let SOL_AV = null;      /* avance por bandeja de la solicitud abierta */
 let CHK = null;         /* check list abierto */
 let CHK_ORIG = '';      /* firma de lo grabado, para detectar cambios sin guardar */
@@ -5273,21 +5316,30 @@ async function showSolicitudes(){
   if(!canSubir() && !canBodega()){ toast('Su rol no tiene acceso'); showInicio(); return; }
   setTab('solicitudes'); showOnly('viewSolicitudes');
   /* Bodega solo ve lo enviado: el borrador es del hospital y ni siquiera se
-     le muestra la cejilla. */
+     le muestra la cejilla. Al reves con «Enviado a Hospital»: es la bandeja
+     de salida de Bodega, y al hospital no se le dibuja -para el la solicitud
+     sigue en «Enviado», que es lo unico que le importa saber-. */
   const soloBodega = !canSubir();
   document.getElementById('solTab-Borrador').classList.toggle('hidden', soloBodega);
+  document.getElementById('solTab-Despachada').classList.toggle('hidden', !canBodega());
   if(soloBodega) SOL_CEJILLA='Enviada';
+  if(SOL_CEJILLA===SOL_DESPACHADA && !canBodega()) SOL_CEJILLA='Enviada';
   await loadSolicitudes();
   solCejilla(SOL_CEJILLA);
 }
+/* Cejilla -> id del boton. «Enviado a Hospital» tiene espacios, asi que su
+   boton usa un id corto. */
+const SOL_TABS = [['Borrador','solTab-Borrador'], ['Enviada','solTab-Enviada'],
+                  [SOL_DESPACHADA,'solTab-Despachada']];
 function solCejilla(estado){
   SOL_CEJILLA=estado;
-  ['Borrador','Enviada'].forEach(e=>document.getElementById('solTab-'+e).classList.toggle('active', e===estado));
+  SOL_TABS.forEach(([e,el])=>document.getElementById(el).classList.toggle('active', e===estado));
   document.getElementById('solCrearBtn').classList.toggle('hidden', estado!=='Borrador' || !canSubir());
   document.getElementById('solEmptyTxt').textContent = estado==='Borrador'
     ? 'No hay solicitudes en borrador. Use «Crear solicitud».'
-    : (canSubir() ? 'Todavía no se ha enviado ninguna solicitud.'
-                  : 'Ningún hospital ha enviado solicitudes.');
+    : (estado===SOL_DESPACHADA ? 'Todavía no se ha enviado ningún equipo al hospital.'
+      : (canSubir() ? 'Todavía no se ha enviado ninguna solicitud.'
+                    : 'Ninguna solicitud pendiente de alistar.'));
   renderSolBody();
 }
 async function loadSolicitudes(){
@@ -5327,8 +5379,9 @@ function renderSolHead(){
 }
 function renderSolicitudes(){ renderSolHead(); renderSolBody(); }
 function renderSolBody(){
-  ['Borrador','Enviada'].forEach(e=>{
-    document.getElementById('solN-'+e).textContent = SOL_ROWS.filter(r=>solEnCejilla(r,e)).length;
+  SOL_TABS.forEach(([e,el])=>{
+    const n=document.getElementById(el).querySelector('.n');
+    if(n) n.textContent = SOL_ROWS.filter(r=>solEnCejilla(r,e)).length;
   });
   const enCejilla=solDeCejilla(), rows=solFiltered();
   const b=document.getElementById('solBody'); b.innerHTML='';
@@ -5414,7 +5467,7 @@ async function abrirSolicitud(id){
     SOL_ACT=s;
     /* El avance por bandeja solo lo necesita Bodega, y solo si ya se envio.
        Si falla, la pantalla igual abre: se pierde el porcentaje, no el dato. */
-    if(canBodega() && SOL_ENVIADAS.includes(s.estado)){
+    if(canBodega() && SOL_POST_HOSPITAL.includes(s.estado)){
       try{ SOL_AV=await api('GET','/solicitudes/'+id+'/bandejas'); }
       catch(e){ toast('No se pudo calcular el avance del alisto: '+e.message); }
     }
@@ -5430,8 +5483,10 @@ function renderSolicitudDet(){
   document.getElementById('solDetTit').textContent = s.id ? s.codigo : 'Nueva solicitud';
   document.getElementById('solDetSub').textContent = s.id
     ? (ed ? 'Borrador — se puede editar'
-          : s.estado+' · enviada el '+(s.fecha_envio||'—')
-            +(solAlisto() ? ' — marque el alisto con «Check list»' : ' — solo lectura'))
+          : s.estado+' · enviada el '+docFechaHora(s.fecha_envio)
+            +(solDespachada()
+                ? ' — equipo enviado al hospital el '+docFechaHora(s.fecha_actualizacion)+'; el check list quedó cerrado'
+                : (solAlisto() ? ' — marque el alisto con «Check list»' : ' — solo lectura')))
     : 'Complete los datos y agregue las bandejas';
   document.getElementById('solForm').innerHTML=`
     <div class="field"><label>Nombre del hospital <span class="req">*</span></label>
@@ -5462,15 +5517,111 @@ function renderSolicitudDet(){
   /* Imprimir solo lo que ya existe en la base: un borrador sin guardar no
      tiene consecutivo, y un papel con el codigo en blanco no sirve. */
   document.getElementById('solPrintBtn').classList.toggle('hidden', !s.id);
+  renderSolDespacho();
   renderSolDetalle();
 }
+/* La franja de despacho y el boton de reabrir. Se llama al abrir la
+   solicitud y despues de cada movimiento, porque los dos dependen del estado
+   y del avance de las bandejas. */
+function renderSolDespacho(){
+  const s=SOL_ACT;
+  const puede = !!(solAlisto() && SOL_AV);
+  document.getElementById('solDespachoAcciones').classList.toggle('hidden', !puede);
+  document.getElementById('solReabrirBtn').classList.toggle('hidden', !(solDespachada() && canBodega()));
+  solResetDespacho();
+  if(!puede) return;
+  /* La nota dice, antes de tocar el boton, por que no se va a poder enviar o
+     con que salvedad se va a enviar. Es la misma regla que valida la API. */
+  const sinAlistar = SOL_AV.filter(b=>(b.articulos||0)>0 && (b.alistados||0)===0);
+  const sinCatalogo = SOL_AV.filter(b=>(b.articulos||0)===0);
+  let nota='';
+  if(sinAlistar.length){
+    nota = '<b>Falta alistar '+(sinAlistar.length===1?'la bandeja ':'las bandejas ')
+         + sinAlistar.map(b=>esc(b.demarcado||b.equipo_codigo)).join(', ')
+         + '.</b> Cada bandeja necesita al menos un componente marcado.';
+  }else if(sinCatalogo.length){
+    nota = (sinCatalogo.length===1?'La bandeja ':'Las bandejas ')
+         + sinCatalogo.map(b=>esc(b.demarcado||b.equipo_codigo)).join(', ')
+         + (sinCatalogo.length===1?' no tiene' : ' no tienen')
+         + ' componentes registrados en el catálogo: se enviarán sin check list.';
+  }else{
+    nota = 'Se cerrará el check list y se avisará al hospital.';
+  }
+  document.getElementById('solDespachoNota').innerHTML=nota;
+  const b=document.getElementById('solDespacharBtn');
+  b.disabled = sinAlistar.length>0;
+  b.title = sinAlistar.length ? 'Falta alistar al menos una bandeja' : 'Enviar el equipo al hospital';
+}
+/* Enviar y reabrir piden un segundo toque, igual que salir del check list con
+   marcas sin guardar: la app no usa confirm(). */
+let SOL_DESP=false, SOL_DESP_T=null, SOL_REAB=false, SOL_REAB_T=null;
+function solResetDespacho(){
+  clearTimeout(SOL_DESP_T); SOL_DESP=false;
+  clearTimeout(SOL_REAB_T); SOL_REAB=false;
+  const d=document.getElementById('solDespacharBtn'); if(d) d.textContent='📦 Enviar a hospital';
+  const r=document.getElementById('solReabrirBtn');   if(r) r.textContent='↩️ Reabrir alisto';
+}
+async function despacharSolicitud(){
+  const s=SOL_ACT; if(!s || !s.id || !canBodega()) return;
+  const btn=document.getElementById('solDespacharBtn');
+  if(!SOL_DESP){
+    SOL_DESP=true;
+    btn.textContent='📦 Confirmar envío';
+    toast('El equipo sale al hospital y el check list se cierra. Toque otra vez para confirmar.');
+    clearTimeout(SOL_DESP_T); SOL_DESP_T=setTimeout(solResetDespacho, 5000);
+    return;
+  }
+  solResetDespacho();
+  btn.disabled=true;
+  try{
+    const r=await api('POST','/solicitudes/'+s.id+'/despachar');
+    SOL_ACT=r;
+    /* El avance se vuelve a pedir: el tablero pasa a solo lectura y los
+       porcentajes son los que quedaron grabados. */
+    try{ SOL_AV=await api('GET','/solicitudes/'+s.id+'/bandejas'); }catch(e){ SOL_AV=null; }
+    const fila=SOL_ROWS.find(x=>x.id===s.id); if(fila) fila.estado=r.estado;
+    renderSolicitudDet();
+    let m='Equipo enviado al hospital: '+r.codigo+'.';
+    if(r.avisos && r.avisos.length) m+=' Sin check list: '+r.avisos.join(', ')+'.';
+    if(r.notificacion && !r.notificacion.enviado) m+=' '+(r.notificacion.aviso||'No se pudo enviar el aviso.');
+    else if(r.notificacion && r.notificacion.cuentas) m+=' Se avisó a '+r.notificacion.cuentas+(r.notificacion.cuentas===1?' cuenta.':' cuentas.');
+    toast(m);
+  }catch(e){
+    toast('No se pudo enviar al hospital: '+e.message);
+    btn.disabled=false;
+  }
+}
+async function reabrirAlisto(){
+  const s=SOL_ACT; if(!s || !s.id || !canBodega()) return;
+  const btn=document.getElementById('solReabrirBtn');
+  if(!SOL_REAB){
+    SOL_REAB=true;
+    btn.textContent='⚠️ Confirmar reapertura';
+    toast('La solicitud vuelve a «En Preparación» y el check list se puede editar. El hospital ya recibió el aviso de alistado.');
+    clearTimeout(SOL_REAB_T); SOL_REAB_T=setTimeout(solResetDespacho, 5000);
+    return;
+  }
+  solResetDespacho();
+  btn.disabled=true;
+  try{
+    const r=await api('POST','/solicitudes/'+s.id+'/reabrir');
+    SOL_ACT={...SOL_ACT, ...r};
+    try{ SOL_AV=await api('GET','/solicitudes/'+s.id+'/bandejas'); }catch(e){ SOL_AV=null; }
+    const fila=SOL_ROWS.find(x=>x.id===s.id); if(fila) fila.estado=r.estado;
+    renderSolicitudDet();
+    toast('Alisto reabierto: '+r.codigo+' volvió a «En Preparación».');
+  }catch(e){
+    toast('No se pudo reabrir: '+e.message);
+  }finally{ btn.disabled=false; }
+}
+
 function renderSolDetalle(){
   const s=SOL_ACT; if(!s) return;
   const ed=solEditable();
   /* Cuando Bodega abre una solicitud enviada, el mismo grid de abajo pasa a
      ser el tablero de alisto: las bandejas son las mismas, solo se le suman
      el avance y el boton que abre el check list. */
-  const al=!!(solAlisto() && SOL_AV);
+  const al=!!(solVerAlisto() && SOL_AV);
   const lista = al ? SOL_AV : (s.detalle||[]);
   /* La tarjeta de celular tiene un reparto por forma: con avance son cuatro
      renglones, sin avance tres. Si se dejaran las areas de Artículos y
@@ -5513,6 +5664,9 @@ function renderSolDetalle(){
    El porcentaje se cuenta por componente: un clic vale uno, sin ponderar
    por cantidad. Se pinta en el momento y se graba con «Guardar»; hasta
    entonces nada sale del navegador. */
+/* El check list de una solicitud ya despachada se abre, pero no se marca:
+   es el registro de con que salio el equipo. La API tambien lo rechaza. */
+const chkSoloLectura = () => !!(CHK && CHK.solicitud && CHK.solicitud.estado === SOL_DESPACHADA);
 async function abrirCheckList(codigo){
   if(!SOL_ACT || !SOL_ACT.id) return;
   if(!canBodega()){ toast('Solo Bodega puede alistar el equipo'); return; }
@@ -5547,7 +5701,7 @@ function chkResetVolver(){
 }
 /* Salir con cambios pide un segundo toque. La app no usa confirm(). */
 function volverDeCheckList(){
-  if(chkFirma()!==CHK_ORIG && !CHK_SALIR){
+  if(chkFirma()!==CHK_ORIG && !chkSoloLectura() && !CHK_SALIR){
     CHK_SALIR=true;
     chkPintarVolver('⚠️ Salir sin guardar');
     clearTimeout(CHK_SALIR_T);
@@ -5580,6 +5734,12 @@ function renderCheckList(){
   document.getElementById('chkHead').innerHTML=
     '<tr><th class="chk-num">#</th><th>Código</th><th class="chk-desc">Descripción</th>'
     +'<th class="chk-cant">Cantidad</th><th class="chk-box">Check</th></tr>';
+  /* Solo lectura: se cambia la ayuda -«toque una linea» seria mentira- y se
+     esconde la franja de Guardar y Desmarcar. */
+  const ro=chkSoloLectura();
+  document.getElementById('chkAyuda').textContent = ro
+    ? 'El equipo ya se envió al hospital: este check list es el registro de lo que salió y no se puede modificar.'
+    : 'Toque una línea para marcarla como alistada. El avance sube al instante; se graba con «Guardar».';
   renderChkBody();
 }
 /* Descripcion del componente. Si no hay ninguna -catalogo de productos
@@ -5600,10 +5760,17 @@ function chkCant(v){
 }
 function renderChkBody(){
   const lista=(CHK&&CHK.componentes)||[];
+  const ro=chkSoloLectura();
   const b=document.getElementById('chkBody'); b.innerHTML='';
   document.getElementById('chkEmpty').classList.toggle('hidden', lista.length>0);
   document.getElementById('chkGrid').classList.toggle('hidden', lista.length===0);
+  /* La franja de abajo se QUEDA en solo lectura: se le sacan Guardar y
+     Desmarcar, pero sigue mostrando el avance final de la bandeja -que es el
+     dato del registro- y, en celular, el «Volver», que es la unica salida
+     alcanzable despues de bajar por 82 componentes. */
   document.getElementById('chkAcciones').classList.toggle('hidden', lista.length===0);
+  document.getElementById('chkGuardarBtn').classList.toggle('hidden', ro);
+  document.getElementById('chkLimpiarBtn').classList.toggle('hidden', ro);
   let tipo=null, n=0;
   lista.forEach((c,i)=>{
     /* La API ya viene ordenada por Tipo: aca solo se corta la seccion.
@@ -5617,9 +5784,9 @@ function renderChkBody(){
     }
     n++;
     const tr=document.createElement('tr');
-    tr.className='chk-row'+(c.marcado?' on':'');
+    tr.className='chk-row'+(c.marcado?' on':'')+(ro?' ro':'');
     tr.dataset.i=i;
-    tr.onclick=()=>chkToggle(i);
+    if(!ro) tr.onclick=()=>chkToggle(i);
     /* Los data-label son los rotulos que en el celular viajan pegados al
        dato: el thead se oculta y la etiqueta del encabezado se perderia. */
     tr.innerHTML=`<td class="chk-num">${n}</td>`
@@ -5632,6 +5799,7 @@ function renderChkBody(){
   chkAvance();
 }
 function chkToggle(i){
+  if(chkSoloLectura()) return;
   const c=CHK && CHK.componentes && CHK.componentes[i]; if(!c) return;
   c.marcado=!c.marcado;
   const tr=document.querySelector('#chkBody tr[data-i="'+i+'"]');
@@ -5642,6 +5810,7 @@ function chkToggle(i){
   chkAvance();
 }
 function chkLimpiar(){
+  if(chkSoloLectura()){ toast('El check list está cerrado: el equipo ya se envió al hospital'); return; }
   ((CHK&&CHK.componentes)||[]).forEach(c=>{ c.marcado=false; });
   renderChkBody();
 }
@@ -5661,13 +5830,14 @@ function chkAvance(){
     ? m+' de '+lista.length+(lista.length===1?' componente alistado':' componentes alistados') : '';
   document.getElementById('chkFoot').textContent=lista.length
     ? (lista.length===1?'1 componente':lista.length+' componentes') : '';
-  const sucio=chkFirma()!==CHK_ORIG;
+  const sucio=chkFirma()!==CHK_ORIG && !chkSoloLectura();
   const g=document.getElementById('chkGuardarBtn');
   if(g) g.textContent = sucio ? '💾 Guardar cambios' : '💾 Guardar';
   if(!sucio) chkResetVolver();
 }
 async function guardarCheckList(){
   if(!CHK || !canBodega()) return;
+  if(chkSoloLectura()){ toast('El check list está cerrado: el equipo ya se envió al hospital'); return; }
   const btn=document.getElementById('chkGuardarBtn'); btn.disabled=true;
   try{
     const cod=CHK.bandeja.equipo_codigo;
