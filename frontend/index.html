@@ -132,6 +132,12 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .hos-chk input{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
 /* Notificaciones: el correo es la columna larga; los eventos son marcas. */
 #notGrid .not-mail{max-width:340px;overflow:hidden;text-overflow:ellipsis}
+/* Bitácora: usuario, acción y detalle se recortan en la tabla; en tarjeta el
+   @media de .cards les devuelve el ancho. */
+#bitGrid .bit-user{max-width:190px;overflow:hidden;text-overflow:ellipsis}
+#bitGrid .bit-acc{max-width:260px;overflow:hidden;text-overflow:ellipsis}
+#bitGrid .bit-det{max-width:320px;overflow:hidden;text-overflow:ellipsis}
+#bitGrid .bit-nope{color:var(--danger);font-weight:700}
 #notGrid .not-si{color:#1c7a54;font-weight:700}
 #notGrid .not-no{color:var(--muted)}
 .not-chks{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:9px 16px;margin-top:2px}
@@ -426,6 +432,7 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
      del grid y le ganan por especificidad al patron, asi que hay que
      devolverles el ancho una por una. */
   #banGrid.cards td.ban-desc,#hosGrid.cards td.hos-nom,#notGrid.cards td.not-mail,
+  #bitGrid.cards td.bit-user,#bitGrid.cards td.bit-acc,#bitGrid.cards td.bit-det,
   table.cards tbody td.clip,table.cards tbody td.diag{
     max-width:none;overflow:visible;text-overflow:clip;white-space:normal;
   }
@@ -924,6 +931,19 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div class="tbl-wrap"><table id="audGrid" class="cards dos"><thead id="audHead"></thead><tbody id="audBody"></tbody></table></div>
         <div id="audEmpty" class="empty hidden"><div class="big">🕵️</div><div>Todavía no hay cambios registrados.</div></div>
         <div class="grid-foot" id="audFoot"></div>
+      </div>
+    </section>
+
+    <!-- BITÁCORA DE ACTIVIDAD — solo Administrador -->
+    <section id="viewBitacora" class="hidden">
+      <div class="page-head">
+        <div><h2>Bitácora de actividad</h2><div class="sub">Qué hizo cada usuario en la app, en qué pantalla y cuándo</div></div>
+        <button class="btn-ghost" onclick="loadBitacora()">🔄 Actualizar</button>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap"><table id="bitGrid" class="cards dos"><thead id="bitHead"></thead><tbody id="bitBody"></tbody></table></div>
+        <div id="bitEmpty" class="empty hidden"><div class="big">📓</div><div>Todavía no hay actividad registrada.</div></div>
+        <div class="grid-foot" id="bitFoot"></div>
       </div>
     </section>
 
@@ -2193,7 +2213,8 @@ function navGrupos(){
       {id:'config',      ic:'\u2699\uFE0F',  l:'Configuración',            fn:showConfig,      ver:canBodega}
     ]},
     { titulo:'ADMINISTRACIÓN', items:[
-      {id:'usuarios',    ic:'\u{1F465}', l:'Usuarios y roles',         fn:showUsuarios,    ver:()=>ROL==='Administrador'}
+      {id:'usuarios',    ic:'\u{1F465}', l:'Usuarios y roles',         fn:showUsuarios,    ver:()=>ROL==='Administrador'},
+      {id:'bitacora',    ic:'\u{1F4D3}', l:'Bitácora de actividad',    fn:showBitacora,    ver:()=>ROL==='Administrador'}
     ]}
   ];
 }
@@ -2219,7 +2240,7 @@ function buildNav(){
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('ovl').classList.toggle('show'); }
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('ovl').classList.remove('show'); }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales','viewNotificaciones','viewSolicitudes','viewSolicitudDet','viewCheckList'];
+const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales','viewNotificaciones','viewSolicitudes','viewSolicitudDet','viewCheckList','viewBitacora'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
 
 /* ===== INICIO ===== */
@@ -6363,6 +6384,9 @@ const CARDS_FILAS = {
                       {extras:[''], acciones:true, ancho:[1]}],
   hosGrid:     () => [HOS_COLS, {extras:[''], acciones:true}],
   notGrid:     () => [NOT_COLS, {extras:[''], acciones:true}],
+  /* La accion es lo que se lee de la fila, asi que hace de titulo; el
+     detalle y el usuario se llevan el ancho entero. */
+  bitGrid:     () => [BIT_COLS, {titulo:4, ancho:['detalle','usuario']}],
   /* Los envios de un pedido no tienen codigo propio: ninguna celda hace de
      titulo y todas llevan su rotulo. */
   envGrid:     () => [['Usuario','Fecha y hora','Cantidad','Lote','Estado','TR'],
@@ -6405,7 +6429,8 @@ const CARDS_BUSCADORES = {
   banGrid:     ['Buscar bandeja, descripción, color…',     () => renderBanBody()],
   banProdGrid: ['Buscar código o descripción…',            () => renderBandejaProductos()],
   hosGrid:     ['Buscar hospital o provincia…',            () => renderHosBody()],
-  notGrid:     ['Buscar cuenta…',                          () => renderNotBody()]
+  notGrid:     ['Buscar cuenta…',                          () => renderNotBody()],
+  bitGrid:     ['Buscar usuario, pantalla, acción…',       () => renderBitBody()]
 };
 function onCardsBuscar(id, v){
   CARDS_Q[id] = v;
@@ -6427,6 +6452,73 @@ function cardsBuscadores(){
       + ' placeholder="' + attr(CARDS_BUSCADORES[id][0]) + '"'
       + ' oninput="onCardsBuscar(\'' + id + '\', this.value)">';
     wrap.parentNode.insertBefore(cont, wrap);
+  });
+}
+
+/* ===== BITÁCORA DE ACTIVIDAD (solo Administrador) =====
+   Quien escribe las filas es el envoltorio de app.http en la API, no esta
+   pantalla: aca solo se leen. La auditoria de hojas y esta conviven a
+   proposito -esa es el diff campo por campo de UNA hoja y la usa Bodega;
+   esta es la actividad de toda la app y es supervision-. */
+let BIT_ROWS=[], BIT_COLF={};
+const BIT_COLS=[
+  {k:'fecha',    l:'Fecha y hora'},
+  {k:'usuario',  l:'Usuario',  cls:'bit-user'},
+  {k:'rol',      l:'Rol'},
+  {k:'pantalla', l:'Pantalla'},
+  {k:'accion',   l:'Acción',   cls:'bit-acc'},
+  {k:'registro', l:'Registro'},
+  {k:'detalle',  l:'Detalle',  cls:'bit-det'}
+];
+async function showBitacora(){
+  if(ROL!=='Administrador'){ toast('Solo el Administrador puede ver la bitácora'); showInicio(); return; }
+  setTab('bitacora'); showOnly('viewBitacora');
+  await loadBitacora();
+}
+async function loadBitacora(){
+  showLoading('Cargando la bitácora', 'Estamos trayendo la actividad registrada…');
+  try{ BIT_ROWS=await api('GET','/bitacora'); }
+  catch(e){ BIT_ROWS=[]; toast('Error al cargar la bitácora: '+e.message); }
+  finally{ hideLoading(); }
+  renderBitacora();
+}
+function bitFiltered(){ return cardsFiltrar('bitGrid', BIT_ROWS, BIT_COLF, BIT_COLS); }
+function onBitFilter(k,v){ BIT_COLF[k]=v; renderBitBody(); }
+function onBitFilterKey(e){
+  if(e.key==='Enter'){ e.preventDefault(); renderBitBody(); return; }
+  if(e.key==='Escape'){ e.preventDefault(); e.target.value=''; onBitFilter(e.target.dataset.k,''); }
+}
+/* El encabezado se dibuja una sola vez: redibujarlo en cada tecla haria
+   perder el foco del input de filtro. Mismo criterio que Bandejas. */
+function renderBitHead(){
+  const head=document.getElementById('bitHead');
+  if(head.dataset.listo) return;
+  head.innerHTML=`<tr>${BIT_COLS.map(c=>`<th${c.cls?' class="'+c.cls+'"':''}>${c.l}</th>`).join('')}</tr>`
+    +`<tr class="filter-row">${BIT_COLS.map(c=>`<th><input placeholder="Filtrar…" autocomplete="off" data-k="${c.k}" oninput="onBitFilter('${c.k}',this.value)" onkeydown="onBitFilterKey(event)" value="${attr(BIT_COLF[c.k])}"></th>`).join('')}</tr>`;
+  head.dataset.listo='1';
+}
+function renderBitacora(){ renderBitHead(); renderBitBody(); }
+function renderBitBody(){
+  const rows=bitFiltered();
+  const b=document.getElementById('bitBody'); b.innerHTML='';
+  document.getElementById('bitEmpty').classList.toggle('hidden', BIT_ROWS.length>0);
+  document.getElementById('bitGrid').classList.toggle('hidden', BIT_ROWS.length===0);
+  const foot=document.getElementById('bitFoot');
+  if(!BIT_ROWS.length){ foot.textContent=''; return; }
+  foot.textContent = (rows.length===BIT_ROWS.length)
+    ? BIT_ROWS.length+(BIT_ROWS.length===1?' movimiento':' movimientos')
+    : rows.length+' de '+BIT_ROWS.length+' movimientos';
+  if(!rows.length){ b.innerHTML=`<tr class="aviso"><td colspan="${BIT_COLS.length}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  rows.forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=BIT_COLS.map(c=>{
+      /* Un 403 es un intento sin permiso: se marca, porque es lo unico que
+         se guarda de lo que NO se hizo. */
+      if(c.k==='accion' && r.http===403)
+        return `<td class="${c.cls} bit-nope" title="El rol no tenía permiso">${esc(r.accion)}</td>`;
+      return `<td${c.cls?' class="'+c.cls+'"':''} title="${attr(r[c.k])}">${esc(r[c.k])}</td>`;
+    }).join('');
+    b.appendChild(tr);
   });
 }
 

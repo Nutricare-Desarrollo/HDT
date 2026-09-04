@@ -6,6 +6,7 @@ const { getCatalogo, getMapa, normCod } = require('./productos');
 const { getLotes } = require('./lotes');
 const { iniciarDynamics, consultarDynamics } = require('./dynamics');
 const { notificar, cuentasDe } = require('./notificar');
+const bitacora = require('./bitacora');
 
 /* ============================================================
    Utilidades
@@ -81,6 +82,16 @@ async function getRole(user) {
 }
 const puedeSubir = (rol) => rol === 'Hospital' || rol === 'Administrador';
 const puedeBodega = (rol) => rol === 'Bodega' || rol === 'Administrador';
+
+/* ============================================================
+   Bitacora: se envuelve app.http UNA vez, aca, antes de que se registre
+   cualquier endpoint. Desde este punto todo lo que no sea GET queda en la
+   bitacora sin que haya que acordarse de llamarla en cada handler.
+   Va despues de getUser y getRole porque son sus dependencias, y antes del
+   primer app.http porque si no, los de arriba quedarian sin envolver.
+   ============================================================ */
+const appHttp = app.http.bind(app);
+app.http = (nombre, cfg) => appHttp(nombre, bitacora.envolver(cfg, { getUser, getRole, query }));
 
 /* ============================================================
    /api/me  -> usuario autenticado + rol
@@ -2439,6 +2450,41 @@ app.http('auditoria-list', {
     } catch (e) {
       context.error(e);
       return json(500, { error: 'No se pudo obtener la auditor\u00eda', detail: e.message });
+    }
+  }
+});
+
+/* ============================================================
+   Bitacora de actividad — solo Administrador
+   El registro lo escribe el envoltorio de app.http (ver bitacora.js).
+   Aca solo se lee.
+   ============================================================ */
+app.http('bitacora-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'bitacora',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    /* Solo el Administrador. La auditoria de hojas la ve Bodega porque es
+       una herramienta de su trabajo; la bitacora es supervision. */
+    if ((await getRole(user)) !== 'Administrador')
+      return json(403, { error: 'Solo el Administrador puede ver la bitácora' });
+    let limite = parseInt(request.query.get('limite') || '1000', 10);
+    if (!Number.isFinite(limite) || limite <= 0) limite = 1000;
+    if (limite > 5000) limite = 5000;
+    try {
+      const r = await query(
+        `SELECT Id AS id,
+                to_char((FechaHora AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica',
+                        'DD/MM/YYYY HH24:MI') AS fecha,
+                Usuario AS usuario, UsuarioEmail AS usuario_email, Rol AS rol,
+                Pantalla AS pantalla, Accion AS accion, Registro AS registro,
+                Detalle AS detalle, Estado AS http
+           FROM dbo.Bitacora
+          ORDER BY Id DESC LIMIT $1`, [limite]);
+      return json(200, r.rows);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener la bitácora', detail: e.message });
     }
   }
 });
