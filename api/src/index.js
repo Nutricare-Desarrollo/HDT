@@ -5,7 +5,7 @@ const audit = require('./auditoria');
 const { getCatalogo, getMapa, normCod } = require('./productos');
 const { getLotes } = require('./lotes');
 const { iniciarDynamics, consultarDynamics } = require('./dynamics');
-const { notificar, cuentasDe } = require('./notificar');
+const { notificar, cuentasDe, urlSolicitud } = require('./notificar');
 const bitacora = require('./bitacora');
 
 /* ============================================================
@@ -1669,6 +1669,7 @@ app.http('solicitud-enviar', {
       notif = await notificar({
         descripcion: resumenSolicitud(sol, detalle),
         solicitadoPor: user.email,
+        url: urlSolicitud(request, id),
         cuentas
       }, context);
     } catch (e) {
@@ -1786,8 +1787,13 @@ app.http('solicitud-despachar', {
     try {
       const cuentas = await cuentasDe(query, 'alistado');
       notif = await notificar({
-        descripcion: 'Equipo alistado — ' + resumenSolicitud(sol, detalle),
+        /* Las bandejas que salieron sin check list van en la descripcion: es
+           el dato que Bodega y el hospital necesitan ver en el aviso, no en
+           el log. El flujo es generico y solo pinta este texto. */
+        descripcion: 'Equipo alistado — ' + resumenSolicitud(sol, detalle)
+          + ((avisos && avisos.length) ? ' — sin check list: ' + avisos.join(', ') : ''),
         solicitadoPor: user.email,
+        url: urlSolicitud(request, id),
         cuentas
       }, context);
     } catch (e) {
@@ -1868,8 +1874,10 @@ app.http('solicitud-devolver', {
     try {
       const cuentas = await cuentasDe(query, 'devuelta');
       notif = await notificar({
-        descripcion: 'Solicitud devuelta al hospital para cambios — ' + resumenSolicitud(sol, detalle),
+        descripcion: 'Solicitud devuelta al hospital para cambios — ' + resumenSolicitud(sol, detalle)
+          + (borradas ? ' — se descartaron ' + borradas + (borradas === 1 ? ' marca' : ' marcas') + ' del alisto' : ''),
         solicitadoPor: user.email,
+        url: urlSolicitud(request, id),
         cuentas
       }, context);
     } catch (e) {

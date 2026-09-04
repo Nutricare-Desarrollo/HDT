@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "Descripcion":   { "type": "string" },
+    "SolicitadoPor": { "type": "string" },
+    "Url":           { "type": "string" },
+    "Cuentas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": { "email": { "type": "string" } },
+        "required": [ "email" ]
+      }
+    }
+  },
+  "required": [ "Descripcion", "SolicitadoPor", "Cuentas" ]
+}

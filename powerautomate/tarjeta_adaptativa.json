@@ -1,0 +1,71 @@
+{
+  "type": "AdaptiveCard",
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "version": "1.4",
+  "msteams": { "width": "Full" },
+  "fallbackText": "@{triggerBody()?['Descripcion']}",
+  "body": [
+    {
+      "type": "Container",
+      "style": "accent",
+      "bleed": true,
+      "spacing": "None",
+      "items": [
+        {
+          "type": "ColumnSet",
+          "columns": [
+            {
+              "type": "Column",
+              "width": "auto",
+              "verticalContentAlignment": "Center",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "🏷️",
+                  "size": "ExtraLarge",
+                  "spacing": "None"
+                }
+              ]
+            },
+            {
+              "type": "Column",
+              "width": "stretch",
+              "verticalContentAlignment": "Center",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "@{triggerBody()?['Descripcion']}",
+                  "weight": "Bolder",
+                  "size": "Large",
+                  "wrap": true,
+                  "spacing": "None"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "FactSet",
+      "spacing": "Medium",
+      "facts": [
+        {
+          "title": "Registrado por",
+          "value": "@{triggerBody()?['SolicitadoPor']}"
+        },
+        {
+          "title": "Fecha",
+          "value": "@{formatDateTime(convertFromUtc(utcNow(), 'Central America Standard Time'), 'dd/MM/yyyy HH:mm')} (hora de Costa Rica)"
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.OpenUrl",
+      "title": "Abrir el registro",
+      "url": "@{triggerBody()?['Url']}"
+    }
+  ]
+}

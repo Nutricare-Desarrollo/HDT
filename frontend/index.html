@@ -2323,6 +2323,10 @@ async function init(){
     acInit();       // buscador de código / lote (autocompletado)
     buildNav();
     showInicio();
+    /* Inicio queda pintado ANTES de intentar el enlace: si el enlace no sirve
+       -rol sin permiso, solicitud borrada- la persona cae en una pantalla
+       normal en vez de en una en blanco. */
+    abrirDesdeEnlace();
   }catch(e){
     document.getElementById('app').classList.add('hidden');
     document.getElementById('login').classList.remove('hidden');
@@ -6098,6 +6102,22 @@ async function nuevaSolicitud(){
   SOL_ACT=solVacia();
   setTab('solicitudes'); showOnly('viewSolicitudDet');
   renderSolicitudDet();
+}
+/* ----- Enlace profundo del aviso -----
+   El boton «Ver la solicitud» de la tarjeta de Teams/correo apunta a
+   .../#solicitud=<id>. Se usa el ID y no el codigo para no tener que buscarlo
+   en el listado, que en Bodega ni siquiera trae los borradores.
+   Se carga el listado primero para que «Volver al listado» caiga en una
+   pantalla con datos y no en una tabla vacia. */
+async function abrirDesdeEnlace(){
+  const m=/(?:^|[#&?])solicitud=(\d+)/.exec(location.hash+location.search);
+  if(!m) return;
+  /* Se limpia el hash: un F5 despues de haber navegado a otra parte no deberia
+     devolver a la solicitud del aviso. */
+  try{ history.replaceState(null,'',location.pathname); }catch(e){}
+  if(!canSubir() && !canBodega()){ toast('Su rol no tiene acceso a las solicitudes'); return; }
+  try{ await showSolicitudes(); }catch(e){}
+  await abrirSolicitud(+m[1]);
 }
 async function abrirSolicitud(id){
   if(!canSubir() && !canBodega()){ toast('Su rol no tiene acceso'); return; }
