@@ -174,6 +174,11 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 #chkGrid td.chk-sec{background:#f1f7fb;font-weight:700;color:var(--brand-d);text-transform:uppercase;letter-spacing:.05em;font-size:12.5px}
 .chk-ayuda{color:var(--muted);font-size:13px;margin:-4px 0 10px}
 .chk-sindesc{color:var(--muted);font-style:italic;font-weight:400}
+/* Buscador de los grids en celular. Al pasar a tarjetas se oculta el thead y
+   con el la fila de filtros por columna; cinco cajitas de filtro no sirven de
+   nada en un telefono, asi que se cambian por una sola que busca en todas las
+   columnas. En escritorio no se dibuja: ahi estan los filtros de verdad. */
+.cards-buscar{display:none}
 #chkAcciones{position:sticky;bottom:0;z-index:6;justify-content:space-between;align-items:center;
   margin:12px -4px 0;padding:12px 4px;background:rgba(238,243,247,.93);backdrop-filter:blur(4px);
   border-top:1px solid var(--line)}
@@ -369,6 +374,28 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
   }
   table.cards tbody tr.banda:first-child{margin-top:0}
   table.cards tbody tr.banda td{border-radius:8px}
+  /* Una columna que en esta fila viene vacia no tiene que dejar su rotulo
+     colgando ni un hueco: en la tabla la celda vacia es una celda, en la
+     tarjeta es ruido. */
+  table.cards tbody td:empty{display:none}
+  /* La celda de los botones de la fila: a lo ancho, separada por una linea,
+     y los botones grandes para el dedo. */
+  table.cards tbody td.cards-acciones{
+    display:flex;gap:8px;flex-wrap:wrap;
+    margin-top:2px;padding-top:9px;border-top:1px solid var(--line);
+  }
+  table.cards tbody td.cards-acciones::before{display:none}
+  table.cards tbody td.cards-acciones button{flex:1 1 auto;padding:10px 12px;font-size:14px}
+  /* La celda que hace de titulo de la tarjeta: sin rotulo, porque el dato se
+     explica solo, y con cuerpo de titulo. */
+  table.cards tbody td.cards-titulo{font-size:15.5px;font-weight:700;line-height:1.3}
+  table.cards tbody td.cards-titulo::before{display:none}
+  /* La fila de «sin coincidencias» es un colspan, no una tarjeta. */
+  table.cards tbody tr.aviso{display:block;border:none;background:none;padding:0;margin:0}
+  /* El buscador reemplaza a los filtros por columna. */
+  .cards-buscar{
+    display:block;width:100%;margin:0 0 12px;padding:11px 12px;font-size:16px;
+  }
 }
 
 /* Detalle en celular (rol Hospital): cada fila pasa a ser una tarjeta.
@@ -501,6 +528,57 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
   /* La ayuda ocupa dos renglones en el telefono: se le baja el cuerpo y se
      le da aire abajo para que no quede pegada a la primera tarjeta. */
   .chk-ayuda{font-size:12.5px;margin:-2px 0 12px}
+
+  /* ----- Listado de Solicitudes -----
+     Ocho columnas no bajan de ~900px. El codigo hace de titulo y el avance lo
+     acompana, porque son las dos cosas que se miran de un ojo al buscar una
+     solicitud en la lista; el resto va en pares. */
+  #solGrid.cards tbody tr{
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:"cod pct" "hosp hosp" "cir band" "reg user" "acc acc";
+  }
+  #solGrid.cards td.sg-cod{grid-area:cod}
+  #solGrid.cards td.sg-pct{grid-area:pct;justify-self:end;min-width:118px}
+  #solGrid.cards td.sg-hosp{grid-area:hosp}
+  #solGrid.cards td.sg-cir{grid-area:cir}
+  #solGrid.cards td.sg-band{grid-area:band;justify-self:end;text-align:right}
+  #solGrid.cards td.sg-reg{grid-area:reg}
+  #solGrid.cards td.sg-user{grid-area:user}
+  #solGrid.cards td.sg-acc{grid-area:acc}
+  /* Hospital y «creada por» se recortan con puntos suspensivos en la tabla, y
+     esas reglas ganan por el id: en la tarjeta van completas. */
+  #solGrid.cards td.sol-hosp,#solGrid.cards td.sol-user{
+    max-width:none;overflow:visible;text-overflow:clip;white-space:normal;
+  }
+  #solGrid.cards td.sg-reg,#solGrid.cards td.sg-user{font-size:13px}
+  #solGrid.cards .pct-mini{min-width:0;width:auto}
+
+  /* ----- Bandejas solicitadas -----
+     Dos formas: Hospital ve Codigo/Color/Descripcion y Bodega le suma
+     Articulos y % alistada. El codigo y el color comparten el primer
+     renglon, la descripcion se lleva el ancho -es el nombre de la bandeja- y
+     el avance va con los articulos. La clase .con-avance la pone
+     renderSolDetalle() segun la forma, para no dejar gaps vacios. */
+  #solDetGrid.cards tbody tr{
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:"cod color" "desc desc" "acc acc";
+    gap:5px 12px;
+  }
+  #solDetGrid.cards.con-avance tbody tr{
+    grid-template-areas:"cod color" "desc desc" "art pct" "acc acc";
+  }
+  #solDetGrid.cards td.sd-cod{grid-area:cod}
+  #solDetGrid.cards td.sd-color{grid-area:color;justify-self:end;text-align:right;font-size:13px}
+  #solDetGrid.cards td.sd-color::before{display:inline;margin-right:5px}
+  #solDetGrid.cards td.sd-desc{
+    grid-area:desc;max-width:none;overflow:visible;text-overflow:clip;white-space:normal;
+  }
+  #solDetGrid.cards td.sd-art{grid-area:art;width:auto;text-align:left;font-size:13px;align-self:center}
+  #solDetGrid.cards td.sd-art::before{display:inline;margin-right:5px}
+  #solDetGrid.cards td.sd-pct{grid-area:pct;width:auto;min-width:130px;align-self:center}
+  #solDetGrid.cards td.sd-pct::before{display:none}
+  #solDetGrid.cards td.sd-acc{grid-area:acc;margin-top:5px}
+  #solDetGrid.cards .pct-mini{min-width:0;width:100%}
   /* Los 11 datos de la cabecera, uno por renglon, se comian la primera
      pantalla completa antes de llegar al primer componente. En dos columnas
      el label puede partirse en dos lineas y aun asi sale ganando. */
@@ -907,7 +985,12 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <button class="tab" id="solTab-Enviada" onclick="solCejilla('Enviada')">Enviado<span class="n" id="solN-Enviada">0</span></button>
       </div>
       <div class="card">
-        <div class="tbl-wrap"><table id="solGrid"><thead id="solHead"></thead><tbody id="solBody"></tbody></table></div>
+        <div class="pad" style="padding-bottom:0">
+          <input class="cards-buscar" id="solBuscar" type="search" autocomplete="off"
+                 placeholder="Buscar solicitud, hospital, cirujano…"
+                 oninput="onSolBuscar(this.value)">
+        </div>
+        <div class="tbl-wrap"><table id="solGrid" class="cards"><thead id="solHead"></thead><tbody id="solBody"></tbody></table></div>
         <div id="solEmpty" class="empty hidden"><div class="big">📝</div><div id="solEmptyTxt">No hay solicitudes en borrador.</div></div>
         <div class="grid-foot" id="solFoot"></div>
       </div>
@@ -934,7 +1017,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
             <button class="btn-primary" onclick="agregarBandejaSolicitud()">➕ Agregar</button>
           </div>
         </div>
-        <div class="tbl-wrap"><table id="solDetGrid"><thead id="solDetHead"></thead><tbody id="solDetBody"></tbody></table></div>
+        <div class="tbl-wrap"><table id="solDetGrid" class="cards"><thead id="solDetHead"></thead><tbody id="solDetBody"></tbody></table></div>
         <div id="solDetEmpty" class="empty hidden"><div class="big">🧰</div><div>Sin bandejas. Agregue al menos una para poder enviar.</div></div>
         <div class="grid-foot" id="solDetFoot"></div>
       </div>
@@ -5162,13 +5245,16 @@ window.addEventListener('resize', ()=>{ if(CB_ACT) cbCerrar(); });
 
 /* ===== SOLICITUD DE EQUIPO (Hospital / Administrador) ===== */
 let SOL_ROWS=[], SOL_COLF={}, SOL_CEJILLA='Borrador', SOL_ACT=null, SOL_DEL=null, SOL_DEL_T=null;
+let SOL_BUSCA='';   /* texto del buscador de celular (ver onSolBuscar) */
 let SOL_BANDEJAS=null;   // hospitales y cirujanos viven en CATS (los comparte el modal del boton '+')
+/* 'a' = area que ocupa la celda en la tarjeta de celular (ver el @media de
+   #solGrid). Mismo recurso que DET_COLS. */
 const SOL_COLS=[
-  {k:'codigo',         l:'Código'},
-  {k:'hospital',       l:'Hospital', cls:'sol-hosp'},
-  {k:'fecha_registro', l:'Registro'},
-  {k:'fecha_cirugia',  l:'Fecha cirugía'},
-  {k:'creado_por',     l:'Creada por', cls:'sol-user'}
+  {k:'codigo',         l:'Código',       a:'cod'},
+  {k:'hospital',       l:'Hospital', cls:'sol-hosp', a:'hosp'},
+  {k:'fecha_registro', l:'Registro',     a:'reg'},
+  {k:'fecha_cirugia',  l:'Fecha cirugía', a:'cir'},
+  {k:'creado_por',     l:'Creada por', cls:'sol-user', a:'user'}
 ];
 /* Solo un borrador se edita o se borra. Una enviada se abre de solo lectura:
    ya salio el aviso a Bodega y el registro es el respaldo de lo que se pidio. */
@@ -5222,12 +5308,21 @@ async function loadSolicitudes(){
 }
 function solDeCejilla(){ return SOL_ROWS.filter(r=>solEnCejilla(r, SOL_CEJILLA)); }
 function solFiltered(){
+  const q=SOL_BUSCA.trim().toLowerCase();
   return solDeCejilla().filter(r=> Object.keys(SOL_COLF).every(k=>{
     const f=(SOL_COLF[k]||'').trim().toLowerCase(); if(!f) return true;
     return String(r[k]==null?'':r[k]).toLowerCase().includes(f);
-  }));
+  })).filter(r=>{
+    /* El buscador de celular reemplaza a los cinco filtros por columna: busca
+       el texto en todas las columnas visibles del grid. Se acumula con los
+       filtros por columna, no los sustituye, para que no dependa del ancho de
+       la pantalla lo que el usuario ve filtrado. */
+    if(!q) return true;
+    return SOL_COLS.some(c=>String(r[c.k]==null?'':r[c.k]).toLowerCase().includes(q));
+  });
 }
 function onSolFilter(k,v){ SOL_COLF[k]=v; renderSolBody(); }
+function onSolBuscar(v){ SOL_BUSCA=v; renderSolBody(); }
 function onSolFilterKey(e){
   if(e.key==='Enter'){ e.preventDefault(); renderSolBody(); return; }
   if(e.key==='Escape'){ e.preventDefault(); e.target.value=''; onSolFilter(e.target.dataset.k,''); }
@@ -5253,21 +5348,31 @@ function renderSolBody(){
   foot.textContent = (rows.length===enCejilla.length)
     ? enCejilla.length+(enCejilla.length===1?' solicitud':' solicitudes')
     : rows.length+' de '+enCejilla.length+' solicitudes';
-  if(!rows.length){ b.innerHTML=`<tr><td colspan="${SOL_COLS.length+3}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  if(!rows.length){ b.innerHTML=`<tr class="aviso"><td colspan="${SOL_COLS.length+3}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
   const editable = SOL_CEJILLA==='Borrador' && canSubir();
   rows.forEach(r=>{
+    /* Cada celda lleva su clase de area y su data-label: en escritorio los dos
+       son inertes, en celular son el reparto de la tarjeta y el rotulo del
+       dato, que sin thead se perderia. */
     const tds=SOL_COLS.map(c=>{
+      const cl='sg-'+c.a+(c.cls?' '+c.cls:'');
       if(c.k==='codigo')
-        return `<td><span class="link-cell" onclick="abrirSolicitud(${r.id})" title="${editable?'Editar':'Ver'}">${esc(r.codigo)}</span></td>`;
+        return `<td class="${cl} cards-titulo"><span class="link-cell" onclick="abrirSolicitud(${r.id})" title="${editable?'Editar':'Ver'}">${esc(r.codigo)}</span></td>`;
       if(c.k==='fecha_cirugia')
-        return `<td>${esc(solFechaTxt(r.fecha_cirugia, r.hora_cirugia))}</td>`;
-      if(c.cls) return `<td class="${c.cls}" title="${attr(r[c.k])}">${esc(r[c.k])}</td>`;
-      return `<td>${esc(r[c.k])}</td>`;
+        return `<td class="${cl}" data-label="${attr(c.l)}">${esc(solFechaTxt(r.fecha_cirugia, r.hora_cirugia))}</td>`;
+      /* El registro venia en orden ISO -to_char lo arma asi en la API- y en la
+         tarjeta quedaba pegado debajo de la fecha de cirugia, que va en
+         DD/MM/AAAA. Dos formatos de fecha en la misma tarjeta se leen como un
+         error. El filtro sigue trabajando sobre el valor crudo, igual que ya
+         lo hacia con la fecha de cirugia. */
+      if(c.k==='fecha_registro')
+        return `<td class="${cl}" data-label="${attr(c.l)}">${esc(docFechaHora(r.fecha_registro))}</td>`;
+      return `<td class="${cl}" data-label="${attr(c.l)}" title="${attr(r[c.k])}">${esc(r[c.k])}</td>`;
     }).join('');
     const tr=document.createElement('tr');
-    tr.innerHTML=tds+`<td>${r.bandejas}</td>`
-      +`<td>${SOL_CEJILLA==='Borrador' ? '<span style="color:var(--muted)">—</span>' : pctBarra(r.porcentaje)}</td>`
-      +`<td style="white-space:nowrap">`
+    tr.innerHTML=tds+`<td class="sg-band" data-label="Bandejas">${r.bandejas}</td>`
+      +`<td class="sg-pct" data-label="% Alisto">${SOL_CEJILLA==='Borrador' ? '<span style="color:var(--muted)">—</span>' : pctBarra(r.porcentaje)}</td>`
+      +`<td class="sg-acc cards-acciones" style="white-space:nowrap">`
       +`<button class="icon-btn" onclick="abrirSolicitud(${r.id})">${editable?'✏️ Editar':'👁️ Ver'}</button>`
       +(editable ? ` <button class="icon-btn danger" id="solDel-${r.id}" onclick="eliminarSolicitud(${r.id})">🗑️ Eliminar</button>` : '')
       +`</td>`;
@@ -5376,9 +5481,18 @@ function renderSolDetalle(){
      el avance y el boton que abre el check list. */
   const al=!!(solAlisto() && SOL_AV);
   const lista = al ? SOL_AV : (s.detalle||[]);
+  /* La tarjeta de celular tiene un reparto por forma: con avance son cuatro
+     renglones, sin avance tres. Si se dejaran las areas de Artículos y
+     % alistada declaradas para las dos, la forma del Hospital arrastraria dos
+     gaps vacios. */
+  document.getElementById('solDetGrid').classList.toggle('con-avance', al);
   document.getElementById('solDetHead').innerHTML= al
     ? '<tr><th>Código de bandeja</th><th>Color</th><th>Descripción</th><th class="sol-art">Artículos</th><th class="sol-pct">% alistada</th><th></th></tr>'
     : '<tr><th>Código de bandeja</th><th>Color</th><th>Descripción</th>'+(ed?'<th></th>':'')+'</tr>';
+  /* El grid tiene dos formas -Hospital ve tres columnas, Bodega ve seis con el
+     avance- y la tarjeta de celular tiene que servir para las dos: por eso el
+     reparto no nombra areas fijas, apila y deja que las celdas que esta forma
+     no trae simplemente no existan. */
   const b=document.getElementById('solDetBody'); b.innerHTML='';
   document.getElementById('solDetEmpty').classList.toggle('hidden', lista.length>0);
   document.getElementById('solDetGrid').classList.toggle('hidden', lista.length===0);
@@ -5386,14 +5500,18 @@ function renderSolDetalle(){
     ? (lista.length===1?'1 bandeja':lista.length+' bandejas') : '';
   lista.forEach((d,i)=>{
     const tr=document.createElement('tr');
-    let fila=`<td>${esc(d.demarcado||d.equipo_codigo)}</td><td>${esc(d.color)}</td>`
-      +`<td class="sol-desc" title="${attr(d.descripcion)}">${esc(d.descripcion)}</td>`;
+    let fila=`<td class="sd-cod cards-titulo">${esc(d.demarcado||d.equipo_codigo)}</td>`
+      +`<td class="sd-color" data-label="Color">${esc(d.color)}</td>`
+      +`<td class="sd-desc sol-desc" data-label="Descripción" title="${attr(d.descripcion)}">${esc(d.descripcion)}</td>`;
+    /* Sin esto el navegador ordena las celdas por su posicion en la fila y el
+       reparto de areas no aplica; con las clases puestas arriba ya viaja cada
+       una a su lugar. */
     if(al){
-      fila+=`<td class="sol-art">${d.articulos||0}</td>`
-        +`<td class="sol-pct">${pctBarra(d.porcentaje)}</td>`
-        +`<td style="white-space:nowrap"><button class="icon-btn" onclick="abrirCheckList('${attr(d.equipo_codigo)}')">✅ Check list</button></td>`;
+      fila+=`<td class="sd-art sol-art" data-label="Artículos">${d.articulos||0}</td>`
+        +`<td class="sd-pct sol-pct" data-label="% alistada">${pctBarra(d.porcentaje)}</td>`
+        +`<td class="sd-acc cards-acciones" style="white-space:nowrap"><button class="icon-btn" onclick="abrirCheckList('${attr(d.equipo_codigo)}')">✅ Check list</button></td>`;
     }else if(ed){
-      fila+=`<td style="white-space:nowrap"><button class="icon-btn danger" onclick="quitarBandejaSolicitud(${i})">🗑️ Eliminar</button></td>`;
+      fila+=`<td class="sd-acc cards-acciones" style="white-space:nowrap"><button class="icon-btn danger" onclick="quitarBandejaSolicitud(${i})">🗑️ Eliminar</button></td>`;
     }
     tr.innerHTML=fila;
     b.appendChild(tr);
