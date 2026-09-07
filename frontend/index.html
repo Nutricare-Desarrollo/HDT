@@ -363,6 +363,21 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .vb-f .pie{padding:5px 7px;font-size:11px;color:var(--muted);line-height:1.35}
 .vb-f .acc{display:flex;gap:5px;padding:0 7px 7px}
 .vb-f .acc button{flex:1 1 auto;font-size:11.5px;padding:5px 4px}
+/* La casilla va ENCIMA de la miniatura y no debajo: con doce fotos en la
+   cuadricula, una fila de casillas al pie obliga a leer dos veces para saber
+   cual esta marcada. Arriba, la foto marcada se distingue de un vistazo. */
+.vb-f{position:relative}
+.vb-f .sel{position:absolute;top:6px;left:6px;z-index:2;width:26px;height:26px;border-radius:7px;
+  background:rgba(255,255,255,.92);border:1px solid rgba(0,0,0,.15);box-shadow:0 1px 3px rgba(0,0,0,.2);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;margin:0}
+.vb-f .sel input{width:16px;height:16px;margin:0;cursor:pointer;accent-color:var(--brand)}
+.vb-f.marcada{border-color:var(--brand);box-shadow:0 0 0 2px rgba(10,92,138,.25)}
+.vb-f.marcada .im{opacity:.72}
+/* Barra de la seleccion: solo existe cuando hay algo marcado. */
+.vb-selbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;
+  background:#fdf3e3;border:1px solid #f0c36d;border-radius:9px;padding:9px 12px;font-size:13px}
+.vb-selbar .n{font-weight:700;color:var(--txt);flex:1 1 auto}
+.vb-selbar button{font-size:12.5px;padding:6px 10px}
 .vb-f .sinleer{color:var(--warn);font-weight:700}
 .vb-vacio{border:1.5px dashed var(--line);border-radius:9px;padding:16px;background:#f7fafc;text-align:center;color:var(--muted);font-size:13px;line-height:1.5}
 .vb-alerta{display:flex;gap:10px;align-items:flex-start;background:#fff8e6;border:1px solid #f0d79a;border-left:4px solid var(--warn);border-radius:8px;padding:11px 13px;font-size:13.5px;line-height:1.45;margin-bottom:14px}
@@ -6704,6 +6719,9 @@ let VAL=null;            // lo que devolvio GET .../validacion
    lo trae-, pero la pantalla valida solo con la foto: pedirlo era un paso más
    para un dato que casi nunca cambia el veredicto. */
 let VAL_IMG={};          // cache de imagenes ya traidas: 'r12' / 'e34' -> data URL
+/* Las fotos marcadas para eliminar. Se limpia en cada recarga a proposito: los
+   ids de la pantalla vieja no tienen por que seguir existiendo. */
+let VAL_SEL=new Set();
 const VAL_MAX_LADO=2000; // mas grande que el catalogo: acá lo que importa es que el OCR lea
 const VAL_CALIDAD=0.85;
 
@@ -6718,7 +6736,7 @@ async function abrirValidacion(codigo){
     VAL=await api('GET','/solicitudes/'+SOL_ACT.id+'/bandejas/'+encodeURIComponent(codigo)+'/validacion');
   }catch(e){ toast('No se pudo abrir la validación: '+e.message); hideLoading(); return; }
   finally{ hideLoading(); }
-  VAL_IMG={};
+  VAL_IMG={}; VAL_SEL.clear();
   setTab('solicitudes'); showOnly('viewValidacion');
   renderValidacion();
 }
@@ -6729,6 +6747,7 @@ async function valRecargar(){
   if(!VAL) return;
   try{
     VAL=await api('GET','/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion');
+    VAL_SEL.clear();
     renderValidacion();
   }catch(e){ toast('No se pudo recargar: '+e.message); }
 }
@@ -6768,7 +6787,9 @@ function renderValidacion(){
         <div class="vb-paso">Fotos de la bandeja alistada</div>`;
   h+=valZonaSubida();
   h+=valTirasEntrega();
-  if(!ro){
+  /* Con fotos marcadas la persona esta borrando, no validando: el consejo de
+     tocar «Validar bandeja» ahi solo estorba. */
+  if(!ro && !VAL_SEL.size){
     h+=`<div class="chk-ayuda" style="margin-top:12px">${VAL.tiene_fotos
       ? 'Cuando estén todas, toque <b>«Validar bandeja»</b> arriba: se compara el texto de estas fotos contra el del catálogo.'
       : 'Adjunte al menos una foto para poder validar.'}</div>`;
@@ -6880,15 +6901,38 @@ function valTirasEntrega(){
   if(!fs.length) return `<div class="vb-vacio" style="margin-top:10px">Todavía no hay fotos de esta entrega.</div>`;
   let h=`<div class="vb-tiras">`;
   fs.forEach((f,i)=>{
-    h+=`<div class="vb-f">
-          <div class="im" id="valEnt_${f.id}"></div>
-          <div class="pie">Foto ${i+1}${f.nombre?' · '+esc(String(f.nombre).slice(0,28)):''}
-            ${f.leida?'':'<br><span class="sinleer">'+esc(f.error_ocr||'sin texto leído')+'</span>'}</div>`;
-    if(f.puede_eliminar) h+=`<div class="acc"><button class="icon-btn danger" onclick="valEliminar(${f.id})">🗑️ Eliminar</button></div>`;
-    h+=`</div>`;
+    const marc=VAL_SEL.has(f.id);
+    h+=`<div class="vb-f${marc?' marcada':''}">`;
+    /* La casilla solo aparece donde la persona de verdad puede borrar: las
+       fotos que subio otro se ven, pero no se marcan. */
+    if(f.puede_eliminar){
+      h+=`<label class="sel" title="Marcar esta foto para eliminarla">
+            <input type="checkbox" ${marc?'checked':''} onchange="valMarcar(${f.id}, this.checked)"></label>`;
+    }
+    h+=`<div class="im" id="valEnt_${f.id}"></div>
+        <div class="pie">Foto ${i+1}${f.nombre?' · '+esc(String(f.nombre).slice(0,28)):''}
+          ${f.leida?'':'<br><span class="sinleer">'+esc(f.error_ocr||'sin texto leído')+'</span>'}</div>
+      </div>`;
   });
-  return h+`</div>`;
+  h+=`</div>`;
+
+  /* La barra de abajo aparece solo con algo marcado: un boton «Eliminar»
+     siempre visible y siempre deshabilitado no le dice nada a nadie. */
+  const n=VAL_SEL.size, borrables=fs.filter(f=>f.puede_eliminar).length;
+  if(n){
+    h+=`<div class="vb-selbar">
+          <span class="n">${n===1?'1 foto marcada':n+' fotos marcadas'}</span>`
+      + (n<borrables ? `<button class="btn-ghost" onclick="valMarcarTodas()">Marcar todas</button>` : '')
+      + `<button class="btn-ghost" onclick="valMarcarNinguna()">Quitar la marca</button>
+          <button class="icon-btn danger" onclick="valEliminarMarcadas()">🗑️ Eliminar ${n===1?'la foto':'las '+n+' fotos'}</button>
+        </div>`;
+  }
+  return h;
 }
+
+function valMarcar(id, on){ if(on) VAL_SEL.add(id); else VAL_SEL.delete(id); renderValidacion(); }
+function valMarcarNinguna(){ VAL_SEL.clear(); renderValidacion(); }
+function valMarcarTodas(){ (VAL.fotos||[]).forEach(f=>{ if(f.puede_eliminar) VAL_SEL.add(f.id); }); renderValidacion(); }
 
 /* Trae una imagen y la deja en el cache. El comparador se sirve del mismo
    cache: abrirlo despues de mirar la galeria no vuelve a pedir nada. */
@@ -6940,16 +6984,32 @@ async function valSubir(input){
   await valRecargar();
 }
 
-function valEliminar(fid){
-  askConfirm('Eliminar foto',
-    'Se eliminará esta foto de la entrega. No se puede deshacer.',
-    'Sí, eliminar',
+/* Borra TODAS las marcadas, una llamada por foto -la API borra de a una y no
+   hace falta un endpoint nuevo para esto-. Una que falle no detiene a las
+   demas, y al final se dice cuantas se fueron y cuantas no. */
+function valEliminarMarcadas(){
+  const ids=[...VAL_SEL];
+  if(!ids.length) return;
+  askConfirm(
+    ids.length===1 ? 'Eliminar la foto' : 'Eliminar ' + ids.length + ' fotos',
+    (ids.length===1
+      ? 'Se eliminará la foto marcada de esta entrega.'
+      : 'Se eliminarán las ' + ids.length + ' fotos marcadas de esta entrega.')
+    + ' No se puede deshacer.'
+    + ((VAL.fotos||[]).length===ids.length
+        ? ' La bandeja va a quedar sin fotos y el veredicto anterior deja de tener respaldo.' : ''),
+    ids.length===1 ? 'Sí, eliminar' : 'Sí, eliminar las ' + ids.length,
     async function(){
-      try{
-        await api('DELETE','/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion/fotos/'+fid);
-        toast('Foto eliminada');
-        await valRecargar();
-      }catch(e){ toast('No se pudo eliminar: '+e.message); }
+      const base='/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion/fotos/';
+      let ok=0; const errores=[];
+      for(const id of ids){
+        try{ await api('DELETE', base+id); ok++; }
+        catch(e){ errores.push(e.message); }
+      }
+      VAL_SEL.clear();
+      await valRecargar();
+      if(ok) toast(ok===1?'Foto eliminada':(ok+' fotos eliminadas'));
+      if(errores.length) toast('No se pudo eliminar '+errores.length+': '+errores[0]);
     });
 }
 
