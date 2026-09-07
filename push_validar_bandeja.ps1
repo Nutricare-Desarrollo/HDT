@@ -4,12 +4,17 @@ Set-Location -Path $PSScriptRoot
 # ============================================================================
 #  Sube lo pendiente a main y con eso dispara el despliegue.
 #
-#  ESTE PUSH TRAE LA MIGRACION 33 (33_SolicitudValidacion.sql).
-#  CORRELA CON psql ANTES DE SUBIR. Si el codigo se despliega primero, tocar
-#  «Validar bandeja» da error 500: la API nombra tablas y columnas que
-#  todavia no existirian.
+#  MIGRACIONES. Correlas CON psql ANTES DE SUBIR: si el codigo se despliega
+#  primero, tocar «Validar bandeja» da error 500 porque la API nombra tablas
+#  y columnas que todavia no existirian. Las dos son idempotentes y no
+#  destructivas, asi que volver a correr una ya aplicada no hace nada.
 #      psql "<tu-cadena-de-conexion>" -f database/33_SolicitudValidacion.sql
-#  Es idempotente y no destructiva.
+#      psql "<tu-cadena-de-conexion>" -f database/34_ValidacionFirma.sql
+#
+#  La 34 agrega SolicitudVerificacion.FotosFirma: el md5 de los Id de las
+#  fotos que vio la validacion. Es lo que permite saber que un veredicto dejo
+#  de hablar de las fotos que hay en pantalla. Sin ella la API falla al
+#  validar, porque el INSERT nombra esa columna.
 #
 #  Y DESPUES, el texto ya leido de las 51 fotos del catalogo:
 #      psql "<tu-cadena-de-conexion>" -f database/33b_EquipoFoto_texto.sql

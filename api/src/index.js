@@ -2235,7 +2235,14 @@ app.http('solicitud-bandejas', {
                 v.Resultado AS veredicto, v.Origen AS veredicto_origen,
                 (SELECT COUNT(*)::int FROM dbo.SolicitudFoto f
                   WHERE f.SolicitudId = d.SolicitudId
-                    AND UPPER(TRIM(f.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo))) AS fotos
+                    AND UPPER(TRIM(f.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo))) AS fotos,
+                /* El veredicto habla de las fotos que vio. Si las de ahora son
+                   otras, la fila no puede seguir diciendo «Correcta». */
+                (v.FotosFirma IS NOT NULL AND v.FotosFirma IS DISTINCT FROM
+                  (SELECT md5(string_agg(f.Id::text, ',' ORDER BY f.Id))
+                     FROM dbo.SolicitudFoto f
+                    WHERE f.SolicitudId = d.SolicitudId
+                      AND UPPER(TRIM(f.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo)))) AS veredicto_viejo
            FROM dbo.SolicitudEquipoDetalle d
            LEFT JOIN cat.EquipoProducto ep
              ON UPPER(TRIM(ep.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo))
@@ -2247,7 +2254,7 @@ app.http('solicitud-bandejas', {
              ON v.SolicitudId = d.SolicitudId
             AND UPPER(TRIM(v.EquipoCodigo))   = UPPER(TRIM(d.EquipoCodigo))
           WHERE d.SolicitudId = $1
-          GROUP BY d.Id, d.EquipoCodigo, d.Demarcado, d.Descripcion, d.Color, v.Resultado, v.Origen
+          GROUP BY d.Id, d.EquipoCodigo, d.Demarcado, d.Descripcion, d.Color, v.Resultado, v.Origen, v.FotosFirma
           ORDER BY d.Id`, [id]);
       return json(200, r.rows.map((x) => ({ ...x, porcentaje: pct(x.alistados, x.articulos) })));
     } catch (e) {
@@ -2495,16 +2502,39 @@ async function bandejaDeSolicitud(id, cod) {
   return r.rowCount ? r.rows[0] : null;
 }
 
+/* La firma de las fotos que hay AHORA en la entrega de esta bandeja: el md5
+   de sus Id, en orden. Es lo que permite saber despues si el veredicto
+   guardado sigue hablando de estas fotos o de otras.
+   Sin fotos devuelve null, que nunca coincide con una firma guardada. */
+const SQL_FIRMA_FOTOS = `
+  SELECT md5(string_agg(Id::text, ',' ORDER BY Id)) AS firma
+    FROM dbo.SolicitudFoto
+   WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))`;
+async function firmaFotos(id, cod, client) {
+  const q = client ? client.query.bind(client) : query;
+  const r = await q(SQL_FIRMA_FOTOS, [id, cod]);
+  return r.rows[0] ? r.rows[0].firma : null;
+}
+
 async function veredictoDe(id, cod) {
   const r = await query(
     `SELECT Resultado AS resultado, Origen AS origen, Motivo AS motivo,
             Puntaje::float8 AS puntaje, CandidatoCodigo AS candidato,
             CandidatoPuntaje::float8 AS candidato_puntaje,
             ColorObservado AS color_observado, ColorCatalogo AS color_catalogo,
-            Nota AS nota, Usuario AS usuario, ${FECHA_VALID} AS fecha
+            Nota AS nota, Usuario AS usuario, FotosFirma AS fotos_firma,
+            ${FECHA_VALID} AS fecha
        FROM dbo.SolicitudVerificacion
       WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))`, [id, cod]);
-  return r.rowCount ? r.rows[0] : null;
+  if (!r.rowCount) return null;
+  const v = r.rows[0];
+  /* Un veredicto habla de UN conjunto de fotos. Si el de ahora no es el mismo,
+     lo que dice ya no aplica y la pantalla tiene que pedir otra validacion.
+     FotosFirma en NULL es un veredicto anterior a la migracion 34: no se sabe
+     que fotos vio, asi que no se le reclama nada. */
+  const actual = await firmaFotos(id, cod);
+  v.desactualizado = v.fotos_firma != null && v.fotos_firma !== actual;
+  return v;
 }
 
 /* Las referencias de TODAS las bandejas que tengan texto leido. Hacen falta
@@ -2769,14 +2799,16 @@ app.http('solicitud-validacion-run', {
       const r = await query(
         `INSERT INTO dbo.SolicitudVerificacion
            (SolicitudId, EquipoCodigo, Resultado, Origen, Motivo, Puntaje,
-            CandidatoCodigo, CandidatoPuntaje, ColorObservado, ColorCatalogo, Nota, Usuario, UsuarioEmail)
-         VALUES ($1,$2,$3,'Automatico',$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            CandidatoCodigo, CandidatoPuntaje, ColorObservado, ColorCatalogo, Nota, Usuario, UsuarioEmail,
+            FotosFirma)
+         VALUES ($1,$2,$3,'Automatico',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
          ON CONFLICT (SolicitudId, UPPER(TRIM(EquipoCodigo))) DO UPDATE
             SET Resultado = EXCLUDED.Resultado, Origen = EXCLUDED.Origen, Motivo = EXCLUDED.Motivo,
                 Puntaje = EXCLUDED.Puntaje, CandidatoCodigo = EXCLUDED.CandidatoCodigo,
                 CandidatoPuntaje = EXCLUDED.CandidatoPuntaje, ColorObservado = EXCLUDED.ColorObservado,
                 ColorCatalogo = EXCLUDED.ColorCatalogo, Nota = EXCLUDED.Nota,
                 Usuario = EXCLUDED.Usuario, UsuarioEmail = EXCLUDED.UsuarioEmail,
+                FotosFirma = EXCLUDED.FotosFirma,
                 FechaHora = (now() at time zone 'utc')
          RETURNING Resultado AS resultado, Origen AS origen, Motivo AS motivo,
                    Puntaje::float8 AS puntaje, CandidatoCodigo AS candidato,
@@ -2784,7 +2816,8 @@ app.http('solicitud-validacion-run', {
                    ColorObservado AS color_observado, ColorCatalogo AS color_catalogo,
                    Nota AS nota, Usuario AS usuario, ${FECHA_VALID} AS fecha`,
         [id, b.equipo_codigo, v.resultado, motivo, v.puntaje, v.candidato, v.candidato_puntaje,
-         colorObs, b.color_catalogo, nota, user.name || user.email, user.email]);
+         colorObs, b.color_catalogo, nota, user.name || user.email, user.email,
+         await firmaFotos(id, cod)]);
       return json(200, { ...r.rows[0], codigo: b.demarcado || b.equipo_codigo,
                          candidato_demarcado: cand ? cand.d : null, ranking: v.ranking });
     } catch (e) {
@@ -2823,10 +2856,18 @@ app.http('solicitud-validacion-confirmar', {
       const b = await bandejaDeSolicitud(id, cod);
       if (!b) return json(404, { error: 'Esa bandeja no está en la solicitud' });
 
+      /* No se confirma sobre un veredicto que ya no habla de estas fotos. El
+         boton esta escondido en ese caso, pero la regla vive aca: la pantalla
+         no es la que manda. */
+      const vig = await veredictoDe(id, cod);
+      if (!vig) return json(409, { error: 'Valide la bandeja antes de confirmar el resultado' });
+      if (vig.desactualizado)
+        return json(409, { error: 'Las fotos cambiaron desde la última validación. Vuelva a validar la bandeja.' });
+
       /* Se conserva lo que habia dicho el sistema: el motivo nuevo lo cuenta.
          Sin eso se perderia el dato de que la maquina opinaba distinto, que es
          justo lo que interesa revisar despues. */
-      const prev = await veredictoDe(id, cod);
+      const prev = vig;
       const antes = prev ? (prev.origen === 'Automatico' ? prev.resultado : null) : null;
       const motivo = 'Lo confirmó ' + (user.name || user.email) + ' comparando las fotos.'
         + (antes ? ' El sistema había dicho «' + antes + '»'
@@ -2835,11 +2876,13 @@ app.http('solicitud-validacion-confirmar', {
       const r = await query(
         `INSERT INTO dbo.SolicitudVerificacion
            (SolicitudId, EquipoCodigo, Resultado, Origen, Motivo, Puntaje,
-            CandidatoCodigo, CandidatoPuntaje, ColorObservado, ColorCatalogo, Nota, Usuario, UsuarioEmail)
-         VALUES ($1,$2,$3,'Persona',$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            CandidatoCodigo, CandidatoPuntaje, ColorObservado, ColorCatalogo, Nota, Usuario, UsuarioEmail,
+            FotosFirma)
+         VALUES ($1,$2,$3,'Persona',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
          ON CONFLICT (SolicitudId, UPPER(TRIM(EquipoCodigo))) DO UPDATE
             SET Resultado = EXCLUDED.Resultado, Origen = 'Persona', Motivo = EXCLUDED.Motivo,
                 Nota = EXCLUDED.Nota, Usuario = EXCLUDED.Usuario, UsuarioEmail = EXCLUDED.UsuarioEmail,
+                FotosFirma = EXCLUDED.FotosFirma,
                 FechaHora = (now() at time zone 'utc')
          RETURNING Resultado AS resultado, Origen AS origen, Motivo AS motivo,
                    Puntaje::float8 AS puntaje, CandidatoCodigo AS candidato,
@@ -2849,7 +2892,7 @@ app.http('solicitud-validacion-confirmar', {
         [id, b.equipo_codigo, res, motivo,
          prev ? prev.puntaje : null, prev ? prev.candidato : null, prev ? prev.candidato_puntaje : null,
          prev ? prev.color_observado : null, b.color_catalogo, nota,
-         user.name || user.email, user.email]);
+         user.name || user.email, user.email, await firmaFotos(id, cod)]);
       return json(200, { ...r.rows[0], codigo: b.demarcado || b.equipo_codigo });
     } catch (e) {
       context.error(e);

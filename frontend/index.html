@@ -394,6 +394,9 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .vb-ver.ok .tit{color:#16704a}
 .vb-ver.duda{background:#fff8e6;border-color:#f0d79a;border-left-color:var(--warn)}
 .vb-ver.duda .tit{color:#8a5a00}
+/* El veredicto que quedo viejo: gris, no rojo ni verde. No es un resultado
+   -no dice si la bandeja esta bien o mal-, es la falta de uno. */
+.vb-ver.viejo{background:#f2f5f8;border-color:#c8d4de;border-left-color:var(--muted)}
 .vb-ver.no{background:#fdeeec;border-color:#f0bdb6;border-left-color:var(--danger)}
 .vb-ver.no .tit{color:#96271b}
 .vb-acc{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
@@ -6721,6 +6724,10 @@ function renderSolDetalle(){
    nada: un «Sin validar» en las doce filas seria ruido, no informacion. */
 function solPillVeredicto(d){
   if(!d.veredicto) return (d.fotos>0) ? ' <span class="vb-pill gris">'+d.fotos+(d.fotos===1?' foto':' fotos')+'</span>' : '';
+  /* Las fotos cambiaron despues de validar: la fila no puede seguir diciendo
+     «Correcta» de un veredicto que ya no habla de esas fotos. */
+  if(d.veredicto_viejo)
+    return ' <span class="vb-pill duda" title="'+attr('El veredicto era «'+d.veredicto+'», pero las fotos cambiaron después. Hay que validar de nuevo.')+'">🔄 Validar de nuevo</span>';
   const cls={'Correcta':'ok','Incorrecta':'no','No puedo determinarlo':'duda'}[d.veredicto]||'gris';
   const t=d.veredicto==='No puedo determinarlo' ? 'Sin determinar' : d.veredicto;
   return ' <span class="vb-pill '+cls+'" title="'+attr(d.veredicto+(d.veredicto_origen==='Persona'?' — lo confirmó Bodega mirando las fotos':' — lo dijo el sistema'))+'">'
@@ -6816,9 +6823,12 @@ function renderValidacion(){
   /* Con fotos marcadas la persona esta borrando, no validando: el consejo de
      tocar «Validar bandeja» ahi solo estorba. */
   if(!ro && !VAL_SEL.size){
-    h+=`<div class="chk-ayuda" style="margin-top:12px">${VAL.tiene_fotos
-      ? 'Cuando estén todas, toque <b>«Validar bandeja»</b> arriba: se compara el texto de estas fotos contra el del catálogo.'
-      : 'Adjunte al menos una foto para poder validar.'}</div>`;
+    const viejo = VAL.veredicto && VAL.veredicto.desactualizado;
+    h+=`<div class="chk-ayuda" style="margin-top:12px">${!VAL.tiene_fotos
+      ? 'Adjunte al menos una foto para poder validar.'
+      : (viejo
+        ? 'Las fotos cambiaron: toque <b>«Validar bandeja»</b> arriba para comparar otra vez.'
+        : 'Cuando estén todas, toque <b>«Validar bandeja»</b> arriba: se compara el texto de estas fotos contra el del catálogo.')}</div>`;
   }
   h+=`</div>`;
 
@@ -6891,6 +6901,21 @@ function valFranjaVeredicto(){
       + (v.puntaje!=null?` · puntaje ${Number(v.puntaje).toFixed(3)}`:'');
   if(v.color_observado) quien+=` · color visto: ${esc(v.color_observado)}`;
   if(v.nota) quien+=` · «${esc(v.nota)}»`;
+
+  /* «Comparar y decidir» CIERRA el proceso: lo que la persona diga ahi pisa al
+     veredicto. Por eso solo se ofrece sobre un veredicto vigente. Si las fotos
+     cambiaron despues de validar, lo que dice la franja ya no habla de lo que
+     hay en pantalla, y confirmarlo seria firmar una comparacion que nadie
+     hizo. En ese caso el unico camino es «Validar bandeja» otra vez. */
+  if(v.desactualizado){
+    return `<div class="vb-ver viejo"><span class="ico">🔄</span><div style="flex:1 1 auto">
+        <div class="tit">Hay que validar de nuevo</div>
+        <div class="txt">Las fotos cambiaron después de la última validación, así que
+          «${esc(v.resultado)}» ya no habla de las fotos que están ahora.
+          Toque <b>«Validar bandeja»</b> arriba.</div>
+        <div class="quien">Lo anterior: ${esc(v.resultado)} · ${persona?'lo confirmó '+esc(v.usuario||''):'lo dijo el sistema'} · ${docFechaHora(v.fecha)}</div>
+      </div></div>`;
+  }
 
   let acc='';
   if(!valSoloLectura() && (VAL.fotos||[]).length && VAL.referencia.length){
@@ -7073,6 +7098,10 @@ let CMP={abierto:false, i:0};
 
 async function cmpAbrir(){
   if(!VAL) return;
+  if(!VAL.veredicto || VAL.veredicto.desactualizado){
+    toast('Valide la bandeja antes de comparar: las fotos cambiaron.');
+    return;
+  }
   CMP={abierto:true, i:0};
   let ovl=document.getElementById('cmpOvl');
   if(!ovl){ ovl=document.createElement('div'); ovl.id='cmpOvl'; document.body.appendChild(ovl); }
