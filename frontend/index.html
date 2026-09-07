@@ -6152,9 +6152,34 @@ function cbAbrir(id, todo){
     ? CB_ACT.lista.map((x,i)=>`<div class="ac-item" data-i="${i}"><span class="ac-code">${esc(x.lab)}</span>`
         +(x.sub?`<span class="ac-desc">${esc(x.sub)}</span>`:'')+`</div>`).join('')
     : `<div class="ac-empty">${esc(SOL_COMBOS[id].vacio)}</div>`;
+  box.classList.remove('hidden');   // antes de medir: oculto no tiene alto
+  cbPosicionar();
+}
+/* Coloca el panel debajo del campo, o ENCIMA si abajo no cabe. Se llama al
+   abrir y cada vez que la pagina se mueve o cambia de tamano.
+   Lo de abrir hacia arriba no es un extra: en celular el campo suele quedar
+   en la mitad de abajo de la pantalla, y con el teclado desplegado la lista
+   caia entera fuera de la vista. */
+function cbPosicionar(){
+  if(!CB_ACT || !CB_BOX) return;
+  const el=document.getElementById(CB_ACT.id);
+  if(!el){ cbCerrar(); return; }
   const r=el.getBoundingClientRect();
-  box.style.left=r.left+'px'; box.style.top=(r.bottom+4)+'px'; box.style.width=Math.max(r.width,280)+'px';
-  box.classList.remove('hidden');
+  /* Si el campo se salio de la pantalla, el panel no tiene de que agarrarse. */
+  if(r.bottom < 0 || r.top > window.innerHeight){ cbCerrar(); return; }
+  const vh=window.innerHeight;
+  const abajo=vh-r.bottom-8, arriba=r.top-8;
+  /* Se mide el alto natural de la lista para decidir el lado: con el maxHeight
+     de la vuelta anterior puesto, la medida saldria recortada. */
+  CB_BOX.style.maxHeight='';
+  const alto=Math.min(CB_BOX.scrollHeight, 320);
+  const haciaArriba = abajo < alto && arriba > abajo;
+  const sitio=Math.max(120, haciaArriba ? arriba : abajo);
+  CB_BOX.style.left=r.left+'px';
+  CB_BOX.style.width=Math.max(r.width,280)+'px';
+  CB_BOX.style.maxHeight=Math.min(320, sitio)+'px';
+  if(haciaArriba){ CB_BOX.style.top=''; CB_BOX.style.bottom=(vh-r.top+4)+'px'; }
+  else           { CB_BOX.style.bottom=''; CB_BOX.style.top=(r.bottom+4)+'px'; }
 }
 function cbCerrar(){ if(CB_BOX) CB_BOX.classList.add('hidden'); CB_ACT=null; CB_IDX=-1; }
 /* Un clic sobre el campo YA enfocado no dispara focus. Sin esto, despues de
@@ -6206,8 +6231,19 @@ function cbBlur(id){
     if(mio) cbCerrar();
   }, 120);
 }
-window.addEventListener('scroll', ()=>{ if(CB_ACT) cbCerrar(); }, true);
-window.addEventListener('resize', ()=>{ if(CB_ACT) cbCerrar(); });
+/* OJO con la captura (el `true`): este listener ve TODOS los scroll de la
+   pagina, y el de adentro del panel es uno de ellos. Cerrar aca sin mirar el
+   origen hacia que rodar la lista la cerrara —y con 46 hospitales y 118
+   bandejas la lista siempre tiene barra, asi que pasaba siempre—. */
+window.addEventListener('scroll', (e)=>{
+  if(!CB_ACT || !CB_BOX) return;
+  const t=e.target;
+  if(t===CB_BOX || (t && t.nodeType===1 && CB_BOX.contains(t))) return;  // rodando la lista
+  cbPosicionar();
+}, true);
+/* Recolocar y no cerrar: en celular, abrir el teclado dispara un resize, y
+   cerrar ahi apagaba la lista justo al empezar a escribir. */
+window.addEventListener('resize', ()=>{ if(CB_ACT) cbPosicionar(); });
 
 /* ===== SOLICITUD DE EQUIPO (Hospital / Administrador) ===== */
 let SOL_ROWS=[], SOL_COLF={}, SOL_CEJILLA='Borrador', SOL_ACT=null, SOL_DEL=null, SOL_DEL_T=null;
