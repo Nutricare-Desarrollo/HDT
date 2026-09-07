@@ -36,9 +36,8 @@ Set-Location -Path $PSScriptRoot
 #      derecha, de par en par. Ahi la persona decide, y su decision pisa a la
 #      del sistema y queda con su nombre («lo dijo Bodega») sin borrar lo que
 #      la maquina habia contestado.
-#    - El color de la demarcacion es OPCIONAL: si Bodega lo dice y contradice
-#      al catalogo, baja el veredicto; si no lo dice, se valida solo con la
-#      foto. Asi lo pidio el requerimiento.
+#    - Se valida SOLO CON LA FOTO, como se pidio. La API sigue aceptando el
+#      color de la demarcacion, pero la pantalla no lo pregunta.
 #
 #  LO QUE NO HACE, a proposito:
 #    - NO revisa que la bandeja este completa. No cuenta tornillos. Valida

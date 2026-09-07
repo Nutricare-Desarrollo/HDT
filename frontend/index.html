@@ -382,12 +382,6 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .vb-ver.no{background:#fdeeec;border-color:#f0bdb6;border-left-color:var(--danger)}
 .vb-ver.no .tit{color:#96271b}
 .vb-acc{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
-.vb-chips{display:flex;flex-wrap:wrap;gap:9px}
-.vb-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1.5px solid var(--line);border-radius:10px;padding:8px 12px 8px 9px;font-size:14px;font-weight:600;color:var(--txt);min-height:46px}
-.vb-chip:hover{border-color:var(--accent)}
-.vb-chip.sel{border-color:var(--brand);box-shadow:0 0 0 3px rgba(10,92,138,.15)}
-.vb-chip .sw{width:26px;height:26px;border-radius:6px;border:1px solid rgba(0,0,0,.18);flex:0 0 auto}
-.vb-chip.nada .sw{background:repeating-linear-gradient(45deg,#e6edf3 0 5px,#cfdae3 5px 10px)}
 /* Pastillas */
 .vb-pill{display:inline-block;font-size:11px;font-weight:800;padding:2px 7px;border-radius:99px;white-space:nowrap;vertical-align:middle}
 .vb-pill.ok{background:#eefaf3;color:#16704a;border:1px solid #b6e3cc}
@@ -1307,6 +1301,10 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div><h2 id="valTit">Validar bandeja</h2><div class="sub" id="valSub"></div></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn-ghost" onclick="volverDeValidacion()">← Volver a la solicitud</button>
+          <!-- El boton de validar vive acá arriba, junto al de volver: es la
+               accion de la pantalla y no tiene que buscarse al fondo. Lo pinta
+               renderValidacion(), que es quien sabe si se puede. -->
+          <span id="valAcc"></span>
         </div>
       </div>
       <div id="valBody"></div>
@@ -6701,7 +6699,10 @@ function solPillVeredicto(d){
    - Sobre cualquiera de los tres veredictos la persona puede mirar las fotos
      lado a lado y decidir ella. Eso queda grabado como suyo, no del sistema. */
 let VAL=null;            // lo que devolvio GET .../validacion
-let VAL_COLOR=null;      // el color que la persona dice ver (opcional)
+/* El color de la demarcación NO se pregunta. La API lo sigue aceptando y lo
+   sigue guardando cuando viene -por eso la franja lo muestra si el registro
+   lo trae-, pero la pantalla valida solo con la foto: pedirlo era un paso más
+   para un dato que casi nunca cambia el veredicto. */
 let VAL_IMG={};          // cache de imagenes ya traidas: 'r12' / 'e34' -> data URL
 const VAL_MAX_LADO=2000; // mas grande que el catalogo: acá lo que importa es que el OCR lea
 const VAL_CALIDAD=0.85;
@@ -6718,7 +6719,6 @@ async function abrirValidacion(codigo){
   }catch(e){ toast('No se pudo abrir la validación: '+e.message); hideLoading(); return; }
   finally{ hideLoading(); }
   VAL_IMG={};
-  VAL_COLOR=(VAL.veredicto && VAL.veredicto.color_observado)||null;
   setTab('solicitudes'); showOnly('viewValidacion');
   renderValidacion();
 }
@@ -6727,10 +6727,8 @@ function volverDeValidacion(){ cmpCerrar(); abrirSolicitud(SOL_ACT.id); }
 /* Recarga sin salir de la pantalla ni perder el color elegido. */
 async function valRecargar(){
   if(!VAL) return;
-  const c=VAL_COLOR;
   try{
     VAL=await api('GET','/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion');
-    VAL_COLOR=c;
     renderValidacion();
   }catch(e){ toast('No se pudo recargar: '+e.message); }
 }
@@ -6764,36 +6762,20 @@ function renderValidacion(){
       El sistema no las puede separar por la foto ni por la demarcación: si son idénticas por dentro, va a contestar «No puedo determinarlo».</div></div>`;
   }
 
-  /* 3. Las fotos de la entrega. */
+  /* 3. Las fotos de la entrega. Ya no se numera como «Paso 1»: el color se
+        quito y quedo un paso solo, y un paso solo no se numera. */
   h+=`<div class="card pad" style="margin-top:16px">
-        <div class="vb-paso">Paso 1 · Fotos de la bandeja alistada</div>`;
+        <div class="vb-paso">Fotos de la bandeja alistada</div>`;
   h+=valZonaSubida();
   h+=valTirasEntrega();
+  if(!ro){
+    h+=`<div class="chk-ayuda" style="margin-top:12px">${VAL.tiene_fotos
+      ? 'Cuando estén todas, toque <b>«Validar bandeja»</b> arriba: se compara el texto de estas fotos contra el del catálogo.'
+      : 'Adjunte al menos una foto para poder validar.'}</div>`;
+  }
   h+=`</div>`;
 
-  /* 4. El color, opcional. Va aparte y despues de las fotos porque no decide
-        el veredicto: solo lo puede bajar cuando contradice al catálogo. */
-  if(!ro && b.color_catalogo){
-    h+=`<div class="card pad" style="margin-top:16px">
-          <div class="vb-paso">Paso 2 · Color de la demarcación <span style="font-weight:600;text-transform:none;letter-spacing:0">(opcional)</span></div>
-          <div class="chk-ayuda" style="margin-bottom:10px">En el catálogo esta bandeja está demarcada
-            <b>${esc(b.color_catalogo)}</b>. Si mira la etiqueta y ve otro color, dígalo: el sistema lo toma en cuenta.
-            Si lo deja en blanco, valida solo con la foto.</div>
-          <div class="vb-chips">${valChipsColor()}</div>
-        </div>`;
-  }
-
-  /* 5. El boton. */
-  if(!ro){
-    h+=`<div class="sol-acciones">
-          <span class="sol-despacho-nota">${VAL.tiene_fotos
-            ? 'Se comparará el texto de las fotos contra el del catálogo.'
-            : 'Adjunte al menos una foto de la bandeja para poder validar.'}</span>
-          <button class="btn-primary" id="valBtn" onclick="valValidar()"${VAL.tiene_fotos?'':' disabled'}>🔎 Validar bandeja</button>
-        </div>`;
-  }
-
-  /* 6. Las fotos del catálogo, al final: son el material de consulta, no el
+  /* 4. Las fotos del catálogo, al final: son el material de consulta, no el
         paso a hacer. Se ven acá y a pantalla completa en el comparador. */
   h+=`<div class="card pad" style="margin-top:16px">
         <div class="vb-paso">Fotos de referencia del catálogo</div>`;
@@ -6817,6 +6799,13 @@ function renderValidacion(){
   h+=`</div>`;
 
   document.getElementById('valBody').innerHTML=h;
+  /* El boton de la accion, arriba. Se repinta con la pantalla porque su estado
+     depende de si ya hay fotos. */
+  document.getElementById('valAcc').innerHTML = ro ? ''
+    : `<button class="btn-primary" id="valBtn" onclick="valValidar()"${VAL.tiene_fotos?'':' disabled'}`
+      + ` title="${VAL.tiene_fotos ? 'Comparar el texto de las fotos contra el del catálogo'
+                                   : 'Adjunte al menos una foto de la bandeja para poder validar'}">`
+      + `🔎 Validar bandeja</button>`;
   /* Las imagenes en segundo plano: la pantalla ya esta usable sin ellas. */
   VAL.referencia.forEach(f=>valThumb('r', f.id));
   (VAL.fotos||[]).forEach(f=>valThumb('e', f.id));
@@ -6859,7 +6848,7 @@ function valFranjaVeredicto(){
   let acc='';
   if(!valSoloLectura() && (VAL.fotos||[]).length && VAL.referencia.length){
     acc=`<div class="vb-acc">
-      <button class="btn-ghost" onclick="cmpAbrir()">🔍 Ver fotos lado a lado</button>
+      <button class="btn-ghost" onclick="cmpAbrir()">🔍 Comparar y decidir</button>
     </div>`;
   }
   return `<div class="vb-ver ${cls}"><span class="ico">${ico}</span><div style="flex:1 1 auto">
@@ -6900,19 +6889,6 @@ function valTirasEntrega(){
   });
   return h+`</div>`;
 }
-
-function valChipsColor(){
-  const lista=(VAL.colores||[]).concat(['No se distingue']);
-  let h=`<button type="button" class="vb-chip nada${VAL_COLOR?'':' sel'}" onclick="valColor(null)"><span class="sw"></span>Sin decir</button>`;
-  lista.forEach(c=>{
-    const st=equipoColorStyle(c);
-    const sw=st?`style="background:${st.background}"`:'';
-    h+=`<button type="button" class="vb-chip${c==='No se distingue'?' nada':''}${VAL_COLOR===c?' sel':''}" onclick="valColor('${attr(c)}')">
-          <span class="sw" ${sw}></span>${esc(c)}</button>`;
-  });
-  return h;
-}
-function valColor(c){ VAL_COLOR=c; renderValidacion(); }
 
 /* Trae una imagen y la deja en el cache. El comparador se sirve del mismo
    cache: abrirlo despues de mirar la galeria no vuelve a pedir nada. */
@@ -6981,8 +6957,7 @@ async function valValidar(){
   if(!VAL || valSoloLectura()) return;
   const btn=document.getElementById('valBtn'); if(btn){ btn.disabled=true; btn.textContent='Comparando…'; }
   try{
-    await api('POST','/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion',
-      VAL_COLOR?{color_observado:VAL_COLOR}:{});
+    await api('POST','/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion', {});
   }catch(e){
     toast('No se pudo validar: '+e.message);
     if(btn){ btn.disabled=false; btn.textContent='🔎 Validar bandeja'; }
