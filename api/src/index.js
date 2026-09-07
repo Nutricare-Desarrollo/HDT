@@ -954,6 +954,216 @@ app.http('bandeja-producto-delete', {
 });
 
 
+
+/* ============================================================
+   Fotografias de referencia de la bandeja
+   ------------------------------------------------------------
+   Como deberia verse la bandeja. Una bandeja tiene de 2 a 9 recipientes y cada
+   uno se fotografia aparte, asi que esto es una galeria, no una foto.
+
+   Dos usos desde el primer dia, sin depender de nada mas:
+     - Bodega abre la bandeja en Mantenimiento y ve con que deberia toparse.
+     - Quien corrija el catalogo puede mirar la foto al lado del contenido
+       registrado. Hay 59 discrepancias medidas entre lo impreso en las
+       bandejas y cat.EquipoProducto, y hoy no hay ninguna pantalla donde ver
+       las dos cosas juntas.
+
+   El contenido va en base64 en TEXT, igual que las fotos de la hoja sellada:
+   sin dependencia nueva y sin cuenta de almacenamiento. Las reglas de imagen
+   -SELLADA_TIPOS y SELLADA_MAX_MB, mas abajo en este archivo- son las mismas.
+
+   QUIEN BORRA: cualquiera de Bodega o Administrador. Es distinto de las fotos
+   de la hoja sellada y del alisto, donde solo borra quien subio, y la razon es
+   que aca la foto NO es evidencia de un acto de nadie: es dato de catalogo
+   compartido, como la descripcion o el color. Se corrige como se corrige el
+   resto del catalogo.
+   ============================================================ */
+
+/* Nueve recipientes tiene la bandeja mas grande que fotografiaron (0001337);
+   doce deja aire para las tapas y para repetir una que salio movida. */
+const FOTO_BANDEJA_MAX = 12;
+const FECHA_EQFOTO = `to_char((FechaHora AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica', 'YYYY-MM-DD HH24:MI')`;
+
+/* El codigo tal como esta guardado en cat.Equipo, que es la llave primaria y a
+   la que apunta la foranea. normBandeja() normaliza lo que llega por la ruta,
+   pero la fila tiene que guardar el codigo del catalogo, no el normalizado, o
+   la foranea rebota. Devuelve null si la bandeja no existe. */
+async function codigoDeBandeja(cod) {
+  const r = await query(
+    `SELECT Codigo AS codigo, Demarcado AS demarcado FROM cat.Equipo
+      WHERE UPPER(TRIM(Codigo)) = UPPER(TRIM($1))`, [cod]);
+  return r.rowCount ? r.rows[0] : null;
+}
+
+/* GET /api/bandejas/{codigo}/fotos -> la galeria SIN el contenido.
+   Traer el base64 aca haria que abrir una bandeja con nueve fotos bajara
+   varios MB; cada imagen se pide aparte y solo cuando se va a ver. */
+app.http('bandeja-fotos-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'bandejas/{codigo}/fotos',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para ver el catálogo de bandejas' });
+    const cod = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!cod) return json(400, { error: 'Código de bandeja inválido' });
+    try {
+      const b = await codigoDeBandeja(cod);
+      if (!b) return json(404, { error: 'Esa bandeja no está en el catálogo' });
+      const r = await query(
+        `SELECT Id AS id, Rotulo AS rotulo, Orden AS orden, Nombre AS nombre,
+                Tipo AS tipo, Bytes AS bytes, Usuario AS usuario, ${FECHA_EQFOTO} AS fecha
+           FROM cat.EquipoFoto WHERE EquipoCodigo = $1
+          ORDER BY Orden, Id`, [b.codigo]);
+      return json(200, { codigo: b.codigo, demarcado: b.demarcado, maximo: FOTO_BANDEJA_MAX, fotos: r.rows });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudieron obtener las fotos de la bandeja', detail: e.message });
+    }
+  }
+});
+
+/* GET /api/bandejas/{codigo}/fotos/{fid} -> una foto en base64. */
+app.http('bandeja-foto-contenido', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'bandejas/{codigo}/fotos/{fid}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para ver el catálogo de bandejas' });
+    const cod = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    const fid = parseInt(request.params.fid, 10);
+    if (!cod || !fid) return json(400, { error: 'Bandeja o foto inválida' });
+    try {
+      const r = await query(
+        `SELECT f.Nombre AS nombre, f.Tipo AS tipo, f.Rotulo AS rotulo, f.Contenido AS contenido
+           FROM cat.EquipoFoto f
+          WHERE f.Id = $1 AND UPPER(TRIM(f.EquipoCodigo)) = UPPER(TRIM($2))`, [fid, cod]);
+      if (!r.rowCount) return json(404, { error: 'La foto no existe' });
+      return json(200, r.rows[0]);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener la foto', detail: e.message });
+    }
+  }
+});
+
+/* POST /api/bandejas/{codigo}/fotos
+   Body: { nombre, tipo, base64, rotulo } — la imagen ya reducida por el
+   navegador. El orden se asigna solo: va al final de la galeria. */
+app.http('bandeja-foto-create', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'bandejas/{codigo}/fotos',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de bandejas' });
+    const cod = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!cod) return json(400, { error: 'Código de bandeja inválido' });
+
+    const body = await request.json().catch(() => ({}));
+    const tipo = String((body && body.tipo) || '').toLowerCase().trim();
+    const b64 = String((body && body.base64) || '');
+    const nombre = String((body && body.nombre) || '').trim().slice(0, 260) || null;
+    const rotulo = String((body && body.rotulo) || '').trim().slice(0, 100) || null;
+
+    if (!b64) return json(400, { error: 'No llegó la imagen' });
+    if (!SELLADA_TIPOS.has(tipo))
+      return json(400, { error: 'Solo se admiten imágenes (JPG, PNG, WEBP, GIF o BMP). Recibido: ' + (tipo || 'sin tipo') });
+    // 3 caracteres de base64 = 4 bytes; alcanza para el tope sin decodificar.
+    const bytes = Math.floor(b64.length * 3 / 4);
+    if (bytes > SELLADA_MAX_MB * 1024 * 1024)
+      return json(400, { error: 'La imagen supera los ' + SELLADA_MAX_MB + ' MB' });
+
+    try {
+      const b = await codigoDeBandeja(cod);
+      if (!b) return json(404, { error: 'Esa bandeja no está en el catálogo' });
+
+      const c = await query(
+        `SELECT COUNT(*)::int AS n, COALESCE(MAX(Orden), -1) AS ultimo
+           FROM cat.EquipoFoto WHERE EquipoCodigo = $1`, [b.codigo]);
+      if (c.rows[0].n >= FOTO_BANDEJA_MAX)
+        return json(400, { error: 'Ya hay ' + FOTO_BANDEJA_MAX + ' fotos en esta bandeja, el máximo permitido' });
+
+      const r = await query(
+        `INSERT INTO cat.EquipoFoto (EquipoCodigo, Rotulo, Orden, Nombre, Tipo, Bytes, Contenido, Usuario, UsuarioEmail)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (EquipoCodigo, COALESCE(Nombre,''), COALESCE(Bytes,0)) DO NOTHING
+         RETURNING Id AS id, Rotulo AS rotulo, Orden AS orden, Nombre AS nombre,
+                   Tipo AS tipo, Bytes AS bytes, Usuario AS usuario, ${FECHA_EQFOTO} AS fecha`,
+        [b.codigo, rotulo, c.rows[0].ultimo + 1, nombre, tipo, bytes, b64,
+         user.name || user.email, user.email]);
+      /* Sin filas devueltas es que el indice unico la freno: la misma foto ya
+         estaba. Se responde 200 y no un error, porque desde la pantalla eso es
+         «ya la tenias», no un fallo. */
+      if (!r.rowCount) return json(200, { ok: true, repetida: true, codigo: b.demarcado || b.codigo });
+      return json(201, { ...r.rows[0], codigo: b.demarcado || b.codigo });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo guardar la foto', detail: e.message });
+    }
+  }
+});
+
+/* PUT /api/bandejas/{codigo}/fotos/{fid}
+   Body: { rotulo, orden } — para nombrar el recipiente y acomodar la galeria.
+   Los dos campos son opcionales: se cambia solo lo que venga. */
+app.http('bandeja-foto-update', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'bandejas/{codigo}/fotos/{fid}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de bandejas' });
+    const cod = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    const fid = parseInt(request.params.fid, 10);
+    if (!cod || !fid) return json(400, { error: 'Bandeja o foto inválida' });
+
+    const body = await request.json().catch(() => ({}));
+    const tieneRotulo = body && body.rotulo !== undefined;
+    const tieneOrden = body && body.orden !== undefined;
+    if (!tieneRotulo && !tieneOrden) return json(400, { error: 'No hay nada que cambiar' });
+    const rotulo = tieneRotulo ? (String(body.rotulo || '').trim().slice(0, 100) || null) : null;
+    const orden = tieneOrden ? (parseInt(body.orden, 10) || 0) : null;
+
+    try {
+      const r = await query(
+        `UPDATE cat.EquipoFoto
+            SET Rotulo = CASE WHEN $3 THEN $4 ELSE Rotulo END,
+                Orden  = CASE WHEN $5 THEN $6 ELSE Orden  END
+          WHERE Id = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))
+        RETURNING Id AS id, Rotulo AS rotulo, Orden AS orden, Nombre AS nombre`,
+        [fid, cod, tieneRotulo, rotulo, tieneOrden, orden]);
+      if (!r.rowCount) return json(404, { error: 'La foto no existe' });
+      return json(200, { ...r.rows[0], codigo: cod });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo actualizar la foto', detail: e.message });
+    }
+  }
+});
+
+/* DELETE /api/bandejas/{codigo}/fotos/{fid} */
+app.http('bandeja-foto-delete', {
+  methods: ['DELETE'], authLevel: 'anonymous', route: 'bandejas/{codigo}/fotos/{fid}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de bandejas' });
+    const cod = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    const fid = parseInt(request.params.fid, 10);
+    if (!cod || !fid) return json(400, { error: 'Bandeja o foto inválida' });
+    try {
+      const r = await query(
+        `DELETE FROM cat.EquipoFoto
+          WHERE Id = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))
+        RETURNING Nombre AS nombre`, [fid, cod]);
+      if (!r.rowCount) return json(404, { error: 'La foto no existe' });
+      return json(200, { ok: true, codigo: cod, nombre: r.rows[0].nombre });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo eliminar la foto', detail: e.message });
+    }
+  }
+});
+
+
 /* ============================================================
    Hospitales — catálogo
    El mantenimiento es solo para Administrador y Bodega, pero la lista de

@@ -343,6 +343,19 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .sell-drop{border:1.5px dashed var(--line);border-radius:10px;padding:14px;background:#f7fafc;margin-bottom:12px}
 .sell-drop .hint{font-size:12.5px;color:var(--muted);margin:8px 0 0;line-height:1.45}
 .sell-thumb{width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:block}
+/* ===== Fotos de referencia de la bandeja (catálogo) =====
+   Galería de recipientes. Las miniaturas son grandes a propósito: sirven para
+   reconocer la bandeja de un vistazo, no para decorar. */
+.bfot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px;margin-top:12px}
+.bfot{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#f7fafc;display:flex;flex-direction:column}
+.bfot .im{width:100%;height:140px;background:#eef3f7;display:block;object-fit:cover;cursor:zoom-in}
+.bfot .cuerpo{padding:8px;display:flex;flex-direction:column;gap:7px}
+.bfot input{font-size:13px;padding:7px 9px}
+.bfot .meta{font-size:11px;color:var(--muted);line-height:1.35}
+.bfot .acc{display:flex;gap:5px}
+.bfot .acc button{flex:0 0 auto;font-size:12px;padding:6px 8px}
+.bfot .acc .crece{flex:1 1 auto}
+.bfot-vacio{border:1.5px dashed var(--line);border-radius:10px;padding:18px;background:#f7fafc;text-align:center;color:var(--muted);font-size:13.5px;line-height:1.5}
 .kv{display:grid;grid-template-columns:180px 1fr;gap:6px 14px;font-size:14px}
 .kv .k{color:var(--muted)}
 .pad{padding:18px}
@@ -1081,6 +1094,15 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div style="margin-top:16px;display:flex;justify-content:flex-end">
           <button class="btn-primary" id="banSaveBtn" onclick="guardarBandeja()">💾 Guardar cambios</button>
         </div>
+      </div>
+      <!-- Fotos de referencia: cómo debería verse la bandeja. Va ANTES de los
+           componentes porque es lo que permite reconocerla en la estantería, y
+           porque quien corrige el catálogo necesita ver la foto y el contenido
+           registrado en la misma pantalla. -->
+      <div class="card pad" style="margin-top:16px">
+        <div class="section-title" style="margin-top:0">Fotos de referencia</div>
+        <div class="chk-ayuda" style="margin:-4px 0 4px">Una foto por recipiente. Es lo que Bodega va a comparar contra la bandeja física.</div>
+        <div id="bfotBody"></div>
       </div>
       <div class="card" style="margin-top:16px">
         <div class="pad" style="padding-bottom:4px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
@@ -3208,6 +3230,188 @@ function renderTrabajos(){
     const tr=document.createElement('tr'); tr.innerHTML=tds; b.appendChild(tr);
   });
 }
+/* ===== FOTOS DE REFERENCIA DE LA BANDEJA =====
+   Cómo debería verse la bandeja. Una bandeja tiene de 2 a 9 recipientes y cada
+   uno se fotografía aparte, así que esto es una galería con rótulo por foto
+   («Recipiente 1», «Tapa») y orden editable.
+
+   Para qué sirve hoy, sin depender de nada más: Bodega abre la bandeja y ve
+   con qué debería toparse en la estantería. Y quien tenga que corregir el
+   catálogo —hay 59 discrepancias medidas entre lo impreso en las bandejas y
+   cat.EquipoProducto— puede mirar la foto al lado del contenido registrado,
+   que hoy no se puede hacer en ninguna pantalla.
+
+   Se reduce en el navegador antes de subir, igual que las fotos de la hoja
+   sellada: una foto de cámara pasa de varios MB a ~130 KB. */
+let BFOT = { codigo:null, fotos:[], maximo:12 };
+const BFOT_MAX_LADO = 1600;   // px del lado largo tras reducir
+const BFOT_CALIDAD  = 0.82;
+
+function bfotReducir(file){
+  return new Promise((resolve, reject)=>{
+    const fr=new FileReader();
+    fr.onerror=()=>reject(new Error('No se pudo leer el archivo'));
+    fr.onload=()=>{
+      const img=new Image();
+      img.onerror=()=>reject(new Error('El navegador no pudo abrir la imagen (¿formato no soportado, como HEIC?)'));
+      img.onload=()=>{
+        try{
+          const esc=Math.min(1, BFOT_MAX_LADO/Math.max(img.width, img.height));
+          const w=Math.max(1, Math.round(img.width*esc)), h=Math.max(1, Math.round(img.height*esc));
+          const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+          const cx=cv.getContext('2d');
+          cx.fillStyle='#fff'; cx.fillRect(0,0,w,h);
+          cx.drawImage(img,0,0,w,h);
+          const url=cv.toDataURL('image/jpeg', BFOT_CALIDAD);
+          const m=/^data:([^;]+);base64,(.*)$/s.exec(url);
+          if(!m) return reject(new Error('No se pudo convertir la imagen'));
+          resolve({tipo:m[1], base64:m[2]});
+        }catch(e){ reject(new Error('No se pudo procesar la imagen: '+e.message)); }
+      };
+      img.src=fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+/* Se pide aparte del detalle de la bandeja y sin bloquear: la pantalla ya está
+   dibujada y un fallo acá no puede impedir editar el catálogo. */
+async function bfotCargar(codigo){
+  BFOT={codigo, fotos:[], maximo:12};
+  const cont=document.getElementById('bfotBody'); if(!cont) return;
+  cont.innerHTML='<div class="empty" style="padding:16px">Cargando…</div>';
+  try{
+    const r=await api('GET','/bandejas/'+encodeURIComponent(codigo)+'/fotos');
+    BFOT.fotos=(r&&r.fotos)||[]; BFOT.maximo=(r&&r.maximo)||12;
+  }catch(e){
+    cont.innerHTML=`<div class="empty" style="padding:16px;color:var(--danger)">No se pudieron cargar las fotos: ${esc(e.message)}</div>`;
+    return;
+  }
+  bfotRender();
+}
+
+function bfotRender(){
+  const cont=document.getElementById('bfotBody'); if(!cont) return;
+  const n=BFOT.fotos.length, lleno=n>=BFOT.maximo;
+  let html='';
+  if(lleno){
+    html+=`<div class="bfot-vacio">Ya hay ${n} fotos, el máximo por bandeja. Elimine alguna si necesita subir otra.</div>`;
+  }else{
+    html+='<div class="sell-drop">'
+      + `<input type="file" id="bfotInput" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" multiple onchange="bfotSubir(this)">`
+      + `<p class="hint">Una foto por recipiente. La bandeja completa en el cuadro, con las cuatro esquinas visibles y sin flash directo. `
+      + `Se reducen automáticamente antes de subir. ${n} de ${BFOT.maximo} usadas.</p>`
+      + '<div id="bfotProgreso" style="font-size:13px;margin-top:8px"></div>'
+      + '</div>';
+  }
+  if(!n){
+    html+='<div class="bfot-vacio" style="margin-top:12px">Esta bandeja todavía no tiene fotos de referencia.<br>'
+      + 'Suba una por cada recipiente para que Bodega sepa con qué debería toparse.</div>';
+    cont.innerHTML=html; return;
+  }
+  html+='<div class="bfot-grid">';
+  BFOT.fotos.forEach((f,i)=>{
+    const kb=f.bytes?Math.max(1,Math.round(f.bytes/1024))+' KB':'';
+    html+=`<div class="bfot"><div class="im" id="bfotThumb_${f.id}"></div><div class="cuerpo">`
+      + `<input type="text" maxlength="100" placeholder="Rótulo (ej. Recipiente ${i+1})" value="${attr(f.rotulo||'')}"`
+      + ` onchange="bfotRotulo(${f.id}, this)" title="Qué se ve en esta foto">`
+      + `<div class="meta">${esc(f.usuario)} · ${esc(f.fecha)}${kb?' · '+kb:''}</div>`
+      + '<div class="acc">'
+      + `<button class="icon-btn" onclick="bfotMover(${f.id},-1)"${i===0?' disabled':''} title="Mover antes">◀</button>`
+      + `<button class="icon-btn" onclick="bfotMover(${f.id},1)"${i===n-1?' disabled':''} title="Mover después">▶</button>`
+      + `<button class="icon-btn crece" onclick="bfotVer(${f.id})">👁️ Ver</button>`
+      + `<button class="icon-btn danger" onclick="bfotEliminar(${f.id})" title="Eliminar">🗑</button>`
+      + '</div></div></div>';
+  });
+  html+='</div>';
+  cont.innerHTML=html;
+  BFOT.fotos.forEach(f=>bfotThumb(f.id));   // miniaturas en segundo plano
+}
+
+async function bfotThumb(fotoId){
+  const cel=document.getElementById('bfotThumb_'+fotoId); if(!cel || !BFOT.codigo) return;
+  try{
+    const f=await api('GET','/bandejas/'+encodeURIComponent(BFOT.codigo)+'/fotos/'+fotoId);
+    cel.outerHTML=`<img class="im" id="bfotThumb_${fotoId}" src="data:${attr(f.tipo)};base64,${attr(f.contenido)}"`
+      + ` alt="${attr(f.rotulo||'foto de la bandeja')}" onclick="bfotVer(${fotoId})">`;
+  }catch(e){ /* si falla, queda el cuadro gris */ }
+}
+async function bfotVer(fotoId){
+  try{
+    const f=await api('GET','/bandejas/'+encodeURIComponent(BFOT.codigo)+'/fotos/'+fotoId);
+    openImg(`data:${f.tipo};base64,${f.contenido}`);
+  }catch(e){ toast('No se pudo abrir la foto: '+e.message); }
+}
+async function bfotRotulo(fotoId, el){
+  const f=BFOT.fotos.find(x=>x.id===fotoId); if(!f) return;
+  const v=el.value.trim();
+  if(v===(f.rotulo||'')) return;
+  try{
+    await api('PUT','/bandejas/'+encodeURIComponent(BFOT.codigo)+'/fotos/'+fotoId, {rotulo:v});
+    f.rotulo=v||null;
+  }catch(e){ toast('No se pudo guardar el rótulo: '+e.message); el.value=f.rotulo||''; }
+}
+/* Mover intercambia el orden con el vecino y graba las DOS filas. Reasignar
+   toda la galería sería más "limpio" pero manda N llamadas por cada clic. */
+async function bfotMover(fotoId, dir){
+  const i=BFOT.fotos.findIndex(x=>x.id===fotoId);
+  const j=i+dir;
+  if(i<0 || j<0 || j>=BFOT.fotos.length) return;
+  const a=BFOT.fotos[i], b=BFOT.fotos[j];
+  /* Si dos fotos quedaron con el mismo orden -posible si se cargaron por
+     script- el intercambio no movería nada. Se renumera el par para que
+     siempre haya diferencia. */
+  const oa=a.orden, ob=b.orden;
+  const nuevoA = (oa===ob) ? (dir>0 ? ob+1 : ob-1) : ob;
+  try{
+    await api('PUT','/bandejas/'+encodeURIComponent(BFOT.codigo)+'/fotos/'+a.id, {orden:nuevoA});
+    await api('PUT','/bandejas/'+encodeURIComponent(BFOT.codigo)+'/fotos/'+b.id, {orden:oa});
+    a.orden=nuevoA; b.orden=oa;
+    BFOT.fotos.sort((x,y)=>(x.orden-y.orden)||(x.id-y.id));
+    bfotRender();
+  }catch(e){ toast('No se pudo reordenar: '+e.message); }
+}
+function bfotEliminar(fotoId){
+  const f=BFOT.fotos.find(x=>x.id===fotoId);
+  askConfirm('Eliminar foto',
+    'Se eliminará '+((f&&(f.rotulo||f.nombre))||'la foto')+' del catálogo de esta bandeja. No se puede deshacer.',
+    'Sí, eliminar',
+    async function(){
+      try{
+        await api('DELETE','/bandejas/'+encodeURIComponent(BFOT.codigo)+'/fotos/'+fotoId);
+        toast('Foto eliminada');
+        await bfotCargar(BFOT.codigo);
+      }catch(e){ toast('No se pudo eliminar: '+e.message); }
+    });
+}
+/* Sube una por una: una foto que falle no arrastra a las demás y el aviso
+   dice cuál falló. El rótulo se pone después, en la galería. */
+async function bfotSubir(input){
+  const files=Array.from(input.files||[]); if(!files.length) return;
+  const prog=document.getElementById('bfotProgreso');
+  const libres=BFOT.maximo-BFOT.fotos.length;
+  const lote=files.slice(0, Math.max(0, libres));
+  if(files.length>lote.length) toast('Solo se subirán '+lote.length+' de '+files.length+': el máximo por bandeja es '+BFOT.maximo+'.');
+  input.disabled=true;
+  let ok=0, rep=0; const errores=[];
+  for(let i=0;i<lote.length;i++){
+    const f=lote[i];
+    if(prog) prog.textContent='Subiendo '+(i+1)+' de '+lote.length+': '+f.name+'…';
+    try{
+      if(!/^image\//i.test(f.type||'')) throw new Error('no es una imagen');
+      const red=await bfotReducir(f);
+      const r=await api('POST','/bandejas/'+encodeURIComponent(BFOT.codigo)+'/fotos',
+        {nombre:f.name, tipo:red.tipo, base64:red.base64});
+      if(r && r.repetida) rep++; else ok++;
+    }catch(e){ errores.push(f.name+': '+e.message); }
+  }
+  input.disabled=false; if(prog) prog.textContent='';
+  if(ok) toast(ok===1?'Foto subida':(ok+' fotos subidas'));
+  if(rep) toast(rep===1?'Una foto ya estaba en la bandeja':(rep+' fotos ya estaban en la bandeja'));
+  if(errores.length) toast('No se pudo subir — '+errores.join(' · '));
+  await bfotCargar(BFOT.codigo);
+}
+
 /* ===== FOTOS DE LA HOJA SELLADA =====
    Respaldo de la hoja física ya sellada por el hospital. NO se procesan por OCR:
    la foto que se lee es la del wizard; estas solo se guardan y se ven.
@@ -5020,6 +5224,9 @@ function renderBandejaDet(){
       <label>Motivo por el que está incompleta <span class="req">*</span></label>
       <input id="ban_motivo" type="text" maxlength="300" autocomplete="off" value="${attr(b.motivo_incompleto)}"></div>`;
   renderBandejaProductos();
+  /* Las fotos se piden aparte y sin bloquear: la bandeja ya está en pantalla y
+     se puede editar el catálogo mientras la galería carga. */
+  bfotCargar(b.codigo);
 }
 function onBanCompleto(){
   const completo=document.getElementById('ban_completo').value==='1';
