@@ -993,7 +993,13 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div class="drop">
           <div class="big">📷</div>
           <p>Tomá una foto de la hoja de consumo o seleccioná una imagen.</p>
-          <input type="file" id="fileInput" accept="image/*" capture="environment" onchange="onFile(this)" style="max-width:320px;margin:0 auto">
+          <!-- SIN capture="environment". Ese atributo obliga al celular a abrir
+               la camara y NO deja llegar a la galeria, que es justo lo que el
+               renglon de arriba ofrece. Ademas no impide nada: quien quiera
+               subir una foto vieja la vuelve a fotografiar de la pantalla. El
+               caso legitimo que bloqueaba es el normal: la hoja ya venia
+               fotografiada, o la mando el hospital por otro medio. -->
+          <input type="file" id="fileInput" accept="image/*" onchange="onFile(this)" style="max-width:320px;margin:0 auto">
           <div id="prevWrap"></div>
         </div>
         <div class="foot">
@@ -3622,7 +3628,10 @@ function sellRender(){
     if(lleno){
       html+=`<div style="font-size:13.5px">Ya hay ${n} fotos, el máximo permitido. Elimine alguna si necesita subir otra.</div>`;
     }else{
-      html+=`<input type="file" id="sellInput" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" multiple capture="environment" onchange="sellSubir(this)">`;
+      /* Sin capture, por lo mismo que el del wizard, y ademas porque aca
+         peleaba con `multiple`: con la camara abierta se toma UNA foto por
+         vez, y el renglon de abajo promete seleccionar varias de una. */
+      html+=`<input type="file" id="sellInput" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" multiple onchange="sellSubir(this)">`;
       html+=`<p class="hint">Solo imágenes. Puede seleccionar varias a la vez si la hoja de consumo ocupó más de una página. `
           + `Se reducen automáticamente antes de subir. ${n} de ${SELL_CTX.maximo} usadas.</p>`;
     }
