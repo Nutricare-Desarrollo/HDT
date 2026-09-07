@@ -1577,6 +1577,8 @@ const SOL_SELECT = `SELECT s.Id AS id, s.Codigo AS codigo, s.Estado AS estado,
        s.PacienteNombre AS paciente_nombre,
        s.FechaEntrega::text AS fecha_entrega, s.HoraEntrega AS hora_entrega,
        s.Observaciones AS observaciones,
+       /* Como salio la validacion de bandejas, estampado al despachar. */
+       s.ValidacionBandejas AS validacion_bandejas,
        s.CreadoPor AS creado_por, s.CreadoPorEmail AS creado_por_email,
        to_char(s.FechaCreacion, 'YYYY-MM-DD HH24:MI') AS fecha_registro,
        to_char(s.FechaEnvio, 'YYYY-MM-DD HH24:MI') AS fecha_envio,
@@ -1937,7 +1939,7 @@ app.http('solicitud-despachar', {
     if (!id) return json(400, { error: 'Id inválido' });
 
     const client = await getClient();
-    let sol, detalle, avisos = [];
+    let sol, detalle, avisos = [], avisosValid = [], validacion = 'Sin validar';
     try {
       await client.query('BEGIN');
       const est = await client.query(`SELECT Estado FROM dbo.SolicitudEquipo WHERE Id = $1 FOR UPDATE`, [id]);
@@ -1970,11 +1972,37 @@ app.http('solicitud-despachar', {
       }
       avisos = av.rows.filter((b) => b.articulos === 0).map((b) => b.demarcado);
 
+      /* Validacion: ESTAMPA y AVISA, nunca bloquea. Es la seccion 8.5 -ninguna
+         verificacion automatica aprueba una entrega, y tampoco la impide- y
+         esta medido: con el veredicto como candado, 4 de las 12 bandejas del
+         Paso 0 no se podrian despachar hoy, todas por errores del catalogo.
+         Validada = la bandeja tiene foto. El veredicto -del sistema o de una
+         persona- se avisa aparte cuando dice «Incorrecta». */
+      const vv = await client.query(
+        `SELECT COALESCE(d.Demarcado, d.EquipoCodigo) AS demarcado,
+                v.Resultado AS veredicto, v.Origen AS origen,
+                (SELECT COUNT(*)::int FROM dbo.SolicitudFoto f
+                  WHERE f.SolicitudId = d.SolicitudId
+                    AND UPPER(TRIM(f.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo))) AS fotos
+           FROM dbo.SolicitudEquipoDetalle d
+           LEFT JOIN dbo.SolicitudVerificacion v
+             ON v.SolicitudId = d.SolicitudId
+            AND UPPER(TRIM(v.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo))
+          WHERE d.SolicitudId = $1
+          ORDER BY d.Id`, [id]);
+      const conFoto = vv.rows.filter((b) => b.fotos > 0).length;
+      validacion = conFoto === 0 ? 'Sin validar'
+                 : conFoto === vv.rowCount ? 'Validada' : 'Parcial';
+      avisosValid = vv.rows
+        .filter((b) => !b.fotos || b.veredicto === 'Incorrecta')
+        .map((b) => b.demarcado + (!b.fotos ? ' (sin foto)'
+              : ' (⚠ INCORRECTA' + (b.origen === 'Persona' ? ', dicho por Bodega' : '') + ')'));
+
       await client.query(
         `UPDATE dbo.SolicitudEquipo
-            SET Estado = $1, ActualizadoPor = $2,
+            SET Estado = $1, ActualizadoPor = $2, ValidacionBandejas = $4,
                 FechaActualizacion = (now() at time zone 'utc')
-          WHERE Id = $3`, [SOL_DESPACHADA, user.name || user.email, id]);
+          WHERE Id = $3`, [SOL_DESPACHADA, user.name || user.email, id, validacion]);
 
       const s = await client.query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
       const d = await client.query(
@@ -2001,7 +2029,10 @@ app.http('solicitud-despachar', {
            el dato que Bodega y el hospital necesitan ver en el aviso, no en
            el log. El flujo es generico y solo pinta este texto. */
         descripcion: 'Equipo alistado — ' + resumenSolicitud(sol, detalle)
-          + ((avisos && avisos.length) ? ' — sin check list: ' + avisos.join(', ') : ''),
+          + ((avisos && avisos.length) ? ' — sin check list: ' + avisos.join(', ') : '')
+          /* Lo que no se valido va en el aviso y no solo en el log: es lo que
+             el hospital necesita saber cuando reciba la bandeja. */
+          + ((avisosValid && avisosValid.length) ? ' — validación: ' + avisosValid.join(', ') : ''),
         solicitadoPor: user.email,
         url: urlSolicitud(request, id),
         cuentas
@@ -2010,7 +2041,8 @@ app.http('solicitud-despachar', {
       context.error('Fallo al preparar la notificación de alistado: ' + e.message);
       notif = { enviado: false, cuentas: 0, aviso: 'No se pudo preparar el aviso; el equipo quedó enviado al hospital.' };
     }
-    return json(200, { ...sol, bandejas: detalle.length, detalle, avisos, notificacion: notif });
+    return json(200, { ...sol, bandejas: detalle.length, detalle, avisos,
+                       validacion_bandejas: validacion, avisos_validacion: avisosValid, notificacion: notif });
   }
 });
 
@@ -2177,10 +2209,18 @@ app.http('solicitud-bandejas', {
     if (!id) return json(400, { error: 'Id inválido' });
     try {
       const r = await query(
+        /* El veredicto entra por LEFT JOIN -una fila por bandeja como maximo,
+           no multiplica- y las fotos por subconsulta: un segundo JOIN a
+           SolicitudFoto duplicaria las filas del GROUP BY y el porcentaje del
+           alisto saldria inflado. */
         `SELECT d.EquipoCodigo AS equipo_codigo, d.Demarcado AS demarcado,
                 d.Descripcion AS descripcion, d.Color AS color,
                 COUNT(ep.ProductoCodigo)::int AS articulos,
-                COUNT(a.Id)::int              AS alistados
+                COUNT(a.Id)::int              AS alistados,
+                v.Resultado AS veredicto, v.Origen AS veredicto_origen,
+                (SELECT COUNT(*)::int FROM dbo.SolicitudFoto f
+                  WHERE f.SolicitudId = d.SolicitudId
+                    AND UPPER(TRIM(f.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo))) AS fotos
            FROM dbo.SolicitudEquipoDetalle d
            LEFT JOIN cat.EquipoProducto ep
              ON UPPER(TRIM(ep.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo))
@@ -2188,8 +2228,11 @@ app.http('solicitud-bandejas', {
              ON a.SolicitudId = d.SolicitudId
             AND UPPER(TRIM(a.EquipoCodigo))   = UPPER(TRIM(d.EquipoCodigo))
             AND UPPER(TRIM(a.ProductoCodigo)) = UPPER(TRIM(ep.ProductoCodigo))
+           LEFT JOIN dbo.SolicitudVerificacion v
+             ON v.SolicitudId = d.SolicitudId
+            AND UPPER(TRIM(v.EquipoCodigo))   = UPPER(TRIM(d.EquipoCodigo))
           WHERE d.SolicitudId = $1
-          GROUP BY d.Id, d.EquipoCodigo, d.Demarcado, d.Descripcion, d.Color
+          GROUP BY d.Id, d.EquipoCodigo, d.Demarcado, d.Descripcion, d.Color, v.Resultado, v.Origen
           ORDER BY d.Id`, [id]);
       return json(200, r.rows.map((x) => ({ ...x, porcentaje: pct(x.alistados, x.articulos) })));
     } catch (e) {
@@ -2375,6 +2418,431 @@ app.http('solicitud-checklist-guardar', {
     }
   }
 });
+
+
+/* ============================================================
+   Validacion de la bandeja alistada — veredicto automatico
+   ------------------------------------------------------------
+   Bodega sube las fotos de la bandeja que alisto y toca «Validar». La API lee
+   el texto impreso con Document Intelligence, lo compara contra el de las
+   fotos de referencia del catalogo (cat.EquipoFoto, migracion 32) y contesta
+   una de tres cosas: Correcta, Incorrecta -diciendo a que se parece mas- o No
+   puedo determinarlo.
+
+   El OCR corre AL SUBIR cada foto, no al validar. Asi el boton contesta al
+   instante en vez de hacer esperar cuarenta segundos frente a la estanteria.
+   Si la lectura falla, la foto se guarda igual con el error anotado: la foto
+   vale como evidencia aunque no se haya podido leer.
+
+   Cualquiera de los tres veredictos lo puede confirmar o desmentir una
+   persona desde la comparacion a pantalla completa, y eso queda registrado
+   con nombre y hora. La marca manual es DISTINTA de la automatica: dentro de
+   tres meses tiene que poder saberse si la bandeja la aprobo el sistema o la
+   aprobo alguien mirando.
+
+   NADA BLOQUEA EL DESPACHO. Ver la migracion 33 y la seccion 8.5.
+   ============================================================ */
+
+const comparar = require('./comparar');
+const { analyzeRead, textoDe } = require('./layout');
+
+const FOTO_ENTREGA_MAX = 6;
+const COLOR_ILEGIBLE = 'No se distingue';
+const COLORES_DEMARCACION = ['Amarillo', 'Azul', 'Blanco', 'Café', 'Gris', 'Morado', 'Naranja', 'Negro', 'Rojo', 'Verde'];
+const FECHA_VALID = `to_char((FechaHora AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica', 'YYYY-MM-DD HH24:MI')`;
+
+const colorKey = (v) => comparar.normalizar(v);
+
+/* Bandejas con EXACTAMENTE el mismo contenido. Son el unico caso que el texto
+   no puede resolver nunca: imprimen los mismos codigos y los mismos nombres.
+   74 de 118 bandejas tienen al menos una. */
+const SQL_GEMELAS = `
+  WITH huella AS (
+    SELECT UPPER(TRIM(EquipoCodigo)) AS cod,
+           md5(string_agg(UPPER(TRIM(ProductoCodigo)), '|'
+                          ORDER BY UPPER(TRIM(ProductoCodigo)))) AS h
+      FROM cat.EquipoProducto GROUP BY 1)
+  SELECT g.cod AS codigo, e.Demarcado AS demarcado, e.Nombre AS nombre, e.Color AS color
+    FROM huella g
+    JOIN huella yo ON yo.cod = UPPER(TRIM($1))
+    JOIN cat.Equipo e ON UPPER(TRIM(e.Codigo)) = g.cod
+   WHERE g.h = yo.h AND g.cod <> yo.cod
+   ORDER BY g.cod`;
+
+async function bandejaDeSolicitud(id, cod) {
+  const r = await query(
+    `SELECT d.EquipoCodigo AS equipo_codigo, d.Demarcado AS demarcado,
+            d.Descripcion AS descripcion, d.Color AS color_solicitud,
+            e.Color AS color_catalogo, e.Nombre AS nombre
+       FROM dbo.SolicitudEquipoDetalle d
+       LEFT JOIN cat.Equipo e ON UPPER(TRIM(e.Codigo)) = UPPER(TRIM(d.EquipoCodigo))
+      WHERE d.SolicitudId = $1 AND UPPER(TRIM(d.EquipoCodigo)) = UPPER(TRIM($2))`, [id, cod]);
+  return r.rowCount ? r.rows[0] : null;
+}
+
+async function veredictoDe(id, cod) {
+  const r = await query(
+    `SELECT Resultado AS resultado, Origen AS origen, Motivo AS motivo,
+            Puntaje::float8 AS puntaje, CandidatoCodigo AS candidato,
+            CandidatoPuntaje::float8 AS candidato_puntaje,
+            ColorObservado AS color_observado, ColorCatalogo AS color_catalogo,
+            Nota AS nota, Usuario AS usuario, ${FECHA_VALID} AS fecha
+       FROM dbo.SolicitudVerificacion
+      WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))`, [id, cod]);
+  return r.rowCount ? r.rows[0] : null;
+}
+
+/* Las referencias de TODAS las bandejas que tengan texto leido. Hacen falta
+   completas y no solo la de la pedida: el IDF necesita el corpus, y sin el
+   una etiqueta que esta en las 118 pesaria igual que una unica.
+   Se cachea un minuto: son 118 filas de texto y la pantalla las pide por cada
+   validacion, pero cambian solo cuando alguien sube una foto al catalogo. */
+let REF_CACHE = null, REF_CACHE_T = 0;
+const REF_CACHE_MS = 60000;
+async function referencias(context) {
+  if (REF_CACHE && (Date.now() - REF_CACHE_T) < REF_CACHE_MS) return REF_CACHE;
+  const r = await query(
+    `SELECT UPPER(TRIM(EquipoCodigo)) AS codigo, TextoOcr AS texto
+       FROM cat.EquipoFoto WHERE TextoOcr IS NOT NULL AND BTRIM(TextoOcr) <> ''`);
+  const refs = {};
+  for (const f of r.rows) (refs[f.codigo] = refs[f.codigo] || []).push(f.texto);
+  REF_CACHE = refs; REF_CACHE_T = Date.now();
+  if (context) context.log('Referencias de bandeja en cache: ' + Object.keys(refs).length);
+  return refs;
+}
+
+/* GET /api/solicitudes/{id}/bandejas/{codigo}/validacion */
+app.http('solicitud-validacion-get', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'solicitudes/{id}/bandejas/{codigo}/validacion',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const rol = await getRole(user);
+    if (!puedeSubir(rol) && !puedeBodega(rol)) return json(403, { error: 'Su rol no tiene acceso a las solicitudes' });
+    const id = parseInt(request.params.id, 10);
+    const cod = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!id || !cod) return json(400, { error: 'Solicitud o bandeja inválida' });
+    try {
+      const s = await query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
+      if (!s.rowCount) return json(404, { error: 'La solicitud no existe' });
+      const b = await bandejaDeSolicitud(id, cod);
+      if (!b) return json(404, { error: 'Esa bandeja no está en la solicitud' });
+
+      const abierta = SOL_ALISTABLES.includes(s.rows[0].estado);
+      const puede = abierta && puedeBodega(rol);
+
+      const [g, ref, ent] = await Promise.all([
+        query(SQL_GEMELAS, [cod]),
+        query(`SELECT Id AS id, Rotulo AS rotulo, Orden AS orden,
+                      (TextoOcr IS NOT NULL) AS leida
+                 FROM cat.EquipoFoto WHERE UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($1))
+                ORDER BY Orden, Id`, [cod]),
+        query(`SELECT Id AS id, Nombre AS nombre, Bytes AS bytes, Usuario AS usuario,
+                      UsuarioEmail AS usuario_email, ErrorOcr AS error_ocr,
+                      (TextoOcr IS NOT NULL) AS leida, ${FECHA_VALID} AS fecha
+                 FROM dbo.SolicitudFoto
+                WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))
+                ORDER BY Id`, [id, cod])
+      ]);
+
+      return json(200, {
+        solicitud: s.rows[0],
+        bandeja: { equipo_codigo: b.equipo_codigo, demarcado: b.demarcado, descripcion: b.descripcion,
+                   nombre: b.nombre, color_catalogo: b.color_catalogo },
+        gemelas: g.rows,
+        gemelas_mismo_color: g.rows.filter((x) => colorKey(b.color_catalogo) && colorKey(x.color) === colorKey(b.color_catalogo)).length,
+        referencia: ref.rows,
+        referencia_leidas: ref.rows.filter((x) => x.leida).length,
+        fotos: ent.rows.map((x) => ({
+          ...x,
+          puede_eliminar: puede && String(x.usuario_email || '').toLowerCase() === String(user.email || '').toLowerCase()
+        })),
+        veredicto: await veredictoDe(id, cod),
+        /* Se puede validar en cuanto haya una foto. */
+        puede_validar: puede,
+        tiene_fotos: ent.rowCount > 0,
+        maximo: FOTO_ENTREGA_MAX,
+        colores: COLORES_DEMARCACION
+      });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener la validación', detail: e.message });
+    }
+  }
+});
+
+/* GET .../validacion/fotos/{fid} -> una foto de la entrega. */
+app.http('solicitud-validacion-foto', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'solicitudes/{id}/bandejas/{codigo}/validacion/fotos/{fid}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const rol = await getRole(user);
+    if (!puedeSubir(rol) && !puedeBodega(rol)) return json(403, { error: 'Su rol no tiene acceso a las solicitudes' });
+    const id = parseInt(request.params.id, 10);
+    const fid = parseInt(request.params.fid, 10);
+    if (!id || !fid) return json(400, { error: 'Id inválido' });
+    try {
+      const r = await query(
+        `SELECT Nombre AS nombre, Tipo AS tipo, Contenido AS contenido
+           FROM dbo.SolicitudFoto WHERE Id = $1 AND SolicitudId = $2`, [fid, id]);
+      if (!r.rowCount) return json(404, { error: 'La foto no existe' });
+      return json(200, r.rows[0]);
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo obtener la foto', detail: e.message });
+    }
+  }
+});
+
+/* POST .../validacion/fotos -> sube una foto de la entrega Y LA LEE.
+   El OCR va acá y no en «Validar» para que el boton conteste al instante.
+   Si Azure falla, la foto se guarda igual con el error anotado: vale como
+   evidencia aunque no se haya podido leer. */
+app.http('solicitud-validacion-foto-create', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'solicitudes/{id}/bandejas/{codigo}/validacion/fotos',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'Solo Bodega valida el equipo alistado' });
+    const id = parseInt(request.params.id, 10);
+    const cod = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!id || !cod) return json(400, { error: 'Solicitud o bandeja inválida' });
+
+    const body = await request.json().catch(() => ({}));
+    const tipo = String((body && body.tipo) || '').toLowerCase().trim();
+    const b64 = String((body && body.base64) || '');
+    const nombre = String((body && body.nombre) || '').trim().slice(0, 260) || null;
+
+    if (!b64) return json(400, { error: 'No llegó la imagen' });
+    if (!SELLADA_TIPOS.has(tipo))
+      return json(400, { error: 'Solo se admiten imágenes (JPG, PNG, WEBP, GIF o BMP). Recibido: ' + (tipo || 'sin tipo') });
+    const bytes = Math.floor(b64.length * 3 / 4);
+    if (bytes > SELLADA_MAX_MB * 1024 * 1024)
+      return json(400, { error: 'La imagen supera los ' + SELLADA_MAX_MB + ' MB' });
+
+    try {
+      const s = await query(`SELECT Estado AS estado FROM dbo.SolicitudEquipo WHERE Id = $1`, [id]);
+      if (!s.rowCount) return json(404, { error: 'La solicitud no existe' });
+      if (!SOL_ALISTABLES.includes(s.rows[0].estado))
+        return json(409, { error: 'La solicitud está en estado ' + s.rows[0].estado + ': la validación ya está cerrada' });
+      const b = await bandejaDeSolicitud(id, cod);
+      if (!b) return json(404, { error: 'Esa bandeja no está en la solicitud' });
+
+      const c = await query(
+        `SELECT COUNT(*)::int AS n FROM dbo.SolicitudFoto
+          WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))`, [id, cod]);
+      if (c.rows[0].n >= FOTO_ENTREGA_MAX)
+        return json(400, { error: 'Ya hay ' + FOTO_ENTREGA_MAX + ' fotos en esta bandeja, el máximo permitido' });
+
+      /* La lectura NO puede tumbar la subida: si Azure no contesta, la foto se
+         guarda con el error y la validacion dira que no pudo determinarlo. */
+      let texto = null, errOcr = null;
+      try {
+        texto = textoDe(await analyzeRead(b64)) || null;
+        if (!texto) errOcr = 'No se leyó ningún texto en la imagen';
+      } catch (e) {
+        errOcr = String(e.message || e).slice(0, 300);
+        context.warn('No se pudo leer la foto de la entrega: ' + errOcr);
+      }
+
+      const r = await query(
+        `INSERT INTO dbo.SolicitudFoto (SolicitudId, EquipoCodigo, Nombre, Tipo, Bytes, Contenido, TextoOcr, ErrorOcr, Usuario, UsuarioEmail)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         RETURNING Id AS id, Nombre AS nombre, Bytes AS bytes, Usuario AS usuario,
+                   ErrorOcr AS error_ocr, (TextoOcr IS NOT NULL) AS leida, ${FECHA_VALID} AS fecha`,
+        [id, b.equipo_codigo, nombre, tipo, bytes, b64, texto, errOcr,
+         user.name || user.email, user.email]);
+      return json(201, { ...r.rows[0], codigo: b.demarcado || b.equipo_codigo });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo guardar la foto', detail: e.message });
+    }
+  }
+});
+
+/* DELETE .../validacion/fotos/{fid}
+   Solo la borra QUIEN LA SUBIO, y solo durante el alisto. Aca la foto SI es
+   evidencia de un acto -de esta entrega, por esta persona-, al reves que las
+   de referencia del catalogo, que son dato compartido. */
+app.http('solicitud-validacion-foto-delete', {
+  methods: ['DELETE'], authLevel: 'anonymous', route: 'solicitudes/{id}/bandejas/{codigo}/validacion/fotos/{fid}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'Su rol no puede eliminar las fotos de la entrega' });
+    const id = parseInt(request.params.id, 10);
+    const fid = parseInt(request.params.fid, 10);
+    if (!id || !fid) return json(400, { error: 'Id inválido' });
+    try {
+      const s = await query(`SELECT Estado AS estado FROM dbo.SolicitudEquipo WHERE Id = $1`, [id]);
+      if (!s.rowCount) return json(404, { error: 'La solicitud no existe' });
+      if (!SOL_ALISTABLES.includes(s.rows[0].estado))
+        return json(409, { error: 'El equipo ya se envió al hospital: sus fotos no se pueden eliminar' });
+      const f = await query(
+        `SELECT UsuarioEmail AS email, EquipoCodigo AS equipo_codigo
+           FROM dbo.SolicitudFoto WHERE Id = $1 AND SolicitudId = $2`, [fid, id]);
+      if (!f.rowCount) return json(404, { error: 'La foto no existe' });
+      if (String(f.rows[0].email || '').toLowerCase() !== String(user.email || '').toLowerCase())
+        return json(403, { error: 'Solo puede eliminar las fotos que subió usted' });
+      await query(`DELETE FROM dbo.SolicitudFoto WHERE Id = $1 AND SolicitudId = $2`, [fid, id]);
+      return json(200, { ok: true, codigo: f.rows[0].equipo_codigo });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo eliminar la foto', detail: e.message });
+    }
+  }
+});
+
+/* POST .../validacion -> EL BOTON «VALIDAR».
+   Body opcional: { color_observado, nota }
+   Compara el texto ya leido y graba el veredicto. Instantaneo: el OCR ya se
+   hizo al subir cada foto. */
+app.http('solicitud-validacion-run', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'solicitudes/{id}/bandejas/{codigo}/validacion',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'Solo Bodega valida el equipo alistado' });
+    const id = parseInt(request.params.id, 10);
+    const cod = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!id || !cod) return json(400, { error: 'Solicitud o bandeja inválida' });
+
+    const body = await request.json().catch(() => ({}));
+    const obsCrudo = solTexto(body && body.color_observado, 60);
+    const nota = solTexto(body && body.nota, 400);
+    let colorObs = null;
+    if (obsCrudo) {
+      colorObs = [...COLORES_DEMARCACION, COLOR_ILEGIBLE].find((c) => colorKey(c) === colorKey(obsCrudo));
+      if (!colorObs) return json(400, { error: 'El color «' + obsCrudo + '» no está en el catálogo de demarcación' });
+      if (colorKey(colorObs) === colorKey(COLOR_ILEGIBLE)) colorObs = COLOR_ILEGIBLE;
+    }
+
+    try {
+      const s = await query(`SELECT Estado AS estado FROM dbo.SolicitudEquipo WHERE Id = $1`, [id]);
+      if (!s.rowCount) return json(404, { error: 'La solicitud no existe' });
+      if (!SOL_ALISTABLES.includes(s.rows[0].estado))
+        return json(409, { error: 'La solicitud está en estado ' + s.rows[0].estado + ': la validación ya está cerrada' });
+      const b = await bandejaDeSolicitud(id, cod);
+      if (!b) return json(404, { error: 'Esa bandeja no está en la solicitud' });
+
+      const f = await query(
+        `SELECT TextoOcr AS texto FROM dbo.SolicitudFoto
+          WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))
+            AND TextoOcr IS NOT NULL`, [id, cod]);
+      const nf = await query(
+        `SELECT COUNT(*)::int AS n FROM dbo.SolicitudFoto
+          WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))`, [id, cod]);
+      if (!nf.rows[0].n) return json(400, { error: 'Adjunte al menos una foto de la bandeja antes de validar' });
+
+      const [g, refs] = await Promise.all([query(SQL_GEMELAS, [cod]), referencias(context)]);
+      const v = comparar.veredicto({
+        textosEntrega: f.rows.map((x) => x.texto),
+        pedida: String(b.equipo_codigo).toUpperCase().trim(),
+        refs,
+        gemelas: g.rows,
+        color: colorObs ? { observado: colorObs, catalogo: b.color_catalogo } : { observado: null, catalogo: b.color_catalogo }
+      });
+
+      /* El codigo del candidato se guarda con su demarcado para que el motivo
+         se pueda leer dentro de un ano sin ir a buscar la tabla. */
+      const cand = v.candidato
+        ? (await query(`SELECT Demarcado AS d FROM cat.Equipo WHERE UPPER(TRIM(Codigo)) = UPPER(TRIM($1))`, [v.candidato])).rows[0]
+        : null;
+      const motivo = cand && cand.d ? v.motivo.split(v.candidato).join(cand.d) : v.motivo;
+
+      const r = await query(
+        `INSERT INTO dbo.SolicitudVerificacion
+           (SolicitudId, EquipoCodigo, Resultado, Origen, Motivo, Puntaje,
+            CandidatoCodigo, CandidatoPuntaje, ColorObservado, ColorCatalogo, Nota, Usuario, UsuarioEmail)
+         VALUES ($1,$2,$3,'Automatico',$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (SolicitudId, UPPER(TRIM(EquipoCodigo))) DO UPDATE
+            SET Resultado = EXCLUDED.Resultado, Origen = EXCLUDED.Origen, Motivo = EXCLUDED.Motivo,
+                Puntaje = EXCLUDED.Puntaje, CandidatoCodigo = EXCLUDED.CandidatoCodigo,
+                CandidatoPuntaje = EXCLUDED.CandidatoPuntaje, ColorObservado = EXCLUDED.ColorObservado,
+                ColorCatalogo = EXCLUDED.ColorCatalogo, Nota = EXCLUDED.Nota,
+                Usuario = EXCLUDED.Usuario, UsuarioEmail = EXCLUDED.UsuarioEmail,
+                FechaHora = (now() at time zone 'utc')
+         RETURNING Resultado AS resultado, Origen AS origen, Motivo AS motivo,
+                   Puntaje::float8 AS puntaje, CandidatoCodigo AS candidato,
+                   CandidatoPuntaje::float8 AS candidato_puntaje,
+                   ColorObservado AS color_observado, ColorCatalogo AS color_catalogo,
+                   Nota AS nota, Usuario AS usuario, ${FECHA_VALID} AS fecha`,
+        [id, b.equipo_codigo, v.resultado, motivo, v.puntaje, v.candidato, v.candidato_puntaje,
+         colorObs, b.color_catalogo, nota, user.name || user.email, user.email]);
+      return json(200, { ...r.rows[0], codigo: b.demarcado || b.equipo_codigo,
+                         candidato_demarcado: cand ? cand.d : null, ranking: v.ranking });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo validar la bandeja', detail: e.message });
+    }
+  }
+});
+
+/* PUT .../validacion/confirmar -> LO QUE DICE LA PERSONA.
+   Body: { resultado: 'Correcta' | 'Incorrecta', nota }
+   Disponible sobre CUALQUIERA de los tres veredictos automaticos, en los dos
+   sentidos: confirmar que si es, o desmentir un «Correcta» que no lo era.
+   Queda con Origen='Persona' para que despues se sepa quien decidio. */
+app.http('solicitud-validacion-confirmar', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'solicitudes/{id}/bandejas/{codigo}/validacion/confirmar',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'Solo Bodega confirma la validación' });
+    const id = parseInt(request.params.id, 10);
+    const cod = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!id || !cod) return json(400, { error: 'Solicitud o bandeja inválida' });
+
+    const body = await request.json().catch(() => ({}));
+    const res = String((body && body.resultado) || '').trim();
+    if (res !== 'Correcta' && res !== 'Incorrecta')
+      return json(400, { error: 'La confirmación solo puede ser «Correcta» o «Incorrecta»' });
+    const nota = solTexto(body && body.nota, 400);
+
+    try {
+      const s = await query(`SELECT Estado AS estado FROM dbo.SolicitudEquipo WHERE Id = $1`, [id]);
+      if (!s.rowCount) return json(404, { error: 'La solicitud no existe' });
+      if (!SOL_ALISTABLES.includes(s.rows[0].estado))
+        return json(409, { error: 'La solicitud está en estado ' + s.rows[0].estado + ': la validación ya está cerrada' });
+      const b = await bandejaDeSolicitud(id, cod);
+      if (!b) return json(404, { error: 'Esa bandeja no está en la solicitud' });
+
+      /* Se conserva lo que habia dicho el sistema: el motivo nuevo lo cuenta.
+         Sin eso se perderia el dato de que la maquina opinaba distinto, que es
+         justo lo que interesa revisar despues. */
+      const prev = await veredictoDe(id, cod);
+      const antes = prev ? (prev.origen === 'Automatico' ? prev.resultado : null) : null;
+      const motivo = 'Lo confirmó ' + (user.name || user.email) + ' comparando las fotos.'
+        + (antes ? ' El sistema había dicho «' + antes + '»'
+                 + (prev.puntaje != null ? ' (puntaje ' + Number(prev.puntaje).toFixed(3) + ')' : '') + '.' : '');
+
+      const r = await query(
+        `INSERT INTO dbo.SolicitudVerificacion
+           (SolicitudId, EquipoCodigo, Resultado, Origen, Motivo, Puntaje,
+            CandidatoCodigo, CandidatoPuntaje, ColorObservado, ColorCatalogo, Nota, Usuario, UsuarioEmail)
+         VALUES ($1,$2,$3,'Persona',$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (SolicitudId, UPPER(TRIM(EquipoCodigo))) DO UPDATE
+            SET Resultado = EXCLUDED.Resultado, Origen = 'Persona', Motivo = EXCLUDED.Motivo,
+                Nota = EXCLUDED.Nota, Usuario = EXCLUDED.Usuario, UsuarioEmail = EXCLUDED.UsuarioEmail,
+                FechaHora = (now() at time zone 'utc')
+         RETURNING Resultado AS resultado, Origen AS origen, Motivo AS motivo,
+                   Puntaje::float8 AS puntaje, CandidatoCodigo AS candidato,
+                   CandidatoPuntaje::float8 AS candidato_puntaje,
+                   ColorObservado AS color_observado, ColorCatalogo AS color_catalogo,
+                   Nota AS nota, Usuario AS usuario, ${FECHA_VALID} AS fecha`,
+        [id, b.equipo_codigo, res, motivo,
+         prev ? prev.puntaje : null, prev ? prev.candidato : null, prev ? prev.candidato_puntaje : null,
+         prev ? prev.color_observado : null, b.color_catalogo, nota,
+         user.name || user.email, user.email]);
+      return json(200, { ...r.rows[0], codigo: b.demarcado || b.equipo_codigo });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo registrar la confirmación', detail: e.message });
+    }
+  }
+});
+
 
 /* ============================================================
    Hojas de consumo — CRUD

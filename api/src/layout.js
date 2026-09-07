@@ -13,10 +13,17 @@ function toInt(v) {
 }
 
 // Llama a Document Intelligence (prebuilt-layout v4.0) y devuelve el analyzeResult.
-async function analyzeLayout(base64) {
+async function analyzeLayout(base64) { return analyzeCon(base64, null); }
+
+/* Igual, pero eligiendo el modelo. Las fotos de bandeja se leen con
+   'prebuilt-read', que es OCR puro: no hay tablas que reconocer, solo texto
+   impreso sobre metal, y es mas barato que layout. */
+async function analyzeRead(base64) { return analyzeCon(base64, 'prebuilt-read'); }
+
+async function analyzeCon(base64, modelo) {
   const endpoint = (process.env.DOCINTEL_ENDPOINT || '').replace(/\/+$/, '');
   const key = process.env.DOCINTEL_KEY;
-  const model = process.env.DOCINTEL_MODEL || 'prebuilt-layout';
+  const model = modelo || process.env.DOCINTEL_MODEL || 'prebuilt-layout';
   if (!endpoint || !key) throw new Error('Falta configurar DOCINTEL_ENDPOINT/DOCINTEL_KEY en el servidor');
 
   const url = `${endpoint}/documentintelligence/documentModels/${model}:analyze?api-version=2024-11-30`;
@@ -113,4 +120,18 @@ function parseLayout(analyzeResult) {
   return { encabezado, detalle };
 }
 
-module.exports = { norm, toInt, analyzeLayout, parseLayout };
+/* El texto plano de un analyzeResult, una linea por renglon leido. Es lo que
+   guarda la validacion de bandejas: el resto de la respuesta -polígonos,
+   confianzas, spans- no se usa y pesa cien veces mas. */
+function textoDe(analyzeResult) {
+  const out = [];
+  for (const pg of (analyzeResult && analyzeResult.pages) || []) {
+    for (const l of pg.lines || []) {
+      const c = String((l && l.content) || '').trim();
+      if (c) out.push(c);
+    }
+  }
+  return out.join('\n');
+}
+
+module.exports = { norm, toInt, analyzeLayout, analyzeRead, parseLayout, textoDe };

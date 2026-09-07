@@ -356,6 +356,69 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .bfot .acc button{flex:0 0 auto;font-size:12px;padding:6px 8px}
 .bfot .acc .crece{flex:1 1 auto}
 .bfot-vacio{border:1.5px dashed var(--line);border-radius:10px;padding:18px;background:#f7fafc;text-align:center;color:var(--muted);font-size:13.5px;line-height:1.5}
+/* ===== Validar bandeja ===== */
+.vb-tiras{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px;margin-top:10px}
+.vb-f{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#f7fafc}
+.vb-f .im{width:100%;height:104px;background:#eef3f7;display:block;object-fit:cover;cursor:zoom-in}
+.vb-f .pie{padding:5px 7px;font-size:11px;color:var(--muted);line-height:1.35}
+.vb-f .acc{display:flex;gap:5px;padding:0 7px 7px}
+.vb-f .acc button{flex:1 1 auto;font-size:11.5px;padding:5px 4px}
+.vb-f .sinleer{color:var(--warn);font-weight:700}
+.vb-vacio{border:1.5px dashed var(--line);border-radius:9px;padding:16px;background:#f7fafc;text-align:center;color:var(--muted);font-size:13px;line-height:1.5}
+.vb-alerta{display:flex;gap:10px;align-items:flex-start;background:#fff8e6;border:1px solid #f0d79a;border-left:4px solid var(--warn);border-radius:8px;padding:11px 13px;font-size:13.5px;line-height:1.45;margin-bottom:14px}
+.vb-alerta b{color:#8a5a00}
+.vb-paso{font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:20px 0 8px}
+.vb-paso:first-child{margin-top:0}
+/* La franja del veredicto */
+.vb-ver{display:flex;gap:13px;align-items:flex-start;border-radius:10px;padding:14px 16px;border:1px solid var(--line);border-left-width:5px;background:#f7fafc}
+.vb-ver .ico{font-size:24px;line-height:1;flex:0 0 auto}
+.vb-ver .tit{font-weight:800;font-size:16px;margin-bottom:3px}
+.vb-ver .txt{font-size:13.5px;line-height:1.5}
+.vb-ver .quien{font-size:12px;color:var(--muted);margin-top:8px}
+.vb-ver.ok{background:#eefaf3;border-color:#b6e3cc;border-left-color:var(--ok)}
+.vb-ver.ok .tit{color:#16704a}
+.vb-ver.duda{background:#fff8e6;border-color:#f0d79a;border-left-color:var(--warn)}
+.vb-ver.duda .tit{color:#8a5a00}
+.vb-ver.no{background:#fdeeec;border-color:#f0bdb6;border-left-color:var(--danger)}
+.vb-ver.no .tit{color:#96271b}
+.vb-acc{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.vb-chips{display:flex;flex-wrap:wrap;gap:9px}
+.vb-chip{display:flex;align-items:center;gap:8px;background:#fff;border:1.5px solid var(--line);border-radius:10px;padding:8px 12px 8px 9px;font-size:14px;font-weight:600;color:var(--txt);min-height:46px}
+.vb-chip:hover{border-color:var(--accent)}
+.vb-chip.sel{border-color:var(--brand);box-shadow:0 0 0 3px rgba(10,92,138,.15)}
+.vb-chip .sw{width:26px;height:26px;border-radius:6px;border:1px solid rgba(0,0,0,.18);flex:0 0 auto}
+.vb-chip.nada .sw{background:repeating-linear-gradient(45deg,#e6edf3 0 5px,#cfdae3 5px 10px)}
+/* Pastillas */
+.vb-pill{display:inline-block;font-size:11px;font-weight:800;padding:2px 7px;border-radius:99px;white-space:nowrap;vertical-align:middle}
+.vb-pill.ok{background:#eefaf3;color:#16704a;border:1px solid #b6e3cc}
+.vb-pill.duda{background:#fff8e6;color:#8a5a00;border:1px solid #f0d79a}
+.vb-pill.no{background:#fdeeec;color:#96271b;border:1px solid #f0bdb6}
+.vb-pill.gris{background:#eef3f7;color:var(--muted);border:1px solid var(--line)}
+/* ===== El comparador a pantalla completa ===== */
+.cmp{position:fixed;inset:0;background:#0d1720;z-index:50;display:flex;flex-direction:column}  /* 50 y no 9000: el modal de confirmar es .overlay, z-index 60, y tiene
+     que poder abrirse ENCIMA del comparador. Con 9000 quedaba detras y la
+     pantalla se trababa sin que se viera por que. */
+.cmp-top{display:flex;align-items:center;gap:12px;padding:11px 14px;color:#fff;background:#101d29;flex-wrap:wrap}
+.cmp-top .t{font-weight:800;font-size:15px}
+.cmp-top .s{font-size:12.5px;opacity:.72}
+.cmp-top .crece{flex:1 1 auto}
+.cmp-top button{background:#1d2f3f;color:#fff;padding:8px 12px;font-size:13px}
+.cmp-top button:hover{background:#294056}
+.cmp-cuerpo{flex:1 1 auto;display:grid;grid-template-columns:1fr 1fr;gap:2px;min-height:0;background:#0d1720}
+@media(max-width:760px){.cmp-cuerpo{grid-template-columns:1fr;grid-template-rows:1fr 1fr}}
+.cmp-pane{position:relative;display:flex;flex-direction:column;min-height:0;background:#131f2b}
+.cmp-pane .cab{padding:7px 12px;color:#cfe0ee;font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;background:#0f1b26;display:flex;gap:8px;align-items:center}
+.cmp-pane .cab .n{opacity:.6;font-weight:600;text-transform:none;letter-spacing:0}
+.cmp-pane .caja{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px}
+.cmp-pane img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
+.cmp-pane .nada{color:#7f95a8;font-size:13px;text-align:center;padding:20px;line-height:1.5}
+.cmp-nav{display:flex;align-items:center;justify-content:center;gap:14px;padding:9px;background:#101d29;color:#cfe0ee;font-size:13px}
+.cmp-nav button{background:#1d2f3f;color:#fff;padding:8px 16px;font-size:15px}
+.cmp-nav button:disabled{opacity:.35}
+.cmp-pie{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;padding:12px;background:#101d29;border-top:1px solid #1d2f3f}
+.cmp-pie .btn-ok{background:var(--ok);color:#fff;padding:12px 18px;font-size:14.5px;font-weight:700}
+.cmp-pie .btn-no{background:var(--danger);color:#fff;padding:12px 18px;font-size:14.5px;font-weight:700}
+.cmp-pie .btn-x{background:#1d2f3f;color:#fff;padding:12px 18px;font-size:14.5px}
 .kv{display:grid;grid-template-columns:180px 1fr;gap:6px 14px;font-size:14px}
 .kv .k{color:var(--muted)}
 .pad{padding:18px}
@@ -1236,6 +1299,17 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
           <button class="btn-primary" id="chkGuardarBtn" onclick="guardarCheckList()">💾 Guardar</button>
         </span>
       </div>
+    </section>
+
+    <!-- VALIDAR BANDEJA — las fotos de la entrega contra las del catálogo (Bodega) -->
+    <section id="viewValidacion" class="hidden">
+      <div class="page-head">
+        <div><h2 id="valTit">Validar bandeja</h2><div class="sub" id="valSub"></div></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn-ghost" onclick="volverDeValidacion()">← Volver a la solicitud</button>
+        </div>
+      </div>
+      <div id="valBody"></div>
     </section>
 
     <!-- NOTIFICACIONES — mantenimiento (solo Bodega / Administrador) -->
@@ -2429,7 +2503,7 @@ function buildNav(){
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('ovl').classList.toggle('show'); }
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('ovl').classList.remove('show'); }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales','viewNotificaciones','viewSolicitudes','viewSolicitudDet','viewCheckList','viewBitacora'];
+const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales','viewNotificaciones','viewSolicitudes','viewSolicitudDet','viewCheckList','viewValidacion','viewBitacora'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
 
 /* ===== INICIO ===== */
@@ -3247,7 +3321,7 @@ let BFOT = { codigo:null, fotos:[], maximo:12 };
 const BFOT_MAX_LADO = 1600;   // px del lado largo tras reducir
 const BFOT_CALIDAD  = 0.82;
 
-function bfotReducir(file){
+function bfotReducir(file, maxLado, calidad){
   return new Promise((resolve, reject)=>{
     const fr=new FileReader();
     fr.onerror=()=>reject(new Error('No se pudo leer el archivo'));
@@ -3256,13 +3330,13 @@ function bfotReducir(file){
       img.onerror=()=>reject(new Error('El navegador no pudo abrir la imagen (¿formato no soportado, como HEIC?)'));
       img.onload=()=>{
         try{
-          const esc=Math.min(1, BFOT_MAX_LADO/Math.max(img.width, img.height));
+          const esc=Math.min(1, (maxLado||BFOT_MAX_LADO)/Math.max(img.width, img.height));
           const w=Math.max(1, Math.round(img.width*esc)), h=Math.max(1, Math.round(img.height*esc));
           const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
           const cx=cv.getContext('2d');
           cx.fillStyle='#fff'; cx.fillRect(0,0,w,h);
           cx.drawImage(img,0,0,w,h);
-          const url=cv.toDataURL('image/jpeg', BFOT_CALIDAD);
+          const url=cv.toDataURL('image/jpeg', calidad||BFOT_CALIDAD);
           const m=/^data:([^;]+);base64,(.*)$/s.exec(url);
           if(!m) return reject(new Error('No se pudo convertir la imagen'));
           resolve({tipo:m[1], base64:m[2]});
@@ -6418,6 +6492,24 @@ function renderSolDespacho(){
   }else{
     nota = 'Se cerrará el check list y se avisará al hospital.';
   }
+  /* La validacion AVISA, no bloquea: es la regla de la seccion 8.5 y esta
+     medida —con el veredicto como candado, 4 de las 12 bandejas del Paso 0 no
+     se podrian despachar hoy, todas por errores del catalogo—. La nota dice
+     con que salvedad va a salir el equipo. */
+  const sinFoto = SOL_AV.filter(b=>!(b.fotos>0));
+  const malas   = SOL_AV.filter(b=>b.veredicto==='Incorrecta');
+  if(malas.length){
+    nota += ' <b>⚠️ '+(malas.length===1?'La bandeja ':'Las bandejas ')
+          + malas.map(b=>esc(b.demarcado||b.equipo_codigo)).join(', ')
+          + (malas.length===1?' quedó marcada como INCORRECTA' : ' quedaron marcadas como INCORRECTAS')
+          + '.</b> Se puede enviar igual; queda anotado en la bitácora y en el aviso al hospital.';
+  }else if(sinFoto.length===SOL_AV.length){
+    nota += ' Ninguna bandeja se validó con fotos: la solicitud saldrá como «Sin validar».';
+  }else if(sinFoto.length){
+    nota += ' '+(sinFoto.length===1?'La bandeja ':'Las bandejas ')
+          + sinFoto.map(b=>esc(b.demarcado||b.equipo_codigo)).join(', ')
+          + (sinFoto.length===1?' no tiene fotos' : ' no tienen fotos')+': saldrá como «Parcial».';
+  }
   document.getElementById('solDespachoNota').innerHTML=nota;
   const b=document.getElementById('solDespacharBtn');
   b.disabled = sinAlistar.length>0;
@@ -6573,13 +6665,439 @@ function renderSolDetalle(){
     if(al){
       fila+=`<td class="sd-art sol-art" data-label="Artículos">${d.articulos||0}</td>`
         +`<td class="sd-pct sol-pct" data-label="% alistada">${pctBarra(d.porcentaje)}</td>`
-        +`<td class="sd-acc cards-acciones" style="white-space:nowrap"><button class="icon-btn" onclick="abrirCheckList('${attr(d.equipo_codigo)}')">✅ Check list</button></td>`;
+        +`<td class="sd-acc cards-acciones" style="white-space:nowrap">`
+          +`<button class="icon-btn" onclick="abrirCheckList('${attr(d.equipo_codigo)}')">✅ Check list</button> `
+          +`<button class="icon-btn" onclick="abrirValidacion('${attr(d.equipo_codigo)}')" title="Comparar las fotos de la bandeja alistada contra las del catálogo">📷 Validar bandeja</button>`
+          +solPillVeredicto(d)
+        +`</td>`;
     }else if(ed){
       fila+=`<td class="sd-acc cards-acciones" style="white-space:nowrap"><button class="icon-btn danger" onclick="quitarBandejaSolicitud(${i})">🗑️ Eliminar</button></td>`;
     }
     tr.innerHTML=fila;
     b.appendChild(tr);
   });
+}
+
+/* La pastilla del veredicto en la fila de la bandeja. Sin fotos no se pinta
+   nada: un «Sin validar» en las doce filas seria ruido, no informacion. */
+function solPillVeredicto(d){
+  if(!d.veredicto) return (d.fotos>0) ? ' <span class="vb-pill gris">'+d.fotos+(d.fotos===1?' foto':' fotos')+'</span>' : '';
+  const cls={'Correcta':'ok','Incorrecta':'no','No puedo determinarlo':'duda'}[d.veredicto]||'gris';
+  const t=d.veredicto==='No puedo determinarlo' ? 'Sin determinar' : d.veredicto;
+  return ' <span class="vb-pill '+cls+'" title="'+attr(d.veredicto+(d.veredicto_origen==='Persona'?' — lo confirmó Bodega mirando las fotos':' — lo dijo el sistema'))+'">'
+       + (d.veredicto_origen==='Persona'?'👤 ':'') + esc(t) + '</span>';
+}
+
+
+/* ===== VALIDAR BANDEJA =====
+   Bodega fotografia la bandeja alistada, toca «Validar» y el sistema contesta
+   Correcta / Incorrecta / No puedo determinarlo comparando el texto que Azure
+   leyo en esas fotos contra el que leyo en las del catalogo.
+
+   Tres cosas que no son obvias:
+   - La lectura NO ocurre acá: pasa al subir cada foto. Por eso «Validar»
+     contesta al instante y por eso una foto puede quedar «sin leer».
+   - El veredicto nunca impide enviar el equipo al hospital. Avisa.
+   - Sobre cualquiera de los tres veredictos la persona puede mirar las fotos
+     lado a lado y decidir ella. Eso queda grabado como suyo, no del sistema. */
+let VAL=null;            // lo que devolvio GET .../validacion
+let VAL_COLOR=null;      // el color que la persona dice ver (opcional)
+let VAL_IMG={};          // cache de imagenes ya traidas: 'r12' / 'e34' -> data URL
+const VAL_MAX_LADO=2000; // mas grande que el catalogo: acá lo que importa es que el OCR lea
+const VAL_CALIDAD=0.85;
+
+/* Solo lectura cuando la solicitud ya se despacho o el rol no es Bodega. La
+   pantalla igual se abre: es el registro de con que salio el equipo. */
+const valSoloLectura = () => !(VAL && VAL.puede_validar);
+
+async function abrirValidacion(codigo){
+  if(!SOL_ACT || !SOL_ACT.id) return;
+  showLoading('Abriendo la validación','Estamos trayendo las fotos de referencia…');
+  try{
+    VAL=await api('GET','/solicitudes/'+SOL_ACT.id+'/bandejas/'+encodeURIComponent(codigo)+'/validacion');
+  }catch(e){ toast('No se pudo abrir la validación: '+e.message); hideLoading(); return; }
+  finally{ hideLoading(); }
+  VAL_IMG={};
+  VAL_COLOR=(VAL.veredicto && VAL.veredicto.color_observado)||null;
+  setTab('solicitudes'); showOnly('viewValidacion');
+  renderValidacion();
+}
+function volverDeValidacion(){ cmpCerrar(); abrirSolicitud(SOL_ACT.id); }
+
+/* Recarga sin salir de la pantalla ni perder el color elegido. */
+async function valRecargar(){
+  if(!VAL) return;
+  const c=VAL_COLOR;
+  try{
+    VAL=await api('GET','/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion');
+    VAL_COLOR=c;
+    renderValidacion();
+  }catch(e){ toast('No se pudo recargar: '+e.message); }
+}
+
+const VAL_ICO={'Correcta':'✅','Incorrecta':'❌','No puedo determinarlo':'🤔'};
+const VAL_CLS={'Correcta':'ok','Incorrecta':'no','No puedo determinarlo':'duda'};
+
+function renderValidacion(){
+  if(!VAL) return;
+  const b=VAL.bandeja, cod=b.demarcado||b.equipo_codigo, ro=valSoloLectura();
+  document.getElementById('valTit').textContent='Validar bandeja · '+cod;
+  document.getElementById('valSub').textContent=
+    (b.descripcion||b.nombre||'')+(b.color_catalogo?' · demarcada '+b.color_catalogo:'')
+    +(ro?' — solo lectura':'');
+
+  const sinRef=!(VAL.referencia_leidas>0);
+  let h='';
+
+  /* 1. El veredicto, arriba del todo: despues de tocar «Validar» es lo que la
+        persona vino a leer, y no puede quedar debajo de la galeria. */
+  h+=valFranjaVeredicto();
+
+  /* 2. Los avisos que explican por que la respuesta puede ser floja. */
+  if(sinRef){
+    h+=`<div class="vb-alerta"><span>⚠️</span><div><b>Esta bandeja no tiene fotos de referencia legibles en el catálogo.</b>
+      Sin ellas el sistema no tiene contra qué comparar y va a contestar «No puedo determinarlo».
+      Puede subir las fotos igual —quedan como evidencia de la entrega— y compararlas usted mismo.
+      Las fotos de referencia se cargan en Catálogo → Bandejas → ${esc(cod)}.</div></div>`;
+  }else if(VAL.gemelas_mismo_color>0){
+    h+=`<div class="vb-alerta"><span>⚠️</span><div><b>Hay ${VAL.gemelas_mismo_color===1?'otra bandeja':VAL.gemelas_mismo_color+' bandejas'} con el mismo contenido y el mismo color.</b>
+      El sistema no las puede separar por la foto ni por la demarcación: si son idénticas por dentro, va a contestar «No puedo determinarlo».</div></div>`;
+  }
+
+  /* 3. Las fotos de la entrega. */
+  h+=`<div class="card pad" style="margin-top:16px">
+        <div class="vb-paso">Paso 1 · Fotos de la bandeja alistada</div>`;
+  h+=valZonaSubida();
+  h+=valTirasEntrega();
+  h+=`</div>`;
+
+  /* 4. El color, opcional. Va aparte y despues de las fotos porque no decide
+        el veredicto: solo lo puede bajar cuando contradice al catálogo. */
+  if(!ro && b.color_catalogo){
+    h+=`<div class="card pad" style="margin-top:16px">
+          <div class="vb-paso">Paso 2 · Color de la demarcación <span style="font-weight:600;text-transform:none;letter-spacing:0">(opcional)</span></div>
+          <div class="chk-ayuda" style="margin-bottom:10px">En el catálogo esta bandeja está demarcada
+            <b>${esc(b.color_catalogo)}</b>. Si mira la etiqueta y ve otro color, dígalo: el sistema lo toma en cuenta.
+            Si lo deja en blanco, valida solo con la foto.</div>
+          <div class="vb-chips">${valChipsColor()}</div>
+        </div>`;
+  }
+
+  /* 5. El boton. */
+  if(!ro){
+    h+=`<div class="sol-acciones">
+          <span class="sol-despacho-nota">${VAL.tiene_fotos
+            ? 'Se comparará el texto de las fotos contra el del catálogo.'
+            : 'Adjunte al menos una foto de la bandeja para poder validar.'}</span>
+          <button class="btn-primary" id="valBtn" onclick="valValidar()"${VAL.tiene_fotos?'':' disabled'}>🔎 Validar bandeja</button>
+        </div>`;
+  }
+
+  /* 6. Las fotos del catálogo, al final: son el material de consulta, no el
+        paso a hacer. Se ven acá y a pantalla completa en el comparador. */
+  h+=`<div class="card pad" style="margin-top:16px">
+        <div class="vb-paso">Fotos de referencia del catálogo</div>`;
+  if(!VAL.referencia.length){
+    h+=`<div class="vb-vacio">Esta bandeja no tiene fotos en el catálogo.</div>`;
+  }else{
+    h+=`<div class="chk-ayuda">${VAL.referencia.length} ${VAL.referencia.length===1?'foto':'fotos'}`
+      + (VAL.referencia_leidas<VAL.referencia.length
+          ? ` · <b>${VAL.referencia.length-VAL.referencia_leidas} sin texto leído</b>, no cuentan para la comparación`
+          : ' · todas con texto leído')+`</div>`;
+    h+=`<div class="vb-tiras">`;
+    VAL.referencia.forEach(f=>{
+      h+=`<div class="vb-f">
+            <div class="im" id="valRef_${f.id}" style="background:#eef3f7"></div>
+            <div class="pie">${esc(f.rotulo||('Foto '+f.orden))}
+              ${f.leida?'':'<br><span class="sinleer">sin texto leído</span>'}</div>
+          </div>`;
+    });
+    h+=`</div>`;
+  }
+  h+=`</div>`;
+
+  document.getElementById('valBody').innerHTML=h;
+  /* Las imagenes en segundo plano: la pantalla ya esta usable sin ellas. */
+  VAL.referencia.forEach(f=>valThumb('r', f.id));
+  (VAL.fotos||[]).forEach(f=>valThumb('e', f.id));
+}
+
+/* La franja del veredicto. Dice quién lo dijo, con qué puntaje, y —cuando el
+   sistema encontró otra bandeja que se parece más— cuál es esa otra: sin ese
+   dato «Incorrecta» deja a Bodega sin nada que hacer. */
+function valFranjaVeredicto(){
+  const v=VAL.veredicto;
+  if(!v){
+    return `<div class="vb-ver"><span class="ico">📷</span><div>
+        <div class="tit">Sin validar</div>
+        <div class="txt">Suba las fotos de la bandeja alistada y toque «Validar bandeja».</div>
+      </div></div>`;
+  }
+  const cls=VAL_CLS[v.resultado]||'duda', ico=VAL_ICO[v.resultado]||'❔';
+  const persona=v.origen==='Persona';
+  let txt=esc(v.motivo||'');
+  /* «Se parece mas a» solo cuando de verdad le gana a la pedida. En un «No
+     puedo determinarlo» por falta de texto el candidato puede puntear MENOS,
+     y decir que se parece mas seria mandar a Bodega a buscar la bandeja
+     equivocada. */
+  if(v.candidato && v.resultado!=='Correcta'){
+    const gana = v.candidato_puntaje!=null && v.puntaje!=null && v.candidato_puntaje>v.puntaje;
+    txt+= gana
+      ? ` <b>Se parece más a ${esc(v.candidato_demarcado||v.candidato)}</b>`
+        + (v.candidato_puntaje!=null?` (${Number(v.candidato_puntaje).toFixed(3)})`:'')+'.'
+      : ` La que más se le acercó después fue ${esc(v.candidato_demarcado||v.candidato)}`
+        + (v.candidato_puntaje!=null?` (${Number(v.candidato_puntaje).toFixed(3)})`:'')+'.';
+  }
+  /* Cuando lo dijo una persona, el motivo ya la nombra: acá va solo la fecha. */
+  let quien = persona
+    ? `${docFechaHora(v.fecha)}`
+    : `Lo dijo el sistema · ${docFechaHora(v.fecha)}`
+      + (v.puntaje!=null?` · puntaje ${Number(v.puntaje).toFixed(3)}`:'');
+  if(v.color_observado) quien+=` · color visto: ${esc(v.color_observado)}`;
+  if(v.nota) quien+=` · «${esc(v.nota)}»`;
+
+  let acc='';
+  if(!valSoloLectura() && (VAL.fotos||[]).length && VAL.referencia.length){
+    acc=`<div class="vb-acc">
+      <button class="btn-ghost" onclick="cmpAbrir()">🔍 Ver fotos lado a lado</button>
+    </div>`;
+  }
+  return `<div class="vb-ver ${cls}"><span class="ico">${ico}</span><div style="flex:1 1 auto">
+      <div class="tit">${esc(v.resultado)}${persona?' <span class="vb-pill gris">lo dijo Bodega</span>':''}</div>
+      <div class="txt">${txt}</div>
+      <div class="quien">${quien}</div>${acc}
+    </div></div>`;
+}
+
+function valZonaSubida(){
+  if(valSoloLectura()){
+    return `<div class="chk-ayuda">La solicitud ya no está en alisto: las fotos quedan como registro de la entrega.</div>`;
+  }
+  const n=(VAL.fotos||[]).length, lleno=n>=VAL.maximo;
+  if(lleno) return `<div class="vb-vacio">Ya hay ${n} fotos, el máximo por bandeja. Elimine alguna si necesita subir otra.</div>`;
+  /* Mismo patron que las otras subidas de la app: el input nativo, sin label
+     encima. En celular es el que abre la camara o el carrete. */
+  return `<div class="sell-drop">
+      <input type="file" id="valInput" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" multiple onchange="valSubir(this)">
+      <p class="hint">Una foto por recipiente, <b>con las etiquetas visibles</b>: el sistema compara el texto
+        impreso, no la forma. Se reducen automáticamente antes de subir y se leen al momento.
+        ${n} de ${VAL.maximo} usadas.</p>
+      <div id="valProgreso" style="font-size:13px;margin-top:8px"></div>
+    </div>`;
+}
+
+function valTirasEntrega(){
+  const fs=VAL.fotos||[];
+  if(!fs.length) return `<div class="vb-vacio" style="margin-top:10px">Todavía no hay fotos de esta entrega.</div>`;
+  let h=`<div class="vb-tiras">`;
+  fs.forEach((f,i)=>{
+    h+=`<div class="vb-f">
+          <div class="im" id="valEnt_${f.id}"></div>
+          <div class="pie">Foto ${i+1}${f.nombre?' · '+esc(String(f.nombre).slice(0,28)):''}
+            ${f.leida?'':'<br><span class="sinleer">'+esc(f.error_ocr||'sin texto leído')+'</span>'}</div>`;
+    if(f.puede_eliminar) h+=`<div class="acc"><button class="icon-btn danger" onclick="valEliminar(${f.id})">🗑️ Eliminar</button></div>`;
+    h+=`</div>`;
+  });
+  return h+`</div>`;
+}
+
+function valChipsColor(){
+  const lista=(VAL.colores||[]).concat(['No se distingue']);
+  let h=`<button type="button" class="vb-chip nada${VAL_COLOR?'':' sel'}" onclick="valColor(null)"><span class="sw"></span>Sin decir</button>`;
+  lista.forEach(c=>{
+    const st=equipoColorStyle(c);
+    const sw=st?`style="background:${st.background}"`:'';
+    h+=`<button type="button" class="vb-chip${c==='No se distingue'?' nada':''}${VAL_COLOR===c?' sel':''}" onclick="valColor('${attr(c)}')">
+          <span class="sw" ${sw}></span>${esc(c)}</button>`;
+  });
+  return h;
+}
+function valColor(c){ VAL_COLOR=c; renderValidacion(); }
+
+/* Trae una imagen y la deja en el cache. El comparador se sirve del mismo
+   cache: abrirlo despues de mirar la galeria no vuelve a pedir nada. */
+async function valThumb(lado, id){
+  const cel=document.getElementById((lado==='r'?'valRef_':'valEnt_')+id);
+  const url=await valImagen(lado, id);
+  if(!url || !cel) return;
+  cel.outerHTML=`<img class="im" id="${lado==='r'?'valRef_':'valEnt_'}${id}" src="${attr(url)}" alt="foto" onclick="openImg('${attr(url)}')">`;
+}
+async function valImagen(lado, id){
+  const k=lado+id;
+  if(VAL_IMG[k]) return VAL_IMG[k];
+  try{
+    const f = lado==='r'
+      ? await api('GET','/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/fotos/'+id)
+      : await api('GET','/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion/fotos/'+id);
+    VAL_IMG[k]='data:'+f.tipo+';base64,'+f.contenido;
+    return VAL_IMG[k];
+  }catch(e){ return null; }
+}
+
+/* Sube una por una: una foto que falle no arrastra a las demas. El OCR corre
+   en la API al recibirla, asi que esto tarda unos segundos por foto. */
+async function valSubir(input){
+  const files=Array.from(input.files||[]); if(!files.length) return;
+  const prog=document.getElementById('valProgreso');
+  const libres=VAL.maximo-(VAL.fotos||[]).length;
+  const lote=files.slice(0, Math.max(0, libres));
+  if(files.length>lote.length) toast('Solo se subirán '+lote.length+' de '+files.length+': el máximo por bandeja es '+VAL.maximo+'.');
+  input.disabled=true;
+  let ok=0, sinTexto=0; const errores=[];
+  for(let i=0;i<lote.length;i++){
+    const f=lote[i];
+    if(prog) prog.textContent='Subiendo y leyendo '+(i+1)+' de '+lote.length+': '+f.name+'…';
+    try{
+      if(!/^image\//i.test(f.type||'')) throw new Error('no es una imagen');
+      const red=await bfotReducir(f, VAL_MAX_LADO, VAL_CALIDAD);
+      const r=await api('POST','/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion/fotos',
+        {nombre:f.name, tipo:red.tipo, base64:red.base64});
+      ok++; if(r && !r.leida) sinTexto++;
+    }catch(e){ errores.push(f.name+': '+e.message); }
+  }
+  input.disabled=false; if(prog) prog.textContent='';
+  if(ok) toast(ok===1?'Foto subida':(ok+' fotos subidas'));
+  if(sinTexto) toast(sinTexto===1
+    ? 'Una foto quedó sin texto leído: no va a contar para la comparación.'
+    : sinTexto+' fotos quedaron sin texto leído: no van a contar para la comparación.');
+  if(errores.length) toast('No se pudo subir — '+errores.join(' · '));
+  await valRecargar();
+}
+
+function valEliminar(fid){
+  askConfirm('Eliminar foto',
+    'Se eliminará esta foto de la entrega. No se puede deshacer.',
+    'Sí, eliminar',
+    async function(){
+      try{
+        await api('DELETE','/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion/fotos/'+fid);
+        toast('Foto eliminada');
+        await valRecargar();
+      }catch(e){ toast('No se pudo eliminar: '+e.message); }
+    });
+}
+
+async function valValidar(){
+  if(!VAL || valSoloLectura()) return;
+  const btn=document.getElementById('valBtn'); if(btn){ btn.disabled=true; btn.textContent='Comparando…'; }
+  try{
+    await api('POST','/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion',
+      VAL_COLOR?{color_observado:VAL_COLOR}:{});
+  }catch(e){
+    toast('No se pudo validar: '+e.message);
+    if(btn){ btn.disabled=false; btn.textContent='🔎 Validar bandeja'; }
+    return;
+  }
+  await valRecargar();
+  const v=VAL.veredicto;
+  if(v) toast(v.resultado==='Correcta' ? '✅ Bandeja correcta'
+            : v.resultado==='Incorrecta' ? '❌ Bandeja incorrecta — revise las fotos'
+            : '🤔 No se pudo determinar — compare las fotos usted mismo');
+  const f=document.getElementById('valBody'); if(f) f.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+/* ===== El comparador a pantalla completa =====
+   Referencia a la izquierda, entrega a la derecha, de par en par. Es la salida
+   del callejon: cuando el sistema dice «Incorrecta» o «No puedo determinarlo»,
+   la persona mira y decide, y esa decision queda con su nombre. */
+let CMP={abierto:false, i:0};
+
+async function cmpAbrir(){
+  if(!VAL) return;
+  CMP={abierto:true, i:0};
+  let ovl=document.getElementById('cmpOvl');
+  if(!ovl){ ovl=document.createElement('div'); ovl.id='cmpOvl'; document.body.appendChild(ovl); }
+  ovl.className='cmp';
+  document.body.style.overflow='hidden';
+  document.addEventListener('keydown', cmpTecla);
+  cmpRender();
+  /* Se precargan todas: pasar de par en par tiene que ser instantaneo. */
+  await Promise.all([].concat(
+    VAL.referencia.map(f=>valImagen('r', f.id)),
+    (VAL.fotos||[]).map(f=>valImagen('e', f.id))
+  ));
+  cmpRender();
+}
+function cmpCerrar(){
+  CMP.abierto=false;
+  const ovl=document.getElementById('cmpOvl'); if(ovl) ovl.remove();
+  document.body.style.overflow='';
+  document.removeEventListener('keydown', cmpTecla);
+}
+function cmpTecla(e){
+  if(!CMP.abierto) return;
+  if(e.key==='Escape') cmpCerrar();
+  else if(e.key==='ArrowRight') cmpIr(1);
+  else if(e.key==='ArrowLeft') cmpIr(-1);
+}
+function cmpPares(){ return Math.max(VAL.referencia.length, (VAL.fotos||[]).length, 1); }
+function cmpIr(d){
+  const n=cmpPares();
+  CMP.i=Math.min(n-1, Math.max(0, CMP.i+d));
+  cmpRender();
+}
+function cmpRender(){
+  const ovl=document.getElementById('cmpOvl'); if(!ovl) return;
+  const b=VAL.bandeja, cod=b.demarcado||b.equipo_codigo;
+  const n=cmpPares(), i=CMP.i;
+  const ref=VAL.referencia[i]||null, ent=(VAL.fotos||[])[i]||null;
+  const uRef=ref?VAL_IMG['r'+ref.id]:null, uEnt=ent?VAL_IMG['e'+ent.id]:null;
+  const v=VAL.veredicto;
+
+  ovl.innerHTML=`
+    <div class="cmp-top">
+      <span class="t">${esc(cod)}</span>
+      <span class="s">${esc(b.descripcion||b.nombre||'')}${b.color_catalogo?' · demarcada '+esc(b.color_catalogo):''}</span>
+      <span class="crece"></span>
+      ${v?`<span class="vb-pill ${VAL_CLS[v.resultado]||'duda'}">${esc(v.resultado)}</span>`:''}
+      <button onclick="cmpCerrar()">✕ Cerrar</button>
+    </div>
+    <div class="cmp-cuerpo">
+      <div class="cmp-pane">
+        <div class="cab">Catálogo <span class="n">${ref?esc(ref.rotulo||('foto '+ref.orden)):'—'}</span></div>
+        <div class="caja">${uRef?`<img src="${attr(uRef)}" alt="referencia">`
+          :(ref?'<div class="nada">Cargando…</div>':'<div class="nada">El catálogo no tiene una foto en esta posición.</div>')}</div>
+      </div>
+      <div class="cmp-pane">
+        <div class="cab">Bandeja alistada <span class="n">${ent?('foto '+(i+1)):'—'}</span></div>
+        <div class="caja">${uEnt?`<img src="${attr(uEnt)}" alt="entrega">`
+          :(ent?'<div class="nada">Cargando…</div>':'<div class="nada">No se subió una foto en esta posición.</div>')}</div>
+      </div>
+    </div>
+    <div class="cmp-nav">
+      <button onclick="cmpIr(-1)"${i<=0?' disabled':''}>←</button>
+      <span>Par ${i+1} de ${n}</span>
+      <button onclick="cmpIr(1)"${i>=n-1?' disabled':''}>→</button>
+    </div>
+    <div class="cmp-pie">
+      <button class="btn-ok" onclick="cmpConfirmar('Correcta')">✅ Confirmo que es la ${esc(cod)}</button>
+      <button class="btn-no" onclick="cmpConfirmar('Incorrecta')">❌ No es esta bandeja</button>
+      <button class="btn-x" onclick="cmpCerrar()">Cancelar</button>
+    </div>`;
+}
+
+/* Lo que diga la persona pisa al veredicto automatico, en los dos sentidos, y
+   queda con su nombre. El motivo que graba la API conserva lo que el sistema
+   habia dicho: es justo el dato que despues interesa revisar. */
+function cmpConfirmar(resultado){
+  const cod=VAL.bandeja.demarcado||VAL.bandeja.equipo_codigo;
+  const auto=(VAL.veredicto && VAL.veredicto.origen==='Automatico') ? VAL.veredicto.resultado : null;
+  askConfirm(
+    resultado==='Correcta' ? 'Confirmar que es la '+cod : 'Marcar la bandeja como incorrecta',
+    (resultado==='Correcta'
+      ? 'Va a quedar registrado que usted comparó las fotos y confirmó que la bandeja alistada es la '+cod+'.'
+      : 'Va a quedar registrado que usted comparó las fotos y la bandeja alistada NO es la '+cod+'.')
+    + (auto && auto!==resultado ? ' El sistema había dicho «'+auto+'»: su decisión lo reemplaza y ambas quedan en la bitácora.' : ''),
+    resultado==='Correcta' ? 'Sí, es la '+cod : 'Sí, marcarla incorrecta',
+    async function(){
+      try{
+        await api('PUT','/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion/confirmar',
+          {resultado});
+      }catch(e){ toast('No se pudo registrar: '+e.message); return; }
+      cmpCerrar();
+      await valRecargar();
+      toast(resultado==='Correcta' ? '✅ Confirmado: es la '+cod : '❌ Registrada como incorrecta');
+    });
 }
 
 /* ===== Check list de una bandeja =====

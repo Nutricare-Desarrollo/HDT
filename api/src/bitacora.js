@@ -57,6 +57,14 @@ const MAPA = {
   'solicitudes/{id}/devolver':                   { p:'Solicitud de Equipo', POST:'Devolvió la solicitud al hospital' },
   'solicitudes/{id}/reabrir':                    { p:'Solicitud de Equipo', POST:'Reabrió el alisto' },
   'solicitudes/{id}/bandejas/{codigo}/checklist':{ p:'Solicitud de Equipo', PUT:'Guardó el alisto de una bandeja' },
+  'solicitudes/{id}/bandejas/{codigo}/validacion':
+                                                 { p:'Solicitud de Equipo', POST:'Validó la bandeja' },
+  'solicitudes/{id}/bandejas/{codigo}/validacion/confirmar':
+                                                 { p:'Solicitud de Equipo', PUT:'Confirmó la validación mirando las fotos' },
+  'solicitudes/{id}/bandejas/{codigo}/validacion/fotos':
+                                                 { p:'Solicitud de Equipo', POST:'Adjuntó una foto de la entrega' },
+  'solicitudes/{id}/bandejas/{codigo}/validacion/fotos/{fid}':
+                                                 { p:'Solicitud de Equipo', DELETE:'Borró una foto de la entrega' },
   'hojas':                                       { p:'Hojas de consumo',    POST:'Registró una hoja de consumo' },
   'hojas/{id}':                                  { p:'Hojas de consumo',    PUT:'Editó la hoja de consumo',
                                                                             DELETE:'Eliminó la hoja de consumo' },
@@ -113,6 +121,15 @@ function detalleDe(cuerpo) {
     partes.push((c.agregados || 0) + ' agregados, ' + (c.actualizados || 0) + ' actualizados'
       + (c.rechazados ? ', ' + c.rechazados + ' rechazados' : ''));
   }
+  /* El veredicto. Va primero entre las cifras porque es el dato por el que
+     alguien va a abrir la bitacora: «quien dijo que esta bandeja estaba bien,
+     y fue el sistema o fue una persona». */
+  if (c.resultado && c.origen) {
+    partes.push(c.resultado + (c.origen === 'Persona' ? ' (lo dijo Bodega)' : ' (automático)')
+      + (c.puntaje != null ? ', puntaje ' + Number(c.puntaje).toFixed(3) : '')
+      + (c.candidato ? ', se parece más a ' + (c.candidato_demarcado || c.candidato) : ''));
+  }
+  if (c.validacion_bandejas) partes.push('bandejas: ' + c.validacion_bandejas);
   if (typeof c.alistados === 'number' && typeof c.articulos === 'number') {
     partes.push(c.alistados + ' de ' + c.articulos + ' componentes');
   }
@@ -122,6 +139,12 @@ function detalleDe(cuerpo) {
   }
   if (Array.isArray(c.avisos) && c.avisos.length) {
     partes.push('sin check list: ' + c.avisos.join(', '));
+  }
+  /* Bandejas que salieron sin foto o marcadas incorrectas. No bloquearon el
+     despacho -a proposito-, asi que la bitacora es el unico lugar donde queda
+     que salieron asi. */
+  if (Array.isArray(c.avisos_validacion) && c.avisos_validacion.length) {
+    partes.push('validación: ' + c.avisos_validacion.join(', '));
   }
   if (c.notificacion) {
     partes.push(c.notificacion.enviado
