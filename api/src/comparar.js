@@ -225,6 +225,75 @@ function veredicto({ textosEntrega, pedida, refs, gemelas = [], color = null }) 
       + '. Ninguna otra bandeja del catálogo tiene este contenido.' };
 }
 
-module.exports = { veredicto, terminos, terminosDeVarias, normalizar,
+/* Debajo de esto, un parecido entre dos fotos es ruido: dos fotos de
+   instrumental cualquiera comparten «screw», «drill» y poco mas. Es a
+   proposito mas bajo que MIN_PUNTAJE -0.25-, porque aca la pregunta es otra:
+   no «es esta la bandeja», sino «de estas cuatro fotos, cual va con cual». */
+const MIN_PAREO = 0.08;
+/* Y ademas tiene que GANARLE a la segunda por este margen. Sin esto el
+   emparejado inventa: en la NUT-0001330, cuatro de sus cinco fotos son los
+   recipientes plasticos de tornillos y su texto es identico -«locking screws /
+   cortex screws», cinco terminos, coseno 1.000 entre las cuatro-. No hay nada
+   que las distinga, y elegir una era tirar los dados. Cuando la eleccion no
+   es clara se devuelve SIN par y la pantalla cae en el orden posicional, que
+   por lo menos es estable y previsible. */
+const MARGEN_PAREO = 0.05;
+
+/* Empareja cada foto de la ENTREGA con la foto del CATALOGO que mas se le
+   parece por el texto que se leyo en cada una.
+
+   Para que sirve: Bodega no toma las fotos en el mismo orden en que estan
+   cargadas en el catalogo -no tiene por que saberlo-, asi que compararlas por
+   posicion ponia lado a lado el recipiente de tornillos contra el del
+   instrumental. Emparejar por contenido usa el texto que YA se leyo: no
+   cuesta una llamada mas a Azure ni le pide nada al usuario.
+
+   El emparejado es GOLOSO y no optimo: se ordenan todos los pares posibles
+   por parecido y se van tomando de mayor a menor, saltando los que ya usaron
+   una de las dos fotos. Con cuatro o seis fotos por lado la diferencia contra
+   un asignamiento optimo -el hungaro- es despreciable, y esto se lee.
+
+   Las fotos sin texto no se emparejan: no hay con que. Quedan sueltas y la
+   pantalla las pone al final, que es honesto: nadie sabe con cual van. */
+function parear(refs, entrega) {
+  const docs = {};
+  const tr = new Map(), te = new Map();
+  for (const f of refs)    { const t = terminos(f.texto); tr.set(String(f.id), t); docs['r' + f.id] = t; }
+  for (const f of entrega) { const t = terminos(f.texto); te.set(String(f.id), t); docs['e' + f.id] = t; }
+  const idf = construirIdf(docs);
+
+  /* El margen se mide contra TODAS las referencias, antes de repartir nada:
+     la pregunta es si esta foto de la entrega es distinguible de por si, y esa
+     respuesta no puede depender de a quien le tocaron las otras. */
+  const cand = [];
+  for (const [ide, t1] of te) {
+    if (!t1.size) continue;
+    const v1 = vector(t1, idf);
+    const fila = [];
+    for (const [idr, t2] of tr) {
+      if (!t2.size) continue;
+      fila.push({ e: ide, r: idr, s: coseno(v1, vector(t2, idf)) });
+    }
+    fila.sort((a, b) => b.s - a.s);
+    if (!fila.length || fila[0].s < MIN_PAREO) continue;
+    const segunda = fila.length > 1 ? fila[1].s : 0;
+    if (fila[0].s - segunda < MARGEN_PAREO) continue;   // empate: no se adivina
+    cand.push(fila[0]);
+  }
+  cand.sort((a, b) => b.s - a.s);
+
+  /* Reparto goloso: dos fotos de la entrega pueden querer la misma referencia
+     y solo una se la lleva. La otra queda sin par y cae en el orden
+     posicional, que es mejor que darle una que ya se sabe que no es suya. */
+  const usadaR = new Set(), par = {};
+  for (const c of cand) {
+    if (usadaR.has(c.r)) continue;
+    usadaR.add(c.r);
+    par[c.e] = { referencia: c.r, puntaje: Number(c.s.toFixed(3)) };
+  }
+  return par;
+}
+
+module.exports = { veredicto, parear, terminos, terminosDeVarias, normalizar,
                    construirIdf, vector, coseno,
-                   PESO_DISC, MIN_TERMINOS, MIN_PUNTAJE, MIN_MARGEN, MARGEN_CONTRA };
+                   PESO_DISC, MIN_TERMINOS, MIN_PUNTAJE, MIN_MARGEN, MARGEN_CONTRA, MIN_PAREO, MARGEN_PAREO };

@@ -2732,16 +2732,24 @@ app.http('solicitud-validacion-get', {
       const [g, ref, ent] = await Promise.all([
         query(SQL_GEMELAS, [cod]),
         query(`SELECT Id AS id, Rotulo AS rotulo, Orden AS orden,
-                      (TextoOcr IS NOT NULL) AS leida
+                      (TextoOcr IS NOT NULL) AS leida, TextoOcr AS texto
                  FROM cat.EquipoFoto WHERE UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($1))
                 ORDER BY Orden, Id`, [cod]),
         query(`SELECT Id AS id, Nombre AS nombre, Bytes AS bytes, Usuario AS usuario,
                       UsuarioEmail AS usuario_email, ErrorOcr AS error_ocr,
-                      (TextoOcr IS NOT NULL) AS leida, ${FECHA_VALID} AS fecha
+                      (TextoOcr IS NOT NULL) AS leida, TextoOcr AS texto, ${FECHA_VALID} AS fecha
                  FROM dbo.SolicitudFoto
                 WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))
                 ORDER BY Id`, [id, cod])
       ]);
+
+      /* Que foto de la entrega va con que foto del catalogo. Se calcula con el
+         texto que ya se leyo -no cuesta nada- y es lo que permite que el
+         comparador las ponga lado a lado aunque Bodega las haya tomado en otro
+         orden. El texto NO se manda a la pantalla: pesa y no se muestra. */
+      const pareo = comparar.parear(
+        ref.rows.filter((x) => x.texto).map((x) => ({ id: x.id, texto: x.texto })),
+        ent.rows.filter((x) => x.texto).map((x) => ({ id: x.id, texto: x.texto })));
 
       return json(200, {
         solicitud: s.rows[0],
@@ -2749,9 +2757,10 @@ app.http('solicitud-validacion-get', {
                    nombre: b.nombre, color_catalogo: b.color_catalogo },
         gemelas: g.rows,
         gemelas_mismo_color: g.rows.filter((x) => colorKey(b.color_catalogo) && colorKey(x.color) === colorKey(b.color_catalogo)).length,
-        referencia: ref.rows,
+        referencia: ref.rows.map(({ texto, ...x }) => x),
         referencia_leidas: ref.rows.filter((x) => x.leida).length,
-        fotos: ent.rows.map((x) => ({
+        pareo,
+        fotos: ent.rows.map(({ texto, ...x }) => ({
           ...x,
           puede_eliminar: puede && String(x.usuario_email || '').toLowerCase() === String(user.email || '').toLowerCase()
         })),

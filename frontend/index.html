@@ -431,6 +431,13 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .cmp-pane img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
 .cmp-pane .nada{color:#7f95a8;font-size:13px;text-align:center;padding:20px;line-height:1.5}
 .cmp-nav{display:flex;align-items:center;justify-content:center;gap:14px;padding:9px;background:#101d29;color:#cfe0ee;font-size:13px}
+/* Las flechas para cambiar a mano la foto del catálogo. Van en la cabecera
+   de su panel y no en la barra de abajo, para que se lea que afectan a ESE
+   lado. */
+.cmp-pane .cab .cambiar{display:inline-flex;gap:4px;margin-left:8px}
+.cmp-pane .cab .cambiar button{background:#1d2b36;color:#c7d3dd;border:1px solid #33465a;
+  border-radius:6px;padding:1px 7px;font-size:12px;cursor:pointer;line-height:1.5}
+.cmp-pane .cab .cambiar button:hover{background:#2a3d4f;color:#fff}
 .cmp-nav button{background:#1d2f3f;color:#fff;padding:8px 16px;font-size:15px}
 .cmp-nav button:disabled{opacity:.35}
 .cmp-pie{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;padding:12px;background:#101d29;border-top:1px solid #1d2f3f}
@@ -7198,7 +7205,7 @@ async function valValidar(){
    Referencia a la izquierda, entrega a la derecha, de par en par. Es la salida
    del callejon: cuando el sistema dice «Incorrecta» o «No puedo determinarlo»,
    la persona mira y decide, y esa decision queda con su nombre. */
-let CMP={abierto:false, i:0};
+let CMP={abierto:false, i:0, pares:[]};
 
 async function cmpAbrir(){
   if(!VAL) return;
@@ -7206,14 +7213,15 @@ async function cmpAbrir(){
     toast('Valide la bandeja antes de comparar: las fotos cambiaron.');
     return;
   }
-  CMP={abierto:true, i:0};
+  CMP={abierto:true, i:0, pares:cmpArmarPares()};
   let ovl=document.getElementById('cmpOvl');
   if(!ovl){ ovl=document.createElement('div'); ovl.id='cmpOvl'; document.body.appendChild(ovl); }
   ovl.className='cmp';
   document.body.style.overflow='hidden';
   document.addEventListener('keydown', cmpTecla);
   cmpRender();
-  /* Se precargan todas: pasar de par en par tiene que ser instantaneo. */
+  /* Se precargan TODAS -no solo las del par actual-: pasar de par en par, y
+     cambiar la del catálogo a mano, tienen que ser instantáneos. */
   await Promise.all([].concat(
     VAL.referencia.map(f=>valImagen('r', f.id)),
     (VAL.fotos||[]).map(f=>valImagen('e', f.id))
@@ -7232,18 +7240,66 @@ function cmpTecla(e){
   else if(e.key==='ArrowRight') cmpIr(1);
   else if(e.key==='ArrowLeft') cmpIr(-1);
 }
-function cmpPares(){ return Math.max(VAL.referencia.length, (VAL.fotos||[]).length, 1); }
+/* Los pares que va a mostrar el comparador.
+
+   Se arma UNA vez al abrir, no en cada pintada: si se recalculara, cambiar la
+   foto del catalogo a mano se perderia en el siguiente repintado.
+
+   El orden manda la ENTREGA -son las fotos que Bodega acaba de tomar, y es el
+   orden en que las tiene en la cabeza-, y al lado va la del catalogo que le
+   corresponde por contenido. Las del catalogo que no emparejaron con ninguna
+   van al final, solas: esconderlas seria peor, porque son justamente las que
+   Bodega no fotografio. */
+function cmpArmarPares(){
+  const refs=VAL.referencia||[], ent=VAL.fotos||[], pareo=VAL.pareo||{};
+  const usadas=new Set();
+  const pares=ent.map(e=>{
+    const p=pareo[String(e.id)];
+    const r=p ? refs.find(x=>String(x.id)===String(p.referencia)) : null;
+    if(r) usadas.add(String(r.id));
+    return { ent:e, ref:r||null, puntaje:p?p.puntaje:null };
+  });
+  /* Las que la API no se animó a emparejar —texto idéntico entre varias, o
+     sin texto— caen al orden POSICIONAL con las referencias que sobraron. No
+     es que acierte: es que es estable y previsible, y con las flechas del
+     panel del catálogo se corrige en un toque. Adivinar entre dos fotos
+     indistinguibles habría sido tirar los dados y decir que se sabe. */
+  const sobran=refs.filter(r=>!usadas.has(String(r.id)));
+  let k=0;
+  pares.forEach(p=>{ if(!p.ref && k<sobran.length){ p.ref=sobran[k++]; p.posicional=true; } });
+  /* Y las del catálogo que ni así encontraron pareja van al final, solas: son
+     los recipientes que Bodega no fotografió, y esconderlas sería lo peor. */
+  for(; k<sobran.length; k++) pares.push({ ent:null, ref:sobran[k], puntaje:null });
+  return pares.length ? pares : [{ent:null, ref:null, puntaje:null}];
+}
+function cmpPares(){ return (CMP.pares||[]).length || 1; }
 function cmpIr(d){
   const n=cmpPares();
   CMP.i=Math.min(n-1, Math.max(0, CMP.i+d));
   cmpRender();
 }
+/* Cambiar a mano la foto del catálogo de ESTE par. El emparejado automático
+   usa el texto, y una foto sin texto —o con poco— puede caer mal; sin esta
+   salida habría que salir, reordenar y volver a entrar. */
+function cmpOtraRef(d){
+  const refs=VAL.referencia||[]; if(refs.length<2) return;
+  const par=CMP.pares[CMP.i]; if(!par) return;
+  const act=par.ref ? refs.findIndex(x=>String(x.id)===String(par.ref.id)) : -1;
+  const j=((act+d)%refs.length+refs.length)%refs.length;
+  /* Ya no es ni el automático ni el posicional: lo eligió la persona, y la
+     barra de abajo no puede seguir diciendo lo contrario. */
+  par.ref=refs[j]; par.puntaje=null; par.posicional=false;
+  cmpRender();
+  valImagen('r', par.ref.id).then(()=>{ if(CMP.abierto) cmpRender(); });
+}
 function cmpRender(){
   const ovl=document.getElementById('cmpOvl'); if(!ovl) return;
   const b=VAL.bandeja, cod=b.demarcado||b.equipo_codigo;
   const n=cmpPares(), i=CMP.i;
-  const ref=VAL.referencia[i]||null, ent=(VAL.fotos||[])[i]||null;
+  const par=(CMP.pares||[])[i]||{ent:null, ref:null, puntaje:null};
+  const ref=par.ref, ent=par.ent;
   const uRef=ref?VAL_IMG['r'+ref.id]:null, uEnt=ent?VAL_IMG['e'+ent.id]:null;
+  const nEnt=ent?((VAL.fotos||[]).findIndex(x=>String(x.id)===String(ent.id))+1):0;
   const v=VAL.veredicto;
 
   ovl.innerHTML=`
@@ -7256,19 +7312,23 @@ function cmpRender(){
     </div>
     <div class="cmp-cuerpo">
       <div class="cmp-pane">
-        <div class="cab">Catálogo <span class="n">${ref?esc(ref.rotulo||('foto '+ref.orden)):'—'}</span></div>
+        <div class="cab">Catálogo <span class="n">${ref?esc(ref.rotulo||('foto '+ref.orden)):'—'}</span>
+          ${(VAL.referencia||[]).length>1 ? `<span class="cambiar">
+            <button onclick="cmpOtraRef(-1)" title="Otra foto del catálogo">◀</button>
+            <button onclick="cmpOtraRef(1)" title="Otra foto del catálogo">▶</button></span>` : ''}</div>
         <div class="caja">${uRef?`<img src="${attr(uRef)}" alt="referencia">`
-          :(ref?'<div class="nada">Cargando…</div>':'<div class="nada">El catálogo no tiene una foto en esta posición.</div>')}</div>
+          :(ref?'<div class="nada">Cargando…</div>':'<div class="nada">Ninguna foto del catálogo se parece a esta. Use ◀ ▶ para elegirla a mano.</div>')}</div>
       </div>
       <div class="cmp-pane">
-        <div class="cab">Bandeja alistada <span class="n">${ent?('foto '+(i+1)):'—'}</span></div>
+        <div class="cab">Bandeja alistada <span class="n">${ent?('foto '+nEnt):'—'}</span></div>
         <div class="caja">${uEnt?`<img src="${attr(uEnt)}" alt="entrega">`
-          :(ent?'<div class="nada">Cargando…</div>':'<div class="nada">No se subió una foto en esta posición.</div>')}</div>
+          :(ent?'<div class="nada">Cargando…</div>':'<div class="nada">Esta foto del catálogo no tiene pareja: no se fotografió ese recipiente.</div>')}</div>
       </div>
     </div>
     <div class="cmp-nav">
       <button onclick="cmpIr(-1)"${i<=0?' disabled':''}>←</button>
-      <span>Par ${i+1} de ${n}</span>
+      <span>Par ${i+1} de ${n}${par.puntaje!=null?' · emparejadas por su contenido'
+        :(par.posicional?' · por orden, revise que corresponda':'')}</span>
       <button onclick="cmpIr(1)"${i>=n-1?' disabled':''}>→</button>
     </div>
     <div class="cmp-pie">
