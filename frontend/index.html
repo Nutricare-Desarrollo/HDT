@@ -363,16 +363,16 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .vb-f .pie{padding:5px 7px;font-size:11px;color:var(--muted);line-height:1.35}
 .vb-f .acc{display:flex;gap:5px;padding:0 7px 7px}
 .vb-f .acc button{flex:1 1 auto;font-size:11.5px;padding:5px 4px}
-/* La casilla va ENCIMA de la miniatura y no debajo: con doce fotos en la
-   cuadricula, una fila de casillas al pie obliga a leer dos veces para saber
-   cual esta marcada. Arriba, la foto marcada se distingue de un vistazo. */
-.vb-f{position:relative}
-.vb-f .sel{position:absolute;top:6px;left:6px;z-index:2;width:26px;height:26px;border-radius:7px;
-  background:rgba(255,255,255,.92);border:1px solid rgba(0,0,0,.15);box-shadow:0 1px 3px rgba(0,0,0,.2);
-  display:flex;align-items:center;justify-content:center;cursor:pointer;margin:0}
-.vb-f .sel input{width:16px;height:16px;margin:0;cursor:pointer;accent-color:var(--brand)}
+/* La casilla va en el PIE, junto al nombre, y NO encima de la miniatura: la
+   miniatura mide 104 px y una casilla flotando le tapaba una esquina justo
+   donde suele estar la etiqueta que hay que leer. Todo el pie es el area de
+   clic. La foto marcada se reconoce por el anillo y por el pie tenido, sin
+   tocar la imagen: lo que hay que ver es la foto. */
+.vb-f .pie.con-sel{display:flex;align-items:flex-start;gap:7px;cursor:pointer;user-select:none}
+.vb-f .pie .txt{flex:1 1 auto;min-width:0}
+.vb-f .pie input{width:16px;height:16px;margin:1px 0 0;flex:0 0 auto;cursor:pointer;accent-color:var(--brand)}
 .vb-f.marcada{border-color:var(--brand);box-shadow:0 0 0 2px rgba(10,92,138,.25)}
-.vb-f.marcada .im{opacity:.72}
+.vb-f.marcada .pie{background:#e8f1f7;color:var(--txt);font-weight:600}
 /* Barra de la seleccion: solo existe cuando hay algo marcado. */
 .vb-selbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;
   background:#fdf3e3;border:1px solid #f0c36d;border-radius:9px;padding:9px 12px;font-size:13px}
@@ -6927,18 +6927,22 @@ function valTirasEntrega(){
   if(!fs.length) return `<div class="vb-vacio" style="margin-top:10px">Todavía no hay fotos de esta entrega.</div>`;
   let h=`<div class="vb-tiras">`;
   fs.forEach((f,i)=>{
-    const marc=VAL_SEL.has(f.id);
-    h+=`<div class="vb-f${marc?' marcada':''}">`;
-    /* La casilla solo aparece donde la persona de verdad puede borrar: las
+    const id=valId(f), marc=VAL_SEL.has(id);
+    const rot=`Foto ${i+1}${f.nombre?' · '+esc(String(f.nombre).slice(0,28)):''}`
+      + (f.leida?'':'<br><span class="sinleer">'+esc(f.error_ocr||'sin texto leído')+'</span>');
+    h+=`<div class="vb-f${marc?' marcada':''}">
+          <div class="im" id="valEnt_${attr(id)}"></div>`;
+    /* La casilla va al PIE, junto al nombre, y no encima de la miniatura: la
+       miniatura es chica y una casilla flotando le tapaba una esquina. De
+       paso, el pie entero es el area de clic, que se acierta mucho mejor que
+       un cuadrito de 16 px. Solo se pinta donde la persona puede borrar: las
        fotos que subio otro se ven, pero no se marcan. */
-    if(f.puede_eliminar){
-      h+=`<label class="sel" title="Marcar esta foto para eliminarla">
-            <input type="checkbox" ${marc?'checked':''} onchange="valMarcar(${f.id}, this.checked)"></label>`;
-    }
-    h+=`<div class="im" id="valEnt_${f.id}"></div>
-        <div class="pie">Foto ${i+1}${f.nombre?' · '+esc(String(f.nombre).slice(0,28)):''}
-          ${f.leida?'':'<br><span class="sinleer">'+esc(f.error_ocr||'sin texto leído')+'</span>'}</div>
-      </div>`;
+    h+= f.puede_eliminar
+      ? `<label class="pie con-sel" title="Marcar esta foto para eliminarla">
+           <input type="checkbox" ${marc?'checked':''} onchange="valMarcar('${attr(id)}', this.checked)">
+           <span class="txt">${rot}</span></label>`
+      : `<div class="pie"><span class="txt">${rot}</span></div>`;
+    h+=`</div>`;
   });
   h+=`</div>`;
 
@@ -6956,9 +6960,13 @@ function valTirasEntrega(){
   return h;
 }
 
-function valMarcar(id, on){ if(on) VAL_SEL.add(id); else VAL_SEL.delete(id); renderValidacion(); }
+/* SIEMPRE como cadena. Id es BIGINT y node-postgres devuelve int8 como
+   cadena; si en algun lado entra como numero, el Set guarda 412 y despues se
+   le pregunta por "412", que no es lo mismo. */
+const valId = (f) => String(f && f.id);
+function valMarcar(id, on){ id=String(id); if(on) VAL_SEL.add(id); else VAL_SEL.delete(id); renderValidacion(); }
 function valMarcarNinguna(){ VAL_SEL.clear(); renderValidacion(); }
-function valMarcarTodas(){ (VAL.fotos||[]).forEach(f=>{ if(f.puede_eliminar) VAL_SEL.add(f.id); }); renderValidacion(); }
+function valMarcarTodas(){ (VAL.fotos||[]).forEach(f=>{ if(f.puede_eliminar) VAL_SEL.add(valId(f)); }); renderValidacion(); }
 
 /* Trae una imagen y la deja en el cache. El comparador se sirve del mismo
    cache: abrirlo despues de mirar la galeria no vuelve a pedir nada. */
@@ -7022,7 +7030,7 @@ function valEliminarMarcadas(){
       ? 'Se eliminará la foto marcada de esta entrega.'
       : 'Se eliminarán las ' + ids.length + ' fotos marcadas de esta entrega.')
     + ' No se puede deshacer.'
-    + ((VAL.fotos||[]).length===ids.length
+    + ((VAL.fotos||[]).filter(f=>f.puede_eliminar).length===ids.length && (VAL.fotos||[]).length===ids.length
         ? ' La bandeja va a quedar sin fotos y el veredicto anterior deja de tener respaldo.' : ''),
     ids.length===1 ? 'Sí, eliminar' : 'Sí, eliminar las ' + ids.length,
     async function(){
