@@ -382,6 +382,9 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .vb-selbar .n{font-weight:700;color:var(--txt);flex:1 1 auto}
 .vb-selbar button{font-size:12.5px;padding:6px 10px}
 .vb-f .sinleer{color:var(--warn);font-weight:700}
+/* Tambien en la galeria del catalogo: la regla estaba atada a .vb-f y
+   ahi el aviso salia en gris, que es justo lo que no se mira. */
+.bfot .sinleer{color:var(--warn);font-weight:700}
 .vb-vacio{border:1.5px dashed var(--line);border-radius:9px;padding:16px;background:#f7fafc;text-align:center;color:var(--muted);font-size:13px;line-height:1.5}
 .vb-alerta{display:flex;gap:10px;align-items:flex-start;background:#fff8e6;border:1px solid #f0d79a;border-left:4px solid var(--warn);border-radius:8px;padding:11px 13px;font-size:13.5px;line-height:1.45;margin-bottom:14px}
 .vb-alerta b{color:#8a5a00}
@@ -3340,7 +3343,7 @@ function renderTrabajos(){
 
    Se reduce en el navegador antes de subir, igual que las fotos de la hoja
    sellada: una foto de cámara pasa de varios MB a ~130 KB. */
-let BFOT = { codigo:null, fotos:[], maximo:12 };
+let BFOT = { codigo:null, fotos:[], maximo:12, leidas:0, pendientes:0 };
 const BFOT_MAX_LADO = 1600;   // px del lado largo tras reducir
 const BFOT_CALIDAD  = 0.82;
 
@@ -3380,6 +3383,7 @@ async function bfotCargar(codigo){
   try{
     const r=await api('GET','/bandejas/'+encodeURIComponent(codigo)+'/fotos');
     BFOT.fotos=(r&&r.fotos)||[]; BFOT.maximo=(r&&r.maximo)||12;
+    BFOT.leidas=(r&&r.leidas)||0; BFOT.pendientes=(r&&r.pendientes)||0;
   }catch(e){
     cont.innerHTML=`<div class="empty" style="padding:16px;color:var(--danger)">No se pudieron cargar las fotos: ${esc(e.message)}</div>`;
     return;
@@ -3396,8 +3400,9 @@ function bfotRender(){
   }else{
     html+='<div class="sell-drop">'
       + `<input type="file" id="bfotInput" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" multiple onchange="bfotSubir(this)">`
-      + `<p class="hint">Una foto por recipiente. La bandeja completa en el cuadro, con las cuatro esquinas visibles y sin flash directo. `
-      + `Se reducen automáticamente antes de subir. ${n} de ${BFOT.maximo} usadas.</p>`
+      + `<p class="hint">Una foto por recipiente, <b>con las etiquetas visibles</b>: de ahí sale el texto contra el que se valida. `
+      + `La bandeja completa en el cuadro, con las cuatro esquinas visibles y sin flash directo. `
+      + `Se reducen y se leen automáticamente al subir. ${n} de ${BFOT.maximo} usadas.</p>`
       + '<div id="bfotProgreso" style="font-size:13px;margin-top:8px"></div>'
       + '</div>';
   }
@@ -3406,13 +3411,30 @@ function bfotRender(){
       + 'Suba una por cada recipiente para que Bodega sepa con qué debería toparse.</div>';
     cont.innerHTML=html; return;
   }
+  /* El texto leído es lo que hace que la bandeja se pueda validar: sin él la
+     validación solo puede contestar «No puedo determinarlo». Se dice acá,
+     donde se cargan las fotos, y no cuando ya es tarde. */
+  const sinTexto=n-BFOT.leidas;
+  if(sinTexto){
+    html+=`<div class="vb-alerta" style="margin-top:12px"><span>⚠️</span><div>`
+      + `<b>${sinTexto===1?'Una foto no tiene texto leído':sinTexto+' fotos no tienen texto leído'}.</b> `
+      + `La validación compara el texto impreso, así que ${sinTexto===n
+          ? 'esta bandeja <b>no se puede validar</b> todavía'
+          : 'esas fotos no cuentan'}.`
+      + (BFOT.pendientes
+          ? ` <button class="btn-ghost" style="font-size:12.5px;padding:5px 10px;margin-left:6px" id="bfotLeerBtn" onclick="bfotLeer()">🔤 Leer texto de ${BFOT.pendientes===1?'la foto':'las '+BFOT.pendientes+' fotos'}</button>`
+          : ' Ya se intentó leerlas y no se encontró texto: vuelva a fotografiar el recipiente con las etiquetas visibles.')
+      + `</div></div>`;
+  }
   html+='<div class="bfot-grid">';
   BFOT.fotos.forEach((f,i)=>{
     const kb=f.bytes?Math.max(1,Math.round(f.bytes/1024))+' KB':'';
     html+=`<div class="bfot"><div class="im" id="bfotThumb_${f.id}"></div><div class="cuerpo">`
       + `<input type="text" maxlength="100" placeholder="Rótulo (ej. Recipiente ${i+1})" value="${attr(f.rotulo||'')}"`
       + ` onchange="bfotRotulo(${f.id}, this)" title="Qué se ve en esta foto">`
-      + `<div class="meta">${esc(f.usuario)} · ${esc(f.fecha)}${kb?' · '+kb:''}</div>`
+      + `<div class="meta">${esc(f.usuario)} · ${esc(f.fecha)}${kb?' · '+kb:''}`
+      + (f.leida ? '' : `<br><span class="sinleer" title="${attr(f.error_ocr||'Todavía no se ha leído')}">sin texto leído</span>`)
+      + `</div>`
       + '<div class="acc">'
       + `<button class="icon-btn" onclick="bfotMover(${f.id},-1)"${i===0?' disabled':''} title="Mover antes">◀</button>`
       + `<button class="icon-btn" onclick="bfotMover(${f.id},1)"${i===n-1?' disabled':''} title="Mover después">▶</button>`
@@ -3481,6 +3503,23 @@ function bfotEliminar(fotoId){
       }catch(e){ toast('No se pudo eliminar: '+e.message); }
     });
 }
+/* Lee el texto de las fotos que no lo tienen. Existe porque durante un tiempo
+   la subida no leía, y las fotos cargadas entonces quedaron mudas: sin esto
+   habría que borrarlas y volverlas a subir, perdiendo rótulo y orden. */
+async function bfotLeer(){
+  const btn=document.getElementById('bfotLeerBtn');
+  if(btn){ btn.disabled=true; btn.textContent='Leyendo…'; }
+  try{
+    const r=await api('POST','/bandejas/'+encodeURIComponent(BFOT.codigo)+'/fotos/leer');
+    if(r.leidas) toast(r.leidas===1?'Se leyó 1 foto':('Se leyeron '+r.leidas+' fotos'));
+    if(r.sinTexto) toast(r.sinTexto===1
+      ? 'Una foto quedó sin texto: ' + ((r.detalle&&r.detalle[0]&&r.detalle[0].error)||'no se encontró nada legible')
+      : r.sinTexto+' fotos quedaron sin texto legible.');
+    if(!r.leidas && !r.sinTexto) toast('Todas las fotos ya tenían su texto.');
+  }catch(e){ toast('No se pudo leer: '+e.message); }
+  await bfotCargar(BFOT.codigo);
+}
+
 /* Sube una por una: una foto que falle no arrastra a las demás y el aviso
    dice cuál falló. El rótulo se pone después, en la galería. */
 async function bfotSubir(input){
@@ -3493,7 +3532,7 @@ async function bfotSubir(input){
   let ok=0, rep=0; const errores=[];
   for(let i=0;i<lote.length;i++){
     const f=lote[i];
-    if(prog) prog.textContent='Subiendo '+(i+1)+' de '+lote.length+': '+f.name+'…';
+    if(prog) prog.textContent='Subiendo y leyendo '+(i+1)+' de '+lote.length+': '+f.name+'…';
     try{
       if(!/^image\//i.test(f.type||'')) throw new Error('no es una imagen');
       const red=await bfotReducir(f);

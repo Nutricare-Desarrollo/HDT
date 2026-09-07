@@ -1011,10 +1011,21 @@ app.http('bandeja-fotos-list', {
       if (!b) return json(404, { error: 'Esa bandeja no está en el catálogo' });
       const r = await query(
         `SELECT Id AS id, Rotulo AS rotulo, Orden AS orden, Nombre AS nombre,
-                Tipo AS tipo, Bytes AS bytes, Usuario AS usuario, ${FECHA_EQFOTO} AS fecha
+                Tipo AS tipo, Bytes AS bytes, Usuario AS usuario, ${FECHA_EQFOTO} AS fecha,
+                (TextoOcr IS NOT NULL) AS leida, ErrorOcr AS error_ocr
            FROM cat.EquipoFoto WHERE EquipoCodigo = $1
           ORDER BY Orden, Id`, [b.codigo]);
-      return json(200, { codigo: b.codigo, demarcado: b.demarcado, maximo: FOTO_BANDEJA_MAX, fotos: r.rows });
+      /* Sin texto no sirven para validar: la pantalla lo dice y ofrece leerlas.
+         `pendientes` = las que un reintento PODRIA arreglar: las que nunca se
+         intentaron, y las que fallaron por algo pasajero -un 429 de Azure, una
+         caida-. La unica que no cuenta es la que se leyo bien y no traia nada
+         que leer: esa no se arregla reintentando, se arregla volviendo a
+         fotografiar el recipiente. */
+      const sinArreglo = 'No se leyó ningún texto en la imagen';
+      return json(200, { codigo: b.codigo, demarcado: b.demarcado, maximo: FOTO_BANDEJA_MAX,
+                         fotos: r.rows,
+                         leidas: r.rows.filter((x) => x.leida).length,
+                         pendientes: r.rows.filter((x) => !x.leida && x.error_ocr !== sinArreglo).length });
     } catch (e) {
       context.error(e);
       return json(500, { error: 'No se pudieron obtener las fotos de la bandeja', detail: e.message });
@@ -1082,14 +1093,33 @@ app.http('bandeja-foto-create', {
       if (c.rows[0].n >= FOTO_BANDEJA_MAX)
         return json(400, { error: 'Ya hay ' + FOTO_BANDEJA_MAX + ' fotos en esta bandeja, el máximo permitido' });
 
+      /* SE LEE AL SUBIR, igual que la foto de la entrega. Sin esto la foto
+         entra al catalogo muda y la bandeja no se puede validar nunca: el
+         motor compara TEXTO contra TEXTO. Si Azure falla, la foto se guarda
+         igual con el error anotado -sirve para verla- y se puede reintentar
+         despues con «Leer texto». */
+      let texto = null, errOcr = null;
+      try {
+        texto = textoDe(await analyzeRead(b64)) || null;
+        if (!texto) errOcr = 'No se leyó ningún texto en la imagen';
+      } catch (e) {
+        errOcr = String(e.message || e).slice(0, 300);
+        context.warn('No se pudo leer la foto del catálogo: ' + errOcr);
+      }
+
       const r = await query(
-        `INSERT INTO cat.EquipoFoto (EquipoCodigo, Rotulo, Orden, Nombre, Tipo, Bytes, Contenido, Usuario, UsuarioEmail)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        `INSERT INTO cat.EquipoFoto (EquipoCodigo, Rotulo, Orden, Nombre, Tipo, Bytes, Contenido,
+                                     TextoOcr, FechaOcr, ErrorOcr, Usuario, UsuarioEmail)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,(now() at time zone 'utc'),$9,$10,$11)
          ON CONFLICT (EquipoCodigo, COALESCE(Nombre,''), COALESCE(Bytes,0)) DO NOTHING
          RETURNING Id AS id, Rotulo AS rotulo, Orden AS orden, Nombre AS nombre,
-                   Tipo AS tipo, Bytes AS bytes, Usuario AS usuario, ${FECHA_EQFOTO} AS fecha`,
+                   Tipo AS tipo, Bytes AS bytes, Usuario AS usuario, ${FECHA_EQFOTO} AS fecha,
+                   (TextoOcr IS NOT NULL) AS leida, ErrorOcr AS error_ocr`,
         [b.codigo, rotulo, c.rows[0].ultimo + 1, nombre, tipo, bytes, b64,
-         user.name || user.email, user.email]);
+         texto, errOcr, user.name || user.email, user.email]);
+      /* El corpus cambio: el cache de referencias tiene que rehacerse o la
+         validacion seguiria comparando contra lo de hace un minuto. */
+      REF_CACHE = null;
       /* Sin filas devueltas es que el indice unico la freno: la misma foto ya
          estaba. Se responde 200 y no un error, porque desde la pantalla eso es
          «ya la tenias», no un fallo. */
@@ -1155,6 +1185,7 @@ app.http('bandeja-foto-delete', {
           WHERE Id = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))
         RETURNING Nombre AS nombre`, [fid, cod]);
       if (!r.rowCount) return json(404, { error: 'La foto no existe' });
+      REF_CACHE = null;   // el corpus cambio
       return json(200, { ok: true, codigo: cod, nombre: r.rows[0].nombre });
     } catch (e) {
       context.error(e);
@@ -1754,6 +1785,61 @@ async function detalleDeSolicitud(id) {
        FROM dbo.SolicitudEquipoDetalle WHERE SolicitudId = $1 ORDER BY Id`, [id]);
   return d.rows;
 }
+
+/* POST /api/bandejas/{codigo}/fotos/leer
+   Lee el texto de las fotos del catalogo que todavia no lo tienen.
+
+   Hace falta porque durante un tiempo la subida NO leia: las fotos que se
+   cargaron por la pantalla quedaron mudas, y sin texto la bandeja no se puede
+   validar. Borrarlas y volverlas a subir tambien serviria, pero perderia el
+   rotulo, el orden y quien las subio.
+
+   Reintenta tambien las que quedaron con error -un 429 de Azure, una caida-.
+   Devuelve cuantas leyo y cuantas siguen sin texto, con el motivo. */
+app.http('bandeja-fotos-leer', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'bandejas/{codigo}/fotos/leer',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar el catálogo de bandejas' });
+    const cod = normBandeja(decodeURIComponent(request.params.codigo || ''));
+    if (!cod) return json(400, { error: 'Código de bandeja inválido' });
+    try {
+      const b = await codigoDeBandeja(cod);
+      if (!b) return json(404, { error: 'Esa bandeja no está en el catálogo' });
+      const r = await query(
+        `SELECT Id AS id, Rotulo AS rotulo, Nombre AS nombre, Contenido AS contenido
+           FROM cat.EquipoFoto
+          WHERE EquipoCodigo = $1 AND TextoOcr IS NULL
+          ORDER BY Orden, Id`, [b.codigo]);
+      if (!r.rowCount) return json(200, { leidas: 0, sinTexto: 0, ya: true });
+
+      let leidas = 0; const sinTexto = [];
+      for (const f of r.rows) {
+        let texto = null, err = null;
+        try {
+          texto = textoDe(await analyzeRead(f.contenido)) || null;
+          if (!texto) err = 'No se leyó ningún texto en la imagen';
+        } catch (e) {
+          err = String(e.message || e).slice(0, 300);
+          context.warn('No se pudo leer la foto ' + f.id + ': ' + err);
+        }
+        await query(
+          `UPDATE cat.EquipoFoto
+              SET TextoOcr = $1, FechaOcr = (now() at time zone 'utc'), ErrorOcr = $2
+            WHERE Id = $3`, [texto, err, f.id]);
+        if (texto) leidas++;
+        else sinTexto.push({ id: f.id, nombre: f.rotulo || f.nombre || ('foto ' + f.id), error: err });
+      }
+      REF_CACHE = null;   // el corpus cambio
+      return json(200, { leidas, sinTexto: sinTexto.length, detalle: sinTexto,
+                         codigo: b.demarcado || b.codigo });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo leer el texto de las fotos', detail: e.message });
+    }
+  }
+});
 
 /* Reescribe el detalle completo dentro de la transaccion abierta. */
 async function guardarDetalle(client, id, detalle) {
@@ -2606,6 +2692,9 @@ async function veredictoDe(id, cod) {
    una etiqueta que esta en las 118 pesaria igual que una unica.
    Se cachea un minuto: son 118 filas de texto y la pantalla las pide por cada
    validacion, pero cambian solo cuando alguien sube una foto al catalogo. */
+/* Se pone en null desde los handlers del catalogo -subir, borrar y leer una
+   foto- para que la validacion no siga comparando contra el corpus de hace un
+   minuto. Es `let` de modulo: se asigna desde cualquier handler del archivo. */
 let REF_CACHE = null, REF_CACHE_T = 0;
 const REF_CACHE_MS = 60000;
 async function referencias(context) {
