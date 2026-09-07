@@ -169,8 +169,8 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .tab .n{font-size:11.5px;font-weight:700;background:#e8f1fb;color:var(--brand-d);border-radius:10px;padding:1px 7px;margin-left:8px}
 .tab.active .n{background:var(--brand);color:#fff}
 /* Solicitud de Equipo */
-#solGrid .sol-hosp{max-width:280px;overflow:hidden;text-overflow:ellipsis}
-#solGrid .sol-user{max-width:190px;overflow:hidden;text-overflow:ellipsis}
+#solGrid .sol-hosp{max-width:230px;overflow:hidden;text-overflow:ellipsis}
+#solGrid .sol-user{max-width:158px;overflow:hidden;text-overflow:ellipsis}
 #solDetGrid .sol-desc{max-width:420px;overflow:hidden;text-overflow:ellipsis}
 .sol-add{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0 4px}
 .sol-add select{flex:1 1 320px;min-width:0}
@@ -183,6 +183,9 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .pct-fill{height:100%;border-radius:6px;display:block;transition:width .18s}
 .pct-num{font-weight:800;text-align:right;display:inline-block}
 .pct-mini{display:inline-flex;align-items:center;gap:8px;min-width:132px;width:100%}
+/* En el listado de solicitudes la barra cede ancho: con la columna de
+   Validación, 132px de minimo empujaban la tabla fuera del contenedor. */
+#solGrid .pct-mini{min-width:104px}
 .pct-mini .pct-track{height:11px;flex:1 1 60px;min-width:46px}
 .pct-mini .pct-num{font-size:13px;min-width:40px}
 #solDetGrid .sol-pct{width:190px}
@@ -694,8 +697,11 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
      solicitud en la lista; el resto va en pares. */
   #solGrid.cards tbody tr{
     grid-template-columns:minmax(0,1fr) auto;
-    grid-template-areas:"cod pct" "hosp hosp" "cir band" "reg user" "acc acc";
+    grid-template-areas:"cod pct" "hosp hosp" "cir band" "reg user" "val val" "acc acc";
   }
+  /* La validacion se lleva un renglon entero: la pastilla mas larga
+     -«Falta validar»- no cabe al lado de nada sin partirse. */
+  #solGrid.cards td.sg-val{grid-area:val}
   #solGrid.cards td.sg-cod{grid-area:cod}
   #solGrid.cards td.sg-pct{grid-area:pct;justify-self:end;min-width:118px}
   #solGrid.cards td.sg-hosp{grid-area:hosp}
@@ -6328,9 +6334,31 @@ function onSolFilterKey(e){
 function renderSolHead(){
   const head=document.getElementById('solHead');
   if(head.dataset.listo) return;
-  head.innerHTML=`<tr>${SOL_COLS.map(c=>`<th${c.cls?' class="'+c.cls+'"':''}>${c.l}</th>`).join('')}<th>Bandejas</th><th>% Alisto</th><th></th></tr>`
-    +`<tr class="filter-row">${SOL_COLS.map(c=>`<th><input placeholder="Filtrar…" autocomplete="off" data-k="${c.k}" oninput="onSolFilter('${c.k}',this.value)" onkeydown="onSolFilterKey(event)" value="${attr(SOL_COLF[c.k])}"></th>`).join('')}<th></th><th></th><th></th></tr>`;
+  head.innerHTML=`<tr>${SOL_COLS.map(c=>`<th${c.cls?' class="'+c.cls+'"':''}>${c.l}</th>`).join('')}<th>Bandejas</th><th>Validación</th><th>% Alisto</th><th></th></tr>`
+    +`<tr class="filter-row">${SOL_COLS.map(c=>`<th><input placeholder="Filtrar…" autocomplete="off" data-k="${c.k}" oninput="onSolFilter('${c.k}',this.value)" onkeydown="onSolFilterKey(event)" value="${attr(SOL_COLF[c.k])}"></th>`).join('')}<th></th>`
+    /* La validacion SI se filtra: «incorrecta» en esa casilla es la busqueda
+       que Bodega va a querer hacer. Va sobre r.validacion, como el resto. */
+    +`<th><input placeholder="Filtrar…" autocomplete="off" data-k="validacion" oninput="onSolFilter('validacion',this.value)" onkeydown="onSolFilterKey(event)" value="${attr(SOL_COLF['validacion'])}"></th>`
+    +`<th></th><th></th></tr>`;
   head.dataset.listo='1';
+}
+/* La pastilla de la columna «Validación». El detalle va en el title: el grid
+   no tiene lugar para «2 de 4 bandejas validadas — 1 correcta, 1 incorrecta,
+   2 sin fotos», y esa es justo la frase que hace falta cuando algo no cuadra.
+   En un borrador no se pinta nada: todavia no hay nada que validar. */
+const SOL_VAL_CLS={'Correcta':'ok','Incorrecta':'no','Sin determinar':'duda',
+                   'Falta validar':'duda','Sin validar':'gris'};
+/* Rotulo corto para la columna. El largo -el que manda la API- va en el
+   title, junto al desglose. Sin emoji y con «Pendiente» en vez de «Falta
+   validar», la columna entra sin empujar el grid fuera del ancho: con el
+   rotulo largo la tabla pasaba de 1148 a 1267 px y aparecia barra horizontal
+   hasta en pantallas de 1600. El color ya dice el estado. */
+const SOL_VAL_TXT={'Falta validar':'Pendiente'};
+function solPillValidacion(r){
+  if(SOL_CEJILLA==='Borrador' || !r.bandejas) return '<span style="color:var(--muted)">—</span>';
+  const e=r.validacion||'Sin validar';
+  return `<span class="vb-pill ${SOL_VAL_CLS[e]||'gris'}" title="${attr((r.validacion_detalle||'')+' ('+e+')')}">`
+    + `${esc(SOL_VAL_TXT[e]||e)}</span>`;
 }
 function renderSolicitudes(){ renderSolHead(); renderSolBody(); }
 function renderSolBody(){
@@ -6347,7 +6375,7 @@ function renderSolBody(){
   foot.textContent = (rows.length===enCejilla.length)
     ? enCejilla.length+(enCejilla.length===1?' solicitud':' solicitudes')
     : rows.length+' de '+enCejilla.length+' solicitudes';
-  if(!rows.length){ b.innerHTML=`<tr class="aviso"><td colspan="${SOL_COLS.length+3}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  if(!rows.length){ b.innerHTML=`<tr class="aviso"><td colspan="${SOL_COLS.length+4}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
   const editable = SOL_CEJILLA==='Borrador' && canSubir();
   rows.forEach(r=>{
     /* Cada celda lleva su clase de area y su data-label: en escritorio los dos
@@ -6370,6 +6398,7 @@ function renderSolBody(){
     }).join('');
     const tr=document.createElement('tr');
     tr.innerHTML=tds+`<td class="sg-band" data-label="Bandejas">${r.bandejas}</td>`
+      +`<td class="sg-val" data-label="Validación">${solPillValidacion(r)}</td>`
       +`<td class="sg-pct" data-label="% Alisto">${SOL_CEJILLA==='Borrador' ? '<span style="color:var(--muted)">—</span>' : pctBarra(r.porcentaje)}</td>`
       +`<td class="sg-acc cards-acciones" style="white-space:nowrap">`
       +`<button class="icon-btn" onclick="abrirSolicitud(${r.id})">${editable?'✏️ Editar':'👁️ Ver'}</button>`

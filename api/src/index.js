@@ -1588,6 +1588,66 @@ const SOL_SELECT = `SELECT s.Id AS id, s.Codigo AS codigo, s.Estado AS estado,
        to_char(s.FechaActualizacion, 'YYYY-MM-DD HH24:MI') AS fecha_actualizacion
   FROM dbo.SolicitudEquipo s`;
 
+/* Como va la validacion de bandejas de cada solicitud, para el listado.
+   Cuenta bandejas, cuales tienen foto y como salio cada veredicto VIGENTE
+   -uno cuya firma ya no calza con las fotos de ahora no cuenta como
+   validado, igual que en la pantalla de la bandeja-. */
+const SQL_VALIDACION = `
+  WITH b AS (
+    SELECT d.SolicitudId AS sid,
+           (SELECT COUNT(*) FROM dbo.SolicitudFoto f
+             WHERE f.SolicitudId = d.SolicitudId
+               AND UPPER(TRIM(f.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo))) AS nfotos,
+           v.Resultado AS res,
+           (v.FotosFirma IS NOT NULL AND v.FotosFirma IS DISTINCT FROM
+             (SELECT md5(string_agg(f.Id::text, ',' ORDER BY f.Id))
+                FROM dbo.SolicitudFoto f
+               WHERE f.SolicitudId = d.SolicitudId
+                 AND UPPER(TRIM(f.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo)))) AS viejo
+      FROM dbo.SolicitudEquipoDetalle d
+      LEFT JOIN dbo.SolicitudVerificacion v
+        ON v.SolicitudId = d.SolicitudId
+       AND UPPER(TRIM(v.EquipoCodigo)) = UPPER(TRIM(d.EquipoCodigo))
+     WHERE d.SolicitudId = ANY($1::int[])
+  )
+  SELECT sid AS id,
+         COUNT(*)::int                                                        AS bandejas,
+         COUNT(*) FILTER (WHERE nfotos > 0)::int                              AS con_fotos,
+         COUNT(*) FILTER (WHERE res IS NOT NULL AND NOT viejo)::int           AS validadas,
+         COUNT(*) FILTER (WHERE res = 'Correcta' AND NOT viejo)::int          AS correctas,
+         COUNT(*) FILTER (WHERE res = 'Incorrecta' AND NOT viejo)::int        AS incorrectas,
+         COUNT(*) FILTER (WHERE res = 'No puedo determinarlo' AND NOT viejo)::int AS dudosas
+    FROM b GROUP BY sid`;
+
+/* De los conteos al rotulo de la columna. El orden de las preguntas es el
+   orden de importancia: lo que hay que atender primero, primero.
+   Se calcula en la API y no en la pantalla para que el imprimible, un correo
+   o cualquier otro consumidor digan exactamente lo mismo. */
+function estadoValidacion(c) {
+  if (!c || !c.bandejas) return { estado: 'Sin validar', detalle: 'La solicitud no tiene bandejas.' };
+  const partes = [];
+  if (c.correctas)   partes.push(c.correctas + (c.correctas === 1 ? ' correcta' : ' correctas'));
+  if (c.incorrectas) partes.push(c.incorrectas + (c.incorrectas === 1 ? ' incorrecta' : ' incorrectas'));
+  if (c.dudosas)     partes.push(c.dudosas + ' sin determinar');
+  const sinFoto = c.bandejas - c.con_fotos;
+  if (sinFoto)       partes.push(sinFoto + (sinFoto === 1 ? ' sin fotos' : ' sin fotos'));
+  /* Con fotos pero sin veredicto vigente: se subieron y no se valido, o se
+     valido y despues cambiaron las fotos. */
+  const pendientes = c.con_fotos - c.validadas;
+  if (pendientes)    partes.push(pendientes + (pendientes === 1 ? ' sin validar' : ' sin validar'));
+
+  const detalle = c.validadas + ' de ' + c.bandejas + (c.bandejas === 1 ? ' bandeja validada' : ' bandejas validadas')
+    + (partes.length ? ' — ' + partes.join(', ') : '') + '.';
+
+  let estado;
+  if (c.incorrectas)                 estado = 'Incorrecta';
+  else if (!c.con_fotos)             estado = 'Sin validar';
+  else if (pendientes || sinFoto)    estado = 'Falta validar';
+  else if (c.dudosas)                estado = 'Sin determinar';
+  else                               estado = 'Correcta';
+  return { estado, detalle, ...c };
+}
+
 /* GET /api/solicitudes?estado=Borrador -> listado de una cejilla. */
 app.http('solicitudes-list', {
   methods: ['GET'], authLevel: 'anonymous', route: 'solicitudes',
@@ -1605,7 +1665,7 @@ app.http('solicitudes-list', {
       /* Cuantas bandejas lleva cada una, para mostrarlo en el grid sin
          pedir el detalle de cada fila. */
       const ids = r.rows.map((x) => x.id);
-      let conteo = {}, avance = {};
+      let conteo = {}, avance = {}, valid = {};
       if (ids.length) {
         const c = await query(
           `SELECT SolicitudId AS id, COUNT(*)::int AS n FROM dbo.SolicitudEquipoDetalle
@@ -1613,12 +1673,16 @@ app.http('solicitudes-list', {
         c.rows.forEach((x) => { conteo[x.id] = x.n; });
         const a = await query(SQL_AVANCE, [ids]);
         a.rows.forEach((x) => { avance[x.id] = x; });
+        const vv = await query(SQL_VALIDACION, [ids]);
+        vv.rows.forEach((x) => { valid[x.id] = x; });
       }
       return json(200, r.rows.map((x) => {
         const av = avance[x.id] || { total: 0, alistados: 0 };
+        const vd = estadoValidacion(valid[x.id]);
         return { ...x, bandejas: conteo[x.id] || 0,
                  articulos: av.total, alistados: av.alistados,
-                 porcentaje: pct(av.alistados, av.total) };
+                 porcentaje: pct(av.alistados, av.total),
+                 validacion: vd.estado, validacion_detalle: vd.detalle };
       }));
     } catch (e) {
       context.error(e);
