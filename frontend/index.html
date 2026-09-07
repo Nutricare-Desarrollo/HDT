@@ -454,6 +454,14 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .step{flex:1;text-align:center;padding:10px;border-radius:9px;background:#fff;border:1px solid var(--line);color:var(--muted);font-weight:600;font-size:13px}
 .step.active{background:var(--brand);color:#fff;border-color:var(--brand)}
 .step.done{background:#d9f2e4;color:#12724a;border-color:#bfe6d0}
+/* Los dos botones de «tomar foto» / «elegir de la galería». El input de
+   archivo queda escondido detrás de su <label for>: el nativo no se puede
+   rotular y ademas se ve distinto en cada navegador. */
+.dos-vias{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:4px 0 2px}
+.dos-vias label{cursor:pointer;display:inline-flex;align-items:center;gap:7px;margin:0}
+.dos-vias + input[type=file], .dos-vias ~ input[type=file]{
+  position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0 0 0 0);
+}
 .drop{border:2px dashed var(--line);border-radius:12px;padding:28px 18px;text-align:center;background:#fff}
 .drop .big{font-size:40px}
 .preview{max-width:100%;max-height:340px;border-radius:10px;border:1px solid var(--line);margin-top:12px}
@@ -993,13 +1001,20 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div class="drop">
           <div class="big">📷</div>
           <p>Tomá una foto de la hoja de consumo o seleccioná una imagen.</p>
-          <!-- SIN capture="environment". Ese atributo obliga al celular a abrir
-               la camara y NO deja llegar a la galeria, que es justo lo que el
-               renglon de arriba ofrece. Ademas no impide nada: quien quiera
-               subir una foto vieja la vuelve a fotografiar de la pantalla. El
-               caso legitimo que bloqueaba es el normal: la hoja ya venia
-               fotografiada, o la mando el hospital por otro medio. -->
-          <input type="file" id="fileInput" accept="image/*" onchange="onFile(this)" style="max-width:320px;margin:0 auto">
+          <!-- DOS entradas, no una.
+               Con capture="environment" el celular abre la camara y no deja
+               llegar al carrete. Sin capture, en varios Android el selector
+               deja de ofrecer la camara. Un solo input no puede garantizar las
+               dos cosas: depende del fabricante y de la version, y las dos
+               fallas se vieron en el mismo telefono. Con un boton para cada
+               una no hay nada que adivinar.
+               Las dos llaman a onFile(): de ahi para abajo no cambia nada. -->
+          <div class="dos-vias">
+            <label class="btn-primary" for="fileInput">📷 Tomar foto</label>
+            <label class="btn-ghost" for="fileGaleria">🖼️ Elegir de la galería</label>
+          </div>
+          <input type="file" id="fileInput"   accept="image/*" capture="environment" onchange="onFile(this)">
+          <input type="file" id="fileGaleria" accept="image/*" onchange="onFile(this)">
           <div id="prevWrap"></div>
         </div>
         <div class="foot">
@@ -3628,9 +3643,17 @@ function sellRender(){
     if(lleno){
       html+=`<div style="font-size:13.5px">Ya hay ${n} fotos, el máximo permitido. Elimine alguna si necesita subir otra.</div>`;
     }else{
-      /* Sin capture, por lo mismo que el del wizard, y ademas porque aca
-         peleaba con `multiple`: con la camara abierta se toma UNA foto por
-         vez, y el renglon de abajo promete seleccionar varias de una. */
+      /* Dos entradas, igual que el wizard. La de la camara NO lleva
+         `multiple` -la camara toma de a una y ponerselo no cambia eso-, y la
+         de la galeria si, que es donde el texto de abajo promete varias.
+         Ojo con el accept de la galeria: la lista de MIME es a proposito, para
+         no aceptar HEIC ni PDF; la de la camara usa image/* porque ahi el
+         tipo lo decide el telefono. */
+      html+='<div class="dos-vias">'
+          + '<label class="btn-primary" for="sellCamara">📷 Tomar foto</label>'
+          + '<label class="btn-ghost" for="sellInput">🖼️ Elegir de la galería</label>'
+          + '</div>';
+      html+=`<input type="file" id="sellCamara" accept="image/*" capture="environment" onchange="sellSubir(this)">`;
       html+=`<input type="file" id="sellInput" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" multiple onchange="sellSubir(this)">`;
       html+=`<p class="hint">Solo imágenes. Puede seleccionar varias a la vez si la hoja de consumo ocupó más de una página. `
           + `Se reducen automáticamente antes de subir. ${n} de ${SELL_CTX.maximo} usadas.</p>`;
@@ -4214,7 +4237,10 @@ function openWizard(){
   document.getElementById('enviarBtn').classList.add('hidden');    // en creación solo se Guarda; Enviar es al completar la reposición
   document.getElementById('guardarBtn').classList.remove('hidden');
   document.getElementById('sinFotoBtn').classList.add('hidden');
+  /* Los DOS: si el input queda con valor, volver a elegir el MISMO archivo
+     no dispara change y la pantalla se queda muda. */
   document.getElementById('fileInput').value='';
+  document.getElementById('fileGaleria').value='';
   document.getElementById('prevWrap').innerHTML='';
   document.getElementById('analizarBtn').disabled=true;
   setStep(1);
