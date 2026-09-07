@@ -1261,6 +1261,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div class="grid-foot" id="solDetFoot"></div>
       </div>
       <div class="sol-acciones" id="solAcciones">
+        <span class="sol-despacho-nota hidden" id="solAvisoGuardar">Guarde el borrador y después podrá enviarlo.</span>
         <button class="btn-ghost" id="solGuardarBtn" onclick="guardarSolicitud(false)">💾 Guardar borrador</button>
         <button class="btn-primary" id="solEnviarBtn" onclick="guardarSolicitud(true)">📤 Enviar solicitud</button>
       </div>
@@ -6082,7 +6083,8 @@ function cbField(id, valor, opts){
   const dis=o.disabled?' disabled':'';
   const inp=`<input id="${id}" class="cb-input" type="text" autocomplete="off" role="combobox"`
     + ` placeholder="${attr(cfg.ph)}" value="${attr(valor)}" data-val="${attr(o.val!=null?o.val:valor)}"`
-    + ` oninput="cbAbrir('${id}')" onfocus="cbAbrir('${id}',true)" onkeydown="cbTecla(event,'${id}')" onblur="cbBlur('${id}')"${dis}>`;
+    + ` oninput="cbAbrir('${id}')" onfocus="cbAbrir('${id}',true)" onclick="cbClic('${id}')"`
+    + ` onkeydown="cbTecla(event,'${id}')" onblur="cbBlur('${id}')"${dis}>`;
   if(o.cat && !o.disabled){
     return `<div class="field-row">${inp}`
       + `<button type="button" class="btn-add" title="Agregar, corregir o desactivar ${attr(o.catEtiq||'')}" onclick="openCat('${o.cat}','${id}')">+</button></div>`;
@@ -6146,6 +6148,11 @@ function cbAbrir(id, todo){
   box.classList.remove('hidden');
 }
 function cbCerrar(){ if(CB_BOX) CB_BOX.classList.add('hidden'); CB_ACT=null; CB_IDX=-1; }
+/* Un clic sobre el campo YA enfocado no dispara focus. Sin esto, despues de
+   cerrar con Escape o de elegir una opcion no habia forma de volver a ver la
+   lista sin salir del campo y entrar de nuevo. Si el panel de ESTE campo ya
+   esta abierto no se toca: el clic ahi es para mover el cursor. */
+function cbClic(id){ if(!CB_ACT || CB_ACT.id!==id) cbAbrir(id, true); }
 function cbElegir(i){
   if(!CB_ACT) return;
   const x=CB_ACT.lista[i], el=document.getElementById(CB_ACT.id);
@@ -6176,12 +6183,18 @@ function cbTecla(e,id){
 function cbBlur(id){
   setTimeout(()=>{
     const el=document.getElementById(id); if(!el) return;
+    /* Cerrar SOLO si el panel sigue siendo el de este campo. Sin esta guarda,
+       pasar de Hospital a Cirujano dejaba al segundo enfocado y sin lista: su
+       cbAbrir() corria primero y este cierre diferido -120 ms despues- lo
+       apagaba. Reaparecia al escribir porque escribir vuelve a abrir, que es
+       justo el «a veces hay que escribir algo para que muestre». */
+    const mio = !CB_ACT || CB_ACT.id===id;
     const txt=String(el.value||'').trim();
-    if(!txt){ el.dataset.val=''; el.classList.remove('invalid'); cbCerrar(); return; }
+    if(!txt){ el.dataset.val=''; el.classList.remove('invalid'); if(mio) cbCerrar(); return; }
     const v=cbValor(id);
     el.classList.toggle('invalid', !v);
     if(v){ const hit=SOL_COMBOS[id].items().find(x=>String(x.val)===String(v)); if(hit) el.value=hit.lab; }
-    cbCerrar();
+    if(mio) cbCerrar();
   }, 120);
 }
 window.addEventListener('scroll', ()=>{ if(CB_ACT) cbCerrar(); }, true);
@@ -6469,6 +6482,19 @@ function renderSolicitudDet(){
     : '';
   document.getElementById('solAddBox').classList.toggle('hidden', !ed);
   document.getElementById('solAcciones').classList.toggle('hidden', !ed);
+  /* Enviar solo despues de guardar. Antes el boton mandaba una solicitud que
+     todavia no existia: creaba y enviaba en un solo viaje, y si la API
+     rechazaba el envio el usuario se quedaba mirando un formulario que no
+     sabia si estaba guardado. Con el borrador ya creado, un envio rechazado
+     no pierde nada. */
+  const env=document.getElementById('solEnviarBtn');
+  if(env){
+    env.disabled = !s.id;
+    env.title = s.id ? 'Enviar la solicitud a Bodega'
+                     : 'Guarde el borrador antes de enviarlo';
+  }
+  const av=document.getElementById('solAvisoGuardar');
+  if(av) av.classList.toggle('hidden', !!s.id || !ed);
   /* Imprimir solo lo que ya existe en la base: un borrador sin guardar no
      tiene consecutivo, y un papel con el codigo en blanco no sirve. */
   document.getElementById('solPrintBtn').classList.toggle('hidden', !s.id);
@@ -6669,7 +6695,7 @@ function renderSolDetalle(){
     ? (lista.length===1?'1 bandeja':lista.length+' bandejas') : '';
   lista.forEach((d,i)=>{
     const tr=document.createElement('tr');
-    let fila=`<td class="sd-cod cards-titulo">${esc(d.demarcado||d.equipo_codigo)}</td>`
+    let fila=`<td class="sd-cod cards-titulo">${esc(d.demarcado||d.equipo_codigo||d.codigo)}</td>`
       +`<td class="sd-color" data-label="Color">${esc(d.color)}</td>`
       +`<td class="sd-desc sol-desc" data-label="Descripción" title="${attr(d.descripcion)}">${esc(d.descripcion)}</td>`;
     /* Sin esto el navegador ordena las celdas por su posicion en la fila y el
@@ -7634,8 +7660,11 @@ function solLeerForm(){
     fecha_entrega: v('sol_fecha_entrega'),
     hora_entrega: v('sol_hora_entrega'),
     observaciones: v('sol_observaciones'),
-    detalle: (SOL_ACT.detalle||[]).map(d=>({equipo_codigo:d.equipo_codigo, demarcado:d.demarcado,
-                                            descripcion:d.descripcion, color:d.color}))
+    /* Se acepta `equipo_codigo` o `codigo`: si la linea llega sin codigo la
+       API la descarta en silencio, y ahi se perdian las bandejas. */
+    detalle: (SOL_ACT.detalle||[]).map(d=>({
+      equipo_codigo: d.equipo_codigo!=null ? d.equipo_codigo : d.codigo,
+      demarcado:d.demarcado, descripcion:d.descripcion, color:d.color}))
   };
 }
 /* Las mismas reglas que la API, para avisar sin gastar el viaje. La API las
@@ -7668,6 +7697,10 @@ async function guardarSolicitud(enviar){
     const errs=solValidarEnvio(cuerpo);
     if(errs.length){ toast(errs[0]); return; }
   }
+  /* Enviar exige que el borrador ya exista. El boton esta deshabilitado en
+     ese caso, asi que esto es el cinturon: si se llega igual, se avisa en vez
+     de crear y enviar de un saque. */
+  if(enviar && !SOL_ACT.id){ toast('Guarde el borrador antes de enviarlo'); return; }
   const btn=document.getElementById(enviar?'solEnviarBtn':'solGuardarBtn');
   btn.disabled=true;
   try{

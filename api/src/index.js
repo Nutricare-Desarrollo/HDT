@@ -1676,6 +1676,21 @@ async function leerEncabezado(body) {
   };
 }
 
+/* El detalle tal como lo lee TODA la aplicacion: con `equipo_codigo`.
+   Existe porque POST y PUT devolvian el detalle recien normalizado, que usa
+   `codigo`, y la pantalla se lo guardaba en SOL_ACT.detalle: el guardado
+   siguiente mandaba equipo_codigo: undefined y la API descartaba las lineas
+   por venir sin codigo. Releer de la base cuesta una consulta y ademas
+   devuelve el color que resolvio el COALESCE contra cat.Equipo, que el objeto
+   normalizado no tenia. */
+async function detalleDeSolicitud(id) {
+  const d = await query(
+    `SELECT EquipoCodigo AS equipo_codigo, Demarcado AS demarcado, Descripcion AS descripcion,
+            Color AS color
+       FROM dbo.SolicitudEquipoDetalle WHERE SolicitudId = $1 ORDER BY Id`, [id]);
+  return d.rows;
+}
+
 /* Reescribe el detalle completo dentro de la transaccion abierta. */
 async function guardarDetalle(client, id, detalle) {
   await client.query(`DELETE FROM dbo.SolicitudEquipoDetalle WHERE SolicitudId = $1`, [id]);
@@ -1727,7 +1742,7 @@ app.http('solicitud-create', {
       await guardarDetalle(client, id, detalle);
       await client.query('COMMIT');
       const out = await query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
-      return json(201, { ...out.rows[0], bandejas: detalle.length, detalle });
+      return json(201, { ...out.rows[0], bandejas: detalle.length, detalle: await detalleDeSolicitud(id) });
     } catch (e) {
       await client.query('ROLLBACK').catch(() => {});
       context.error(e);
@@ -1771,7 +1786,7 @@ app.http('solicitud-update', {
       await guardarDetalle(client, id, detalle);
       await client.query('COMMIT');
       const out = await query(`${SOL_SELECT} WHERE s.Id = $1`, [id]);
-      return json(200, { ...out.rows[0], bandejas: detalle.length, detalle });
+      return json(200, { ...out.rows[0], bandejas: detalle.length, detalle: await detalleDeSolicitud(id) });
     } catch (e) {
       await client.query('ROLLBACK').catch(() => {});
       context.error(e);
