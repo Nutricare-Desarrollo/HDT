@@ -3190,44 +3190,56 @@ function imprimirDoc(enc, filas){
   }
   const doc=`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Hoja de consumo ${esc(enc.numero_hoja||'')}</title>
 <style>
+/* TAMANOS EN PUNTOS, NO EN PIXELES. Esto se imprime, y el punto es una unidad
+   fisica -1pt = 1/72 pulgada- mientras el pixel CSS depende de una equivalencia
+   de 96dpi que el navegador puede no respetar al armar la pagina. De paso, es la
+   unidad en la que se habla de una hoja impresa: lo que antes era «10px» era en
+   realidad 7.5pt, mas chico que cualquier formulario.
+
+   SE LE SUMARON 2pt A CADA TAMANO, tal cual se pidio: 7.5 -> 9.5, 8.25 -> 10.25,
+   6.75 -> 8.75. Y las cajas que contienen texto crecieron en la misma
+   proporcion -las filas del detalle, observaciones y las firmas-, porque si no
+   el texto mas grande queda apretado contra el borde.
+   El recuadro del logo NO crecio: esta vacio, y agrandarlo solo le robaria
+   altura a la tabla del detalle, que es lo unico que se lee. */
 @page{size:A4 portrait;margin:9mm}
 *{box-sizing:border-box}
-body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:11px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:10.25pt;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 table{border-collapse:collapse}
 .sheet>*{margin-bottom:6px}
 .sheet>*:last-child{margin-bottom:0}
 .top{display:flex;align-items:center}
 .top .logo{flex:0 0 55%;height:90px;border:1.5px solid #000;border-radius:8px}
 .top .brand{flex:1;text-align:right;padding:0 10px}
-.top .brand .nut{font-family:Georgia,'Times New Roman',serif;font-style:italic;font-weight:bold;font-size:38px;line-height:1}
-.top .brand .htr{display:block;font-weight:bold;font-size:11px;letter-spacing:.5px;margin-top:4px}
+.top .brand .nut{font-family:Georgia,'Times New Roman',serif;font-style:italic;font-weight:bold;font-size:30.5pt;line-height:1}
+.top .brand .htr{display:block;font-weight:bold;font-size:10.25pt;letter-spacing:.5px;margin-top:4px}
 .infowrap,.nameswrap{border:1.5px solid #000;border-radius:8px;overflow:hidden}
 .detwrap{border-radius:8px;overflow:hidden}
 .info{width:100%;table-layout:fixed}
-.info td{border-right:1px solid #000;padding:5px 7px;font-size:11px}
+.info td{border-right:1px solid #000;padding:5px 7px;font-size:10.25pt}
 .info td:last-child{border-right:0}
 .info .lbl{background:#cfcfcf;font-weight:bold;text-align:center}
 .info .doc{background:#cfcfcf;font-weight:bold;text-align:center;letter-spacing:.5px}
 .info .datewrap{padding:0}
 .dt{width:100%;table-layout:fixed}
-.dt td{border:0;border-left:1px solid #000;text-align:center;padding:2px 0;font-size:9px}
+.dt td{border:0;border-left:1px solid #000;text-align:center;padding:2px 0;font-size:8.75pt}
 .dt td:first-child{border-left:0}
 .dt tr:first-child td{font-weight:bold;border-bottom:1px solid #000}
-.dt tr:last-child td{height:22px;font-size:13px}
+.dt tr:last-child td{height:21pt;font-size:11.75pt}
 .names{width:100%}
-.names td{padding:5px 8px;border-bottom:1px solid #000;font-size:11px}
+.names td{padding:5px 8px;border-bottom:1px solid #000;font-size:10.25pt}
 .names tr:last-child td{border-bottom:0}
 .det{width:100%;table-layout:fixed}
-.det th{background:#000;color:#fff;font-size:9.5px;font-weight:bold;text-align:center;padding:5px 3px;border:1px solid #000;border-left-color:#fff;border-right-color:#fff;line-height:1.1}
-.det td{border:1px solid #000;height:18px;padding:1px 4px;font-size:10px}
+.det th{background:#000;color:#fff;font-size:9pt;font-weight:bold;text-align:center;padding:5px 3px;border:1px solid #000;border-left-color:#fff;border-right-color:#fff;line-height:1.1}
+.det td{border:1px solid #000;height:17pt;padding:1.5pt 4px;font-size:9.5pt}
 .det .cod{width:13%}
 .det .eq{width:15%;text-align:center}
 .det .ds{width:47%}
 .det .un{width:9%;text-align:center}
 .det .rp{width:16%;text-align:center}
-.obs{border:1.5px solid #000;border-radius:8px;height:66px;padding:4px 8px;font-size:9px;font-weight:bold}
+.obs{border:1.5px solid #000;border-radius:8px;height:62pt;padding:4px 8px;font-size:8.75pt;font-weight:bold}
 .firmas{display:flex;gap:10px}
-.firmas .f{flex:1;border:1.5px solid #000;border-radius:8px;height:56px;padding:3px 8px;font-size:9px;font-weight:bold}
+.firmas .f{flex:1;border:1.5px solid #000;border-radius:8px;height:53pt;padding:3px 8px;font-size:8.75pt;font-weight:bold}
 </style></head><body>
 <div class="sheet">
   <div class="top">
