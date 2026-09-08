@@ -7082,9 +7082,24 @@ function valZonaSubida(){
   }
   const n=(VAL.fotos||[]).length, lleno=n>=VAL.maximo;
   if(lleno) return `<div class="vb-vacio">Ya hay ${n} fotos, el máximo por bandeja. Elimine alguna si necesita subir otra.</div>`;
-  /* Mismo patron que las otras subidas de la app: el input nativo, sin label
-     encima. En celular es el que abre la camara o el carrete. */
+  /* DOS entradas, no una: la misma razon que en el wizard y en las fotos de la
+     hoja sellada. Con capture="environment" el celular abre la camara y no deja
+     llegar al carrete; sin capture, en varios Android el selector deja de
+     ofrecer la camara. Cual de las dos cosas pasa lo decide el fabricante y la
+     version -las dos fallas se vieron en el mismo telefono-, asi que con un
+     boton para cada una no hay nada que adivinar.
+     La de la camara NO lleva `multiple` -la camara toma de a una y ponerselo no
+     cambia eso-, y la de la galeria si, que es donde el texto de abajo promete
+     varias. El accept de la galeria es la lista de MIME a proposito, para no
+     aceptar HEIC ni PDF; la de la camara usa image/* porque ahi el tipo lo
+     decide el telefono.
+     Las dos llaman a valSubir(): de ahi para abajo no cambia nada. */
   return `<div class="sell-drop">
+      <div class="dos-vias">
+        <label class="btn-primary" for="valCamara">📷 Tomar foto</label>
+        <label class="btn-ghost" for="valInput">🖼️ Elegir de la galería</label>
+      </div>
+      <input type="file" id="valCamara" accept="image/*" capture="environment" onchange="valSubir(this)">
       <input type="file" id="valInput" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" multiple onchange="valSubir(this)">
       <p class="hint">Una foto por recipiente, <b>con las etiquetas visibles</b>: el sistema compara el texto
         impreso, no la forma. Se reducen automáticamente antes de subir y se leen al momento.
@@ -7167,7 +7182,12 @@ async function valSubir(input){
   const libres=VAL.maximo-(VAL.fotos||[]).length;
   const lote=files.slice(0, Math.max(0, libres));
   if(files.length>lote.length) toast('Solo se subirán '+lote.length+' de '+files.length+': el máximo por bandeja es '+VAL.maximo+'.');
-  input.disabled=true;
+  /* Se bloquean LAS DOS entradas, no solo la que se uso: `libres` se calculo
+     con las fotos que hay ahora y VAL.fotos no se actualiza hasta valRecargar().
+     Dejar la otra viva permitiria arrancar una segunda subida con el mismo cupo
+     y pasarse del maximo. Al recargar se vuelven a dibujar habilitadas. */
+  const entradas=['valCamara','valInput'].map(id=>document.getElementById(id)).filter(Boolean);
+  entradas.forEach(el=>{ el.disabled=true; });
   let ok=0, sinTexto=0; const errores=[];
   for(let i=0;i<lote.length;i++){
     const f=lote[i];
@@ -7180,7 +7200,8 @@ async function valSubir(input){
       ok++; if(r && !r.leida) sinTexto++;
     }catch(e){ errores.push(f.name+': '+e.message); }
   }
-  input.disabled=false; if(prog) prog.textContent='';
+  entradas.forEach(el=>{ el.disabled=false; el.value=''; });
+  if(prog) prog.textContent='';
   if(ok) toast(ok===1?'Foto subida':(ok+' fotos subidas'));
   if(sinTexto) toast(sinTexto===1
     ? 'Una foto quedó sin texto leído: no va a contar para la comparación.'
