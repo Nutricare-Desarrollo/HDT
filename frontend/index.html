@@ -134,14 +134,17 @@ tbody tr:hover{background:#f5fafc}
    Solo de 641px para arriba: abajo de eso las tablas se vuelven tarjetas
    (el @media de .cards) y ahi no hay columna que anclar. */
 @media(min-width:641px){
-  #grid thead th:last-child,#pendGrid thead th:last-child{position:sticky;right:0;z-index:3}
+  #grid thead th:last-child,#pendGrid thead th:last-child,
+  #simaGrid thead th:last-child{position:sticky;right:0;z-index:3}
   #grid tbody tr:not(.aviso) td:last-child,
-  #pendGrid tbody tr:not(.aviso) td:last-child{
+  #pendGrid tbody tr:not(.aviso) td:last-child,
+  #simaGrid tbody tr:not(.aviso) td:last-child{
     position:sticky;right:0;background:#fff;
     box-shadow:-7px 0 7px -7px rgba(0,0,0,.22);
   }
   #grid tbody tr:not(.aviso):hover td:last-child,
-  #pendGrid tbody tr:not(.aviso):hover td:last-child{background:#f5fafc}
+  #pendGrid tbody tr:not(.aviso):hover td:last-child,
+  #simaGrid tbody tr:not(.aviso):hover td:last-child{background:#f5fafc}
 }
 .tag{background:#e8f4fb;color:var(--brand-d);padding:3px 9px;border-radius:20px;font-size:12px;font-weight:600}
 /* Numero de linea del detalle: es el mismo que muestran "Diferencias" e
@@ -307,6 +310,15 @@ thead tr.filter-row input{padding:6px 8px;font-size:12.5px;border-radius:5px;bor
 .cat-fhint{margin:8px 0 0;font-size:12.5px;line-height:1.4;color:var(--muted)}
 .cat-fhint.warn{color:#8c5c05}
 .cat-ferr{margin:6px 0 0;font-size:13px;color:var(--danger)}
+/* Los dos datos de Nutricare en el modal de Sima: se ven, no se editan. */
+.sima-ro{background:#f6fafc;border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+.sima-ro>div{margin-bottom:7px;font-size:13.5px;line-height:1.4}
+.sima-ro>div:last-child{margin-bottom:0}
+.sima-ro .k{display:block;font-size:11.5px;letter-spacing:.04em;color:var(--muted);font-weight:700;text-transform:uppercase}
+.sima-ro .nota{font-size:12.5px;color:var(--muted)}
+/* Precio a la derecha, como cualquier numero. */
+#simaGrid td.sima-num,#simaGrid th.sima-num{text-align:right}
+#simaGrid td.sima-desc{max-width:170px;overflow:hidden;text-overflow:ellipsis}
 .cat-list{max-height:44vh;overflow:auto;border:1px solid var(--line);border-radius:10px}
 .cat-list table{white-space:normal}
 .cat-list thead th{font-size:12px}
@@ -1287,6 +1299,22 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       </div>
     </section>
 
+    <!-- CODIGO SIMA — el catalogo de productos con sus campos Sima (Bodega / Admin) -->
+    <section id="viewSima" class="hidden">
+      <div class="page-head">
+        <div><h2>Código Sima</h2><div class="sub" id="simaSub">Códigos, descripción y precio Sima de cada producto</div></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <button class="btn-ghost" onclick="loadSima()">🔄 Actualizar</button>
+          <button class="btn-primary" onclick="abrirSimaExcel()">📄 Subir Excel</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap"><table id="simaGrid" class="cards dos"><thead id="simaHead"></thead><tbody id="simaBody"></tbody></table></div>
+        <div id="simaEmpty" class="empty hidden"><div class="big">🏷️</div><div>No hay productos en el catálogo.</div></div>
+        <div class="grid-foot" id="simaFoot"></div>
+      </div>
+    </section>
+
     <!-- SOLICITUD DE EQUIPO — listado por cejilla (Hospital / Administrador) -->
     <section id="viewSolicitudes" class="hidden">
       <div class="page-head">
@@ -1809,6 +1837,68 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
     <div class="modal-head"><h3>Cirugía</h3><button class="x" onclick="closeCirDet()">×</button></div>
     <div class="modal-body" id="cirDetBody"></div>
     <div class="modal-foot" id="cirDetFoot"></div>
+  </div>
+</div>
+
+<!-- MODAL editar los campos Sima de UN producto.
+     El codigo y la descripcion de Nutricare van de solo lectura a proposito:
+     vienen del catalogo externo y esta pantalla no los puede cambiar. -->
+<div id="simaModal" class="overlay hidden">
+  <div class="modal">
+    <div class="modal-head"><h3 id="simaModalTitle">Códigos Sima del producto</h3><button class="x" onclick="closeSima()">×</button></div>
+    <div class="modal-body">
+      <div class="sima-ro">
+        <div><span class="k">Código Nutricare</span><b id="sima_prod_cod">—</b></div>
+        <div><span class="k">Descripción Nutricare</span><span id="sima_prod_desc">—</span></div>
+        <div class="nota">Estos dos vienen del catálogo de productos y no se editan acá.</div>
+      </div>
+      <div class="cfg-grid" style="margin-top:14px">
+        <div class="field"><label>Código Sima</label><input id="sima_codigo" type="text" maxlength="60" autocomplete="off"></div>
+        <div class="field"><label>Línea</label><input id="sima_linea" type="text" maxlength="30" autocomplete="off"></div>
+        <div class="field full"><label>Descripción Sima</label><textarea id="sima_descripcion" rows="3" maxlength="600"></textarea></div>
+        <div class="field full"><label>Partida</label><input id="sima_partida" type="text" maxlength="300" autocomplete="off"></div>
+        <div class="field full"><label>Renglón</label><input id="sima_renglon" type="text" maxlength="300" autocomplete="off"></div>
+        <div class="field"><label>Precio</label><input id="sima_precio" type="text" maxlength="24" autocomplete="off" placeholder="Ej. 234.468571"></div>
+      </div>
+      <p class="cat-fhint">Los seis campos son opcionales. <b>Dejar uno vacío lo borra</b> — si no
+        querés tocar un campo, no lo cambiés. Para cargar muchos a la vez usá <b>Subir Excel</b>,
+        que sí respeta los vacíos.</p>
+      <div id="simaErr" class="cat-ferr"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="closeSima()">Cancelar</button>
+      <button class="btn-primary" id="simaSaveBtn" onclick="guardarSima()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL subir Excel de codigos Sima -->
+<div id="simaXlsModal" class="overlay hidden">
+  <div class="modal">
+    <div class="modal-head"><h3>Subir Excel · Códigos Sima</h3><button class="x" onclick="closeSimaExcel()">×</button></div>
+    <div class="modal-body">
+      <p style="margin-top:0">El archivo debe tener los <b>mismos encabezados de columna</b> que la
+        plantilla (primera fila). Las columnas que no coincidan se ignoran.</p>
+      <p>La única obligatoria es <b>Código Nutricare</b>: es con la que se busca el producto. Los
+        seis campos Sima son <b>opcionales</b>.</p>
+      <p><b>El código de Nutricare y su descripción no se pueden cambiar desde el archivo.</b> El
+        código solo se usa para encontrar el producto y la descripción se ignora por completo, así
+        que editarlas en el Excel no tiene ningún efecto. Si el código <b>no está en el catálogo</b>,
+        esa fila se descarta y se te muestra con su número de línea; las demás se cargan igual.</p>
+      <p><b>La celda vacía no borra:</b> el campo que venga en blanco <b>se queda como está</b>. Una
+        fila que no traiga ninguno de los seis campos no toca el registro. Si un código aparece dos
+        veces, gana la última fila. Para borrar un valor, abrí el producto y dejá el campo vacío.</p>
+      <p style="color:var(--muted);font-size:13px">También acepta el formato del archivo original de
+        Sima, el que trae <b>CodigoDelMaterial</b>: ahí <b>Codigo</b> y <b>Descripcion</b> son los de
+        Sima, no los de Nutricare.</p>
+      <input type="file" id="simaXlsInput" accept=".xlsx,.xls,.csv" onchange="simaXlsParse(this)" style="display:none">
+      <div id="simaXlsPreview" style="margin-top:12px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="simaXlsPlantilla()">⬇️ Descargar plantilla</button>
+      <button class="btn-ghost" onclick="document.getElementById('simaXlsInput').click()">Seleccionar archivo…</button>
+      <button class="btn-primary hidden" id="simaXlsBtn" onclick="simaXlsConfirmar()">Cargar</button>
+    </div>
   </div>
 </div>
 
@@ -2590,6 +2680,7 @@ function navGrupos(){
     { titulo:'MANTENIMIENTO', items:[
       {id:'bandejas',    ic:'\u{1F9F0}', l:'Bandejas',                 fn:showBandejas,    ver:canBodega},
       {id:'hospitales',  ic:'\u{1F3E5}', l:'Hospitales',               fn:showHospitales,  ver:canBodega},
+      {id:'sima',        ic:'\u{1F3F7}\uFE0F', l:'Código Sima',          fn:showSima,        ver:canBodega},
       {id:'notificaciones',ic:'\u2709\uFE0F', l:'Notificaciones',       fn:showNotificaciones, ver:canBodega},
       {id:'config',      ic:'\u2699\uFE0F',  l:'Configuración',            fn:showConfig,      ver:canBodega}
     ]},
@@ -2621,7 +2712,7 @@ function buildNav(){
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('ovl').classList.toggle('show'); }
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('ovl').classList.remove('show'); }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales','viewNotificaciones','viewSolicitudes','viewSolicitudDet','viewCheckList','viewValidacion','viewBitacora'];
+const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales','viewNotificaciones','viewSolicitudes','viewSolicitudDet','viewCheckList','viewValidacion','viewBitacora','viewSima'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
 
 /* ===== INICIO ===== */
@@ -5616,6 +5707,300 @@ async function confirmarVaciarDetalle(){
   }finally{ hideLoading(); }
 }
 
+/* ===== CODIGO SIMA: el catalogo de productos con sus campos Sima =====
+   Solo Bodega / Administrador. El grid lista TODO el catalogo -con los campos
+   Sima vacios en los productos que no tienen-, porque es la unica forma de
+   completar uno nuevo sin poder agregar productos.
+
+   NO HAY «NUEVO PRODUCTO», a proposito: las filas las manda el catalogo
+   externo. La regla tambien esta en la API -el PUT rechaza con 404 un codigo
+   que el catalogo no tiene-, no solo en la ausencia del boton. */
+let SIMA_ROWS=[], SIMA_COLF={}, SIMA_ACT=null, SIMA_HUERF=0;
+/* Las columnas del grid. `ro` marca las dos que vienen del catalogo y no se
+   editan; la plantilla del Excel usa esta MISMA lista, asi que agregar una
+   columna acá la agrega en los dos lados. */
+const SIMA_COLS=[
+  {k:'codigo',           l:'Código Nutricare', ro:true},
+  {k:'descripcion',      l:'Descripción Nutricare', ro:true, desc:true},
+  {k:'codigo_sima',      l:'Código Sima'},
+  {k:'descripcion_sima', l:'Descripción Sima', desc:true},
+  {k:'linea_sima',       l:'Línea'},
+  {k:'partida_sima',     l:'Partida', desc:true},
+  {k:'renglon_sima',     l:'Renglón', desc:true},
+  {k:'precio_sima',      l:'Precio', num:true}
+];
+
+async function showSima(){
+  if(!canBodega()){ toast('Su rol no tiene acceso a Código Sima'); showInicio(); return; }
+  setTab('sima'); showOnly('viewSima');
+  await loadSima();
+}
+async function loadSima(){
+  try{
+    const r=await api('GET','/productos/sima');
+    SIMA_ROWS=(r&&r.productos)||[]; SIMA_HUERF=(r&&r.huerfanas)||0;
+    const con=(r&&r.con_sima)||0;
+    document.getElementById('simaSub').textContent =
+      SIMA_ROWS.length+' productos del catálogo · '+con+' con datos Sima'
+      + (SIMA_HUERF ? ' · '+SIMA_HUERF+' fila'+(SIMA_HUERF===1?'':'s')+' de códigos que ya no están en el catálogo' : '');
+  }catch(e){ SIMA_ROWS=[]; toast('No se pudo cargar: '+e.message); }
+  renderSima();
+}
+function simaFiltered(){ return cardsFiltrar('simaGrid', SIMA_ROWS, SIMA_COLF, SIMA_COLS); }
+function onSimaFilter(k,v){ SIMA_COLF[k]=v; renderSima(); }
+/* El precio se muestra con dos decimales aunque se guarde con seis: es un
+   precio, y los seis decimales solo estorban en la lectura. El valor exacto se
+   ve al abrir el producto. */
+const simaPrecioTxt=(v)=> (v===''||v==null) ? '' : Number(v).toFixed(2);
+
+function renderSima(){
+  const head=document.getElementById('simaHead');
+  head.innerHTML=`<tr>${SIMA_COLS.map(c=>`<th${c.num?' class="sima-num"':''}>${c.l}</th>`).join('')}<th></th></tr>`
+    +`<tr class="filter-row">${SIMA_COLS.map(c=>`<th><input placeholder="Filtrar…" oninput="onSimaFilter('${c.k}',this.value)" value="${attr(SIMA_COLF[c.k])}"></th>`).join('')}<th></th></tr>`;
+  const rows=simaFiltered();
+  const b=document.getElementById('simaBody'); b.innerHTML='';
+  document.getElementById('simaEmpty').classList.toggle('hidden', SIMA_ROWS.length>0);
+  document.getElementById('simaGrid').classList.toggle('hidden', SIMA_ROWS.length===0);
+  const foot=document.getElementById('simaFoot');
+  if(!SIMA_ROWS.length){ foot.textContent=''; return; }
+  foot.textContent = rows.length===1?'1 producto':(rows.length+' productos');
+  if(!rows.length){ b.innerHTML=`<tr class="aviso"><td colspan="${SIMA_COLS.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  rows.forEach(r=>{
+    const tds=SIMA_COLS.map(c=>{
+      const v = c.num ? simaPrecioTxt(r[c.k]) : (r[c.k]==null?'':r[c.k]);
+      const cls=(c.num?'sima-num':'')+(c.desc?' sima-desc':'');
+      return `<td${cls.trim()?` class="${cls.trim()}"`:''}${c.desc?` title="${attr(r[c.k])}"`:''}>${esc(v)}</td>`;
+    }).join('');
+    const tr=document.createElement('tr');
+    tr.innerHTML=tds+`<td><button class="icon-btn" onclick="editarSima('${attr(r.codigo)}')">✏️ Editar</button></td>`;
+    b.appendChild(tr);
+  });
+}
+
+function editarSima(cod){
+  const r=SIMA_ROWS.find(x=>String(x.codigo)===String(cod));
+  if(!r){ toast('No se encontró el producto'); return; }
+  SIMA_ACT=r;
+  document.getElementById('simaModalTitle').textContent='Códigos Sima · '+r.codigo;
+  document.getElementById('sima_prod_cod').textContent=r.codigo;
+  document.getElementById('sima_prod_desc').textContent=r.descripcion||'—';
+  document.getElementById('sima_codigo').value=r.codigo_sima||'';
+  document.getElementById('sima_descripcion').value=r.descripcion_sima||'';
+  document.getElementById('sima_linea').value=r.linea_sima||'';
+  document.getElementById('sima_partida').value=r.partida_sima||'';
+  document.getElementById('sima_renglon').value=r.renglon_sima||'';
+  /* Acá SÍ va el valor exacto, no el redondeado del grid: si se guardara lo
+     que se ve, abrir y guardar sin tocar nada recortaria el precio a dos
+     decimales sin que nadie lo pidiera. */
+  document.getElementById('sima_precio').value=(r.precio_sima===''||r.precio_sima==null)?'':String(r.precio_sima);
+  document.getElementById('simaErr').textContent='';
+  document.getElementById('simaModal').classList.remove('hidden');
+}
+function closeSima(){ document.getElementById('simaModal').classList.add('hidden'); SIMA_ACT=null; }
+
+async function guardarSima(){
+  if(!canBodega()){ toast('Su rol no puede editar los códigos Sima'); return; }
+  if(!SIMA_ACT) return;
+  const err=document.getElementById('simaErr'); err.textContent='';
+  const body={
+    codigo_sima:      document.getElementById('sima_codigo').value.trim(),
+    descripcion_sima: document.getElementById('sima_descripcion').value.trim(),
+    linea_sima:       document.getElementById('sima_linea').value.trim(),
+    partida_sima:     document.getElementById('sima_partida').value.trim(),
+    renglon_sima:     document.getElementById('sima_renglon').value.trim(),
+    precio_sima:      document.getElementById('sima_precio').value.trim()
+  };
+  const btn=document.getElementById('simaSaveBtn'); btn.disabled=true; btn.textContent='Guardando…';
+  try{
+    await api('PUT','/productos/sima/'+encodeURIComponent(SIMA_ACT.codigo), body);
+    toast('Guardado');
+    closeSima();
+    await loadSima();
+  }catch(e){ err.textContent=e.message; }
+  finally{ btn.disabled=false; btn.textContent='💾 Guardar'; }
+}
+
+/* ----- Codigos Sima: carga por Excel -----
+   Mismo mecanismo que los componentes de la bandeja: se lee EN EL NAVEGADOR
+   con SheetJS y se manda como JSON, asi que api/package.json sigue con sus dos
+   dependencias. */
+let SIMA_XLS=[];
+function abrirSimaExcel(){
+  SIMA_XLS=[];
+  document.getElementById('simaXlsPreview').innerHTML='';
+  const bx=document.getElementById('simaXlsBtn');
+  bx.classList.add('hidden'); bx.disabled=false;
+  document.getElementById('simaXlsInput').value='';
+  document.getElementById('simaXlsModal').classList.remove('hidden');
+}
+function closeSimaExcel(){
+  document.getElementById('simaXlsModal').classList.add('hidden');
+  document.getElementById('simaXlsBtn').disabled=false;
+  SIMA_XLS=[];
+}
+/* La plantilla sale con TODO el catalogo y sus valores actuales: asi sirve para
+   corregir en masa, no solo para cargar de cero. Las dos columnas de Nutricare
+   van primero como referencia; SheetJS no puede protegerlas -su version
+   community no escribe proteccion de celdas- y no hace falta: la importacion
+   usa el codigo solo para buscar y la descripcion la ignora, asi que editarlas
+   en el archivo no tiene efecto. */
+function simaXlsPlantilla(){
+  if(typeof XLSX==='undefined'){ toast('No se pudo cargar el lector de Excel (revisá tu conexión a internet).'); return; }
+  const cols=SIMA_COLS.map(c=>c.l);
+  const base=(simaFiltered().length?simaFiltered():SIMA_ROWS);
+  const filas=base.map(r=>{
+    const o={};
+    SIMA_COLS.forEach(c=>{ o[c.l] = (r[c.k]==null?'':r[c.k]); });
+    return o;
+  });
+  const ws=XLSX.utils.json_to_sheet(filas.length?filas:[Object.fromEntries(cols.map(c=>[c,'']))], {header:cols});
+  ws['!cols']=[{wch:18},{wch:46},{wch:14},{wch:46},{wch:9},{wch:34},{wch:34},{wch:14}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Codigos Sima');
+  XLSX.writeFile(wb, 'codigos_sima.xlsx');
+}
+/* Busca una columna por encabezado, sin tildes ni mayusculas. Se compara
+   COMPLETO y no por prefijo: «Código Sima» y «Código Nutricare» empiezan igual,
+   y un startsWith haria que la primera que aparezca gane las dos. */
+function simaXlsCol(H, alts){
+  const norm=(v)=>String(v==null?'':v).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+  for(let i=0;i<H.length;i++){ const h=norm(H[i]); if(alts.some(a=>h===a)) return i; }
+  return -1;
+}
+function simaXlsParse(input){
+  const f=(input.files||[])[0]; if(!f) return;
+  if(typeof XLSX==='undefined'){ toast('No se pudo cargar el lector de Excel (revisá tu conexión a internet).'); return; }
+  const prev=document.getElementById('simaXlsPreview');
+  prev.innerHTML='Leyendo…'; SIMA_XLS=[];
+  const rdr=new FileReader();
+  rdr.onload=()=>{
+    try{
+      const wb=XLSX.read(rdr.result,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      /* raw:false hace que SheetJS devuelva el texto formateado de la celda.
+         Importa para el precio: con raw:true un numero con muchos decimales
+         vuelve como float y se pierde precision antes de llegar al servidor. */
+      const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
+      if(!rows.length){ prev.innerHTML='<div class="empty" style="padding:14px">El archivo está vacío.</div>'; return; }
+      const H=rows[0]||[];
+
+      /* DOS FORMATOS. El de la plantilla y el del archivo original de Sima.
+         Se distinguen por una sola columna: si existe «CodigoDelMaterial», el
+         archivo es el original y ahi «Codigo»/«Descripcion» son los de SIMA.
+         En la plantilla, en cambio, «Código Nutricare» es el del producto.
+         Sin esta distincion, un «Codigo» a secas seria ambiguo y se cargarian
+         los codigos Sima como si fueran de producto. */
+      const cMat=simaXlsCol(H,['codigodelmaterial','codigo del material','codigo material']);
+      const original = cMat>=0;
+      const c = original ? {
+        prod: cMat,
+        cod:  simaXlsCol(H,['codigo','codigo sima']),
+        desc: simaXlsCol(H,['descripcion','descripcion sima']),
+        lin:  simaXlsCol(H,['linea','linea sima']),
+        par:  simaXlsCol(H,['partida','partida sima']),
+        ren:  simaXlsCol(H,['renglon','renglon sima']),
+        pre:  simaXlsCol(H,['precio','precio sima'])
+      } : {
+        prod: simaXlsCol(H,['codigo nutricare','codigo de producto','codigo producto']),
+        cod:  simaXlsCol(H,['codigo sima']),
+        desc: simaXlsCol(H,['descripcion sima']),
+        lin:  simaXlsCol(H,['linea','linea sima']),
+        par:  simaXlsCol(H,['partida','partida sima']),
+        ren:  simaXlsCol(H,['renglon','renglon sima']),
+        pre:  simaXlsCol(H,['precio','precio sima'])
+      };
+      if(c.prod<0){
+        prev.innerHTML='<div class="err-detail">No se encontró la columna del código de producto. '
+          +'La plantilla la llama <b>Código Nutricare</b>; el archivo original de Sima, '
+          +'<b>CodigoDelMaterial</b>. Descargá la plantilla y usá esos encabezados.</div>';
+        return;
+      }
+      let vacias=0;
+      for(let r=1;r<rows.length;r++){
+        const row=rows[r]||[];
+        const g=(i)=> (i>=0 && row[i]!=null) ? String(row[i]).trim() : '';
+        const prod=g(c.prod);
+        const campos={ codigo_sima:g(c.cod), descripcion_sima:g(c.desc), linea_sima:g(c.lin),
+                       partida_sima:g(c.par), renglon_sima:g(c.ren), precio_sima:g(c.pre) };
+        if(!prod && Object.values(campos).every(v=>v==='')){ continue; }   // fila vacía
+        if(!prod){ vacias++; continue; }
+        SIMA_XLS.push(Object.assign({ linea:r+1, producto_codigo:prod }, campos));
+      }
+      simaXlsPreview(original, vacias);
+    }catch(e){
+      prev.innerHTML='<div class="err-detail">No se pudo leer el archivo: '+esc(e.message)+'</div>';
+    }
+  };
+  rdr.readAsArrayBuffer(f);
+}
+/* Vista previa ANTES de mandar nada: cuantas filas, en que formato se leyo, y
+   -lo mas util- cuantos codigos no estan en el catalogo, que es lo que se va a
+   descartar. Eso se puede saber acá porque el catalogo ya esta en el navegador. */
+function simaXlsPreview(original, sinProducto){
+  const prev=document.getElementById('simaXlsPreview');
+  const btn=document.getElementById('simaXlsBtn');
+  if(!SIMA_XLS.length){
+    prev.innerHTML='<div class="err-detail">No se encontró ninguna fila con datos.</div>';
+    btn.classList.add('hidden'); return;
+  }
+  const enCat=new Set(SIMA_ROWS.map(r=>String(r.codigo).replace(/\s+/g,'')));
+  const fuera=SIMA_XLS.filter(f=>!enCat.has(String(f.producto_codigo).replace(/\s+/g,'')));
+  const CAMPOS=['codigo_sima','descripcion_sima','linea_sima','partida_sima','renglon_sima','precio_sima'];
+  const sinDatos=SIMA_XLS.filter(f=>CAMPOS.every(k=>!f[k]));
+  const aplican=SIMA_XLS.length-fuera.length-sinDatos.filter(f=>enCat.has(String(f.producto_codigo).replace(/\s+/g,''))).length;
+  let h='<div class="cat-ocr">Se leyeron <b>'+SIMA_XLS.length+'</b> filas'
+      + (original?' en el formato del archivo original de Sima (<b>CodigoDelMaterial</b>)':' en el formato de la plantilla')
+      + '. Se van a aplicar <b>'+aplican+'</b>.</div>';
+  if(fuera.length){
+    h+='<div class="err-detail" style="margin-top:10px"><b>'+fuera.length+' se descartan</b> porque el código no está en el catálogo de productos: '
+      + esc(fuera.slice(0,12).map(f=>'línea '+f.linea+' ('+f.producto_codigo+')').join(', '))
+      + (fuera.length>12?' y '+(fuera.length-12)+' más':'') + '.</div>';
+  }
+  if(sinDatos.length){
+    h+='<div class="cat-fhint warn" style="margin-top:8px"><b>'+sinDatos.length+'</b> no traen ninguno de los seis campos: esos registros no se tocan.</div>';
+  }
+  if(sinProducto){
+    h+='<div class="cat-fhint warn" style="margin-top:8px"><b>'+sinProducto+'</b> traen datos pero sin código de producto: se descartan.</div>';
+  }
+  prev.innerHTML=h;
+  btn.classList.remove('hidden');
+}
+async function simaXlsConfirmar(){
+  if(!SIMA_XLS.length) return;
+  const btn=document.getElementById('simaXlsBtn');
+  btn.disabled=true; btn.textContent='Cargando…';
+  showLoading();
+  try{
+    const r=await api('POST','/productos/sima/importar',{filas:SIMA_XLS});
+    let msg=(r.aplicadas||0)+' aplicadas';
+    if(r.nuevas) msg+=' · '+r.nuevas+' nuevas';
+    if(r.actualizadas) msg+=' · '+r.actualizadas+' actualizadas';
+    if(r.descartadas_total) msg+=' · '+r.descartadas_total+' descartadas';
+    if(r.precio_invalido_total) msg+=' · '+r.precio_invalido_total+' con precio inválido';
+    toast(msg);
+    /* Los rechazos se muestran en la pantalla, no solo en el toast: con 200
+       filas el aviso se va antes de poder leerlo. */
+    const prev=document.getElementById('simaXlsPreview');
+    let h='<div class="cat-ocr">'+esc(msg)+'</div>';
+    if((r.precio_invalido||[]).length){
+      h+='<div class="err-detail" style="margin-top:10px"><b>Precios que no se pudieron leer:</b> '
+        + esc(r.precio_invalido.slice(0,12).map(x=>'línea '+x.linea+' («'+x.valor+'»)').join(', '))+'.</div>';
+    }
+    if((r.descartadas||[]).length){
+      h+='<div class="err-detail" style="margin-top:10px"><b>Descartadas:</b> '
+        + esc(r.descartadas.slice(0,12).map(x=>'línea '+x.linea+' ('+x.codigo+': '+x.motivo+')').join(', '))
+        + (r.descartadas_total>12?' y '+(r.descartadas_total-12)+' más':'')+'.</div>';
+    }
+    prev.innerHTML=h;
+    btn.classList.add('hidden');
+    SIMA_XLS=[];
+    await loadSima();
+  }catch(e){
+    toast('No se pudo cargar: '+e.message);
+    btn.disabled=false; btn.textContent='Cargar';
+  }finally{ hideLoading(); }
+}
+
 /* ----- Componentes de la bandeja: carga por Excel -----
    El archivo se lee EN EL NAVEGADOR con SheetJS -el mismo que ya usaba la
    importacion de cirugias- y se manda como JSON. Por eso no hay dependencia
@@ -8219,6 +8604,11 @@ const CARDS_FILAS = {
   banProdGrid: () => [['','Código','Descripción','Tipo','Cantidad'],
                       {extras:[''], acciones:true, titulo:1, ancho:[2]}],
   hosGrid:     () => [HOS_COLS, {extras:[''], acciones:true}],
+  /* Codigo Sima: el titulo de la tarjeta es el codigo de producto -la primera-
+     y las cuatro descripciones largas van a lo ancho, si no la tarjeta queda
+     ilegible en el celular. */
+  simaGrid:    () => [SIMA_COLS, {extras:[''], acciones:true,
+                      ancho:['descripcion','descripcion_sima','partida_sima','renglon_sima']}],
   notGrid:     () => [NOT_COLS, {extras:[''], acciones:true}],
   /* La accion es lo que se lee de la fila, asi que hace de titulo; el
      detalle y el usuario se llevan el ancho entero. */

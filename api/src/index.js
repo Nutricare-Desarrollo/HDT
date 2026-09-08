@@ -159,6 +159,251 @@ app.http('productos-list', {
 });
 
 /* ============================================================
+   Códigos Sima del catálogo  (solo Bodega / Administrador)
+   ------------------------------------------------------------
+   El catálogo de productos es EXTERNO -lo sirve PRODUCTOS_API_URL- así que los
+   seis campos Sima viven en cat.ProductoSima, indexados por el código de
+   producto, y se unen al catálogo al listarlos. Por eso:
+
+     · NO SE PUEDEN AGREGAR PRODUCTOS. Las filas del grid las manda el
+       catálogo. El PUT rechaza con 404 un código que el catálogo no tiene, y
+       la importación lo descarta. La regla está acá y no solo en la pantalla.
+
+     · EDITAR e IMPORTAR tienen semánticas DISTINTAS para el campo vacío, a
+       propósito:
+         - En el PUT (el formulario) el vacío BORRA. El usuario ve los seis
+           campos con su valor actual; si limpia uno y guarda, es porque quiere
+           dejarlo vacío. Si el vacío no borrara, un valor mal cargado no se
+           podría quitar nunca.
+         - En la importación el vacío NO TOCA NADA. Es lo pedido: los seis son
+           opcionales, y una celda en blanco significa «de este campo no sé
+           nada», no «bórralo». Así se puede subir un archivo que solo trae
+           precios sin perder los códigos ya cargados.
+   ============================================================ */
+
+/* Fecha local de Costa Rica, como en los otros listados. Se define ACA y no
+   se reusa FECHA_VALID: esa nombra la columna FechaHora y esta tabla usa
+   FechaModificacion. */
+const FECHA_SIMA = `to_char((FechaModificacion AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica', 'YYYY-MM-DD HH24:MI')`;
+
+/* Los seis campos, con su columna. El orden es el del grid. */
+const SIMA_CAMPOS = [
+  ['codigo_sima', 'CodigoSima'], ['descripcion_sima', 'DescripcionSima'],
+  ['linea_sima', 'LineaSima'], ['partida_sima', 'PartidaSima'],
+  ['renglon_sima', 'RenglonSima'], ['precio_sima', 'PrecioSima']
+];
+const SIMA_SELECT = `SELECT ProductoCodigo AS producto_codigo, CodigoSima AS codigo_sima,
+       DescripcionSima AS descripcion_sima, LineaSima AS linea_sima,
+       PartidaSima AS partida_sima, RenglonSima AS renglon_sima,
+       PrecioSima::float8 AS precio_sima, ModificadoPor AS modificado_por,
+       ${FECHA_SIMA} AS fecha_modificacion
+  FROM cat.ProductoSima`;
+
+/* Texto o null. `max` recorta en vez de rechazar: un renglón dos caracteres
+   más largo no vale perder la fila entera de una importación de 200. */
+function simaTexto(v, max) {
+  const t = String(v == null ? '' : v).trim();
+  if (!t) return null;
+  return t.length > max ? t.slice(0, max) : t;
+}
+
+/* El precio. Devuelve { ok, valor } y no un número pelado, porque hay que
+   distinguir «no vino» de «vino mal escrito»: lo primero se ignora, lo segundo
+   tiene que avisarse.
+
+   ACEPTA COMA DECIMAL. En los datos de origen hay precios con punto
+   (234.468571428571) y al menos uno con coma (62,5344444444444). Un
+   parseFloat directo leería ese último como 62 y guardaría un precio 55 veces
+   más chico, sin avisar. También se quitan los separadores de miles y los
+   símbolos de moneda, que es lo que aparece cuando el dato pasó por Excel. */
+function simaPrecio(v) {
+  if (v == null || String(v).trim() === '') return { ok: true, valor: null };
+  let t = String(v).trim().replace(/[\s ]/g, '').replace(/^[₡$]/, '');
+  /* Con punto Y coma, el ÚLTIMO separador es el decimal y el otro es de miles:
+     «1.234,56» y «1,234.56» son el mismo número. */
+  const iPunto = t.lastIndexOf('.'), iComa = t.lastIndexOf(',');
+  if (iPunto >= 0 && iComa >= 0) {
+    const dec = Math.max(iPunto, iComa);
+    t = t.slice(0, dec).replace(/[.,]/g, '') + '.' + t.slice(dec + 1);
+  } else if (iComa >= 0) {
+    t = t.replace(',', '.');
+  }
+  if (!/^-?\d+(\.\d+)?$/.test(t)) return { ok: false, valor: null };
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0) return { ok: false, valor: null };
+  return { ok: true, valor: n };
+}
+
+/* GET /api/productos/sima -> el catálogo con sus campos Sima. */
+app.http('productos-sima-list', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'productos/sima',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'Solo Bodega/Administrador' });
+    try {
+      const [cat, r] = await Promise.all([getCatalogo(false), query(SIMA_SELECT)]);
+      const porCod = new Map(r.rows.map((x) => [normCod(x.producto_codigo), x]));
+      /* Se recorre el CATALOGO, no la tabla: la pantalla lista todos los
+         productos, con los campos Sima vacíos en los que no tienen. Es lo que
+         permite completar uno nuevo sin poder agregar productos. */
+      const filas = (cat || []).map((p) => {
+        const s = porCod.get(normCod(p.codigo)) || {};
+        return {
+          codigo: p.codigo, descripcion: p.descripcion || '',
+          codigo_sima: s.codigo_sima || '', descripcion_sima: s.descripcion_sima || '',
+          linea_sima: s.linea_sima || '', partida_sima: s.partida_sima || '',
+          renglon_sima: s.renglon_sima || '',
+          precio_sima: (s.precio_sima == null ? '' : s.precio_sima),
+          modificado_por: s.modificado_por || '', fecha_modificacion: s.fecha_modificacion || ''
+        };
+      });
+      /* Filas de la tabla cuyo producto ya no está en el catálogo. No se
+         muestran -no son productos- pero el conteo se informa para que no
+         queden invisibles para siempre. */
+      const huerfanas = r.rows.filter((x) => !(cat || []).some((p) => normCod(p.codigo) === normCod(x.producto_codigo))).length;
+      return json(200, { productos: filas, con_sima: r.rowCount, huerfanas });
+    } catch (e) {
+      context.error(e);
+      return json(502, { error: 'No se pudo obtener el catálogo con los códigos Sima', detail: e.message });
+    }
+  }
+});
+
+/* PUT /api/productos/sima/{codigo} -> graba los seis campos de UN producto.
+   El vacío borra: ver la nota de arriba. */
+app.http('productos-sima-save', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'productos/sima/{codigo}',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar los códigos Sima' });
+    const cod = normCod(decodeURIComponent(request.params.codigo || ''));
+    if (!cod) return json(400, { error: 'Código de producto inválido' });
+    try {
+      /* El producto tiene que existir en el catálogo. Es el candado del «no
+         puede agregar productos», y va en el servidor. Si el catálogo no
+         responde se rechaza en vez de dejar pasar: crear una fila para un
+         código inventado es justo lo que hay que evitar. */
+      const mapa = await getMapa();
+      if (!mapa || !mapa.size) return json(503, { error: 'El catálogo de productos no está disponible; intente de nuevo en un momento' });
+      if (!mapa.has(cod)) return json(404, { error: 'El código ' + cod + ' no está en el catálogo de productos' });
+
+      const b = await request.json().catch(() => ({}));
+      const pre = simaPrecio(b.precio_sima);
+      if (!pre.ok) return json(400, { error: 'El precio «' + b.precio_sima + '» no es un número válido' });
+      const vals = [cod, simaTexto(b.codigo_sima, 60), simaTexto(b.descripcion_sima, 600),
+        simaTexto(b.linea_sima, 30), simaTexto(b.partida_sima, 300), simaTexto(b.renglon_sima, 300),
+        pre.valor, user.name || user.email];
+      await query(
+        `INSERT INTO cat.ProductoSima
+           (ProductoCodigo, CodigoSima, DescripcionSima, LineaSima, PartidaSima, RenglonSima,
+            PrecioSima, ModificadoPor, FechaModificacion)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,(now() at time zone 'utc'))
+         ON CONFLICT (ProductoCodigo) DO UPDATE
+            SET CodigoSima=EXCLUDED.CodigoSima, DescripcionSima=EXCLUDED.DescripcionSima,
+                LineaSima=EXCLUDED.LineaSima, PartidaSima=EXCLUDED.PartidaSima,
+                RenglonSima=EXCLUDED.RenglonSima, PrecioSima=EXCLUDED.PrecioSima,
+                ModificadoPor=EXCLUDED.ModificadoPor, FechaModificacion=EXCLUDED.FechaModificacion`,
+        vals);
+      return json(200, { ok: true, codigo: cod });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo guardar', detail: e.message });
+    }
+  }
+});
+
+/* POST /api/productos/sima/importar -> carga masiva desde el Excel.
+   Body: { filas: [{ linea, producto_codigo, codigo_sima?, ... }] }
+   El vacío NO toca nada: ver la nota de arriba. */
+app.http('productos-sima-importar', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'productos/sima/importar',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para importar los códigos Sima' });
+    const b = await request.json().catch(() => ({}));
+    const filas = Array.isArray(b.filas) ? b.filas : [];
+    if (!filas.length) return json(400, { error: 'El archivo no trae filas' });
+    if (filas.length > 20000) return json(400, { error: 'El archivo trae demasiadas filas (máximo 20000)' });
+
+    try {
+      const mapa = await getMapa();
+      if (!mapa || !mapa.size) return json(503, { error: 'El catálogo de productos no está disponible; intente de nuevo en un momento' });
+
+      const descartadas = [], sinDatos = [], malPrecio = [];
+      const aplicar = [];
+      const vistos = new Set();
+      for (const f of filas) {
+        const linea = f && f.linea;
+        const cod = normCod(f && f.producto_codigo);
+        if (!cod) { descartadas.push({ linea, codigo: '', motivo: 'sin código de producto' }); continue; }
+        if (!mapa.has(cod)) { descartadas.push({ linea, codigo: cod, motivo: 'no está en el catálogo' }); continue; }
+        const pre = simaPrecio(f.precio_sima);
+        if (!pre.ok) { malPrecio.push({ linea, codigo: cod, valor: String(f.precio_sima) }); continue; }
+        const v = {
+          codigo_sima: simaTexto(f.codigo_sima, 60), descripcion_sima: simaTexto(f.descripcion_sima, 600),
+          linea_sima: simaTexto(f.linea_sima, 30), partida_sima: simaTexto(f.partida_sima, 300),
+          renglon_sima: simaTexto(f.renglon_sima, 300), precio_sima: pre.valor
+        };
+        /* Fila que no trae NINGUNO de los seis: no se toca el registro. Es lo
+           pedido, y evita que un archivo con solo la columna de códigos borre
+           -o cree- filas vacías. */
+        if (SIMA_CAMPOS.every(([k]) => v[k] == null)) { sinDatos.push({ linea, codigo: cod }); continue; }
+        /* Si el código se repite en el archivo, gana la última fila: es la
+           misma regla que ya usa la carga de componentes de bandeja. */
+        if (vistos.has(cod)) { const i = aplicar.findIndex((x) => x.cod === cod); if (i >= 0) aplicar.splice(i, 1); }
+        vistos.add(cod);
+        aplicar.push({ cod, v });
+      }
+
+      let nuevas = 0, actualizadas = 0;
+      const client = await getClient();
+      try {
+        await client.query('BEGIN');
+        for (const { cod, v } of aplicar) {
+          /* COALESCE(EXCLUDED.x, actual) es lo que hace que el vacío no borre:
+             el campo que no vino llega en NULL y se queda el que ya estaba. */
+          const r = await client.query(
+            `INSERT INTO cat.ProductoSima
+               (ProductoCodigo, CodigoSima, DescripcionSima, LineaSima, PartidaSima, RenglonSima,
+                PrecioSima, ModificadoPor, FechaModificacion)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,(now() at time zone 'utc'))
+             ON CONFLICT (ProductoCodigo) DO UPDATE
+                SET CodigoSima      = COALESCE(EXCLUDED.CodigoSima,      cat.ProductoSima.CodigoSima),
+                    DescripcionSima = COALESCE(EXCLUDED.DescripcionSima, cat.ProductoSima.DescripcionSima),
+                    LineaSima       = COALESCE(EXCLUDED.LineaSima,       cat.ProductoSima.LineaSima),
+                    PartidaSima     = COALESCE(EXCLUDED.PartidaSima,     cat.ProductoSima.PartidaSima),
+                    RenglonSima     = COALESCE(EXCLUDED.RenglonSima,     cat.ProductoSima.RenglonSima),
+                    PrecioSima      = COALESCE(EXCLUDED.PrecioSima,      cat.ProductoSima.PrecioSima),
+                    ModificadoPor   = EXCLUDED.ModificadoPor,
+                    FechaModificacion = EXCLUDED.FechaModificacion
+             RETURNING (xmax = 0) AS insertada`,
+            [cod, v.codigo_sima, v.descripcion_sima, v.linea_sima, v.partida_sima,
+             v.renglon_sima, v.precio_sima, user.name || user.email]);
+          if (r.rows[0] && r.rows[0].insertada) nuevas++; else actualizadas++;
+        }
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw e;
+      } finally { client.release(); }
+
+      return json(200, {
+        ok: true, leidas: filas.length, aplicadas: aplicar.length, nuevas, actualizadas,
+        descartadas: descartadas.slice(0, 200), descartadas_total: descartadas.length,
+        sin_datos: sinDatos.slice(0, 200), sin_datos_total: sinDatos.length,
+        precio_invalido: malPrecio.slice(0, 200), precio_invalido_total: malPrecio.length
+      });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo importar', detail: e.message });
+    }
+  }
+});
+
+/* ============================================================
    /api/lotes  -> catálogo de lotes por producto (proxy + caché)
    ============================================================ */
 app.http('lotes-list', {
