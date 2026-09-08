@@ -121,8 +121,28 @@ tbody td{padding:10px 12px;border-bottom:1px solid var(--line)}
 tbody td.clip{max-width:150px;overflow:hidden;text-overflow:ellipsis}
 /* Diagnostico: se recorta con puntos suspensivos y el texto completo queda en
    el title. En tarjeta (celular) el @media de .cards le devuelve el ancho. */
-tbody td.diag{max-width:300px;overflow:hidden;text-overflow:ellipsis}
+tbody td.diag{max-width:200px;overflow:hidden;text-overflow:ellipsis}
 tbody tr:hover{background:#f5fafc}
+/* EL BOTON «VER» SIEMPRE VISIBLE. Angostar Diagnóstico y Usuario hace que la
+   tabla entre en una pantalla de 1440, pero medido NO alcanza para una de
+   1280: sobraban 164px. En vez de seguir apretando columnas hasta que el
+   Diagnóstico no se lea, la columna de acciones se ancla a la derecha, y el
+   botón queda a la vista aunque la tabla se corra en horizontal.
+   Necesita fondo propio -si no, el texto le pasa por debajo- y el mismo color
+   que la fila en hover. Se excluye la fila de «Sin coincidencias con los
+   filtros», que es un colspan y anclarla la partiria al medio.
+   Solo de 641px para arriba: abajo de eso las tablas se vuelven tarjetas
+   (el @media de .cards) y ahi no hay columna que anclar. */
+@media(min-width:641px){
+  #grid thead th:last-child,#pendGrid thead th:last-child{position:sticky;right:0;z-index:3}
+  #grid tbody tr:not(.aviso) td:last-child,
+  #pendGrid tbody tr:not(.aviso) td:last-child{
+    position:sticky;right:0;background:#fff;
+    box-shadow:-7px 0 7px -7px rgba(0,0,0,.22);
+  }
+  #grid tbody tr:not(.aviso):hover td:last-child,
+  #pendGrid tbody tr:not(.aviso):hover td:last-child{background:#f5fafc}
+}
 .tag{background:#e8f4fb;color:var(--brand-d);padding:3px 9px;border-radius:20px;font-size:12px;font-weight:600}
 /* Numero de linea del detalle: es el mismo que muestran "Diferencias" e
    "Historial de cambios" en su columna Linea, para poder ubicar la fila. */
@@ -1807,12 +1827,17 @@ const ENC = [
   {k:'paciente',l:'Paciente'},{k:'identificacion',l:'Identificación'},{k:'tipo',l:'Tipo'},
   {k:'fecha_accidente',l:'Fecha de accidente',t:'date'},{k:'fecha_cirugia',l:'Fecha de cirugía',t:'date'},{k:'fecha_hoja',l:'Fecha de la hoja',t:'date',req:true},
   {k:'cirujano',l:'Cirujano',req:true,cat:'cirujano'},{k:'instrumentista',l:'Instrumentista',req:true},
-  {k:'diagnostico',l:'Diagnóstico',full:true,area:true,req:true},{k:'procedimiento',l:'Procedimiento',full:true,area:true},
-  /* Tipo de Cirugía. `sel` lo dibuja como lista desplegable y `bodega` lo
-     limita a Bodega/Administrador: Hospital no lo ve ni al crear ni al mirar
-     una hoja, y como los bucles de LECTURA usan la misma lista filtrada,
-     tampoco lo manda al guardar. Sin `req`: la base tiene DEFAULT 'HDT'. */
-  {k:'tipo_cirugia',l:'Tipo de Cirugía',sel:['HDT','Transitoria'],bodega:true}
+  /* Tipo de Cirugía. Va JUNTO A INSTRUMENTISTA a pedido de Bodega: la rejilla
+     del encabezado es de cuatro columnas y Fecha de la hoja / Cirujano /
+     Instrumentista ocupan tres, así que este entra en el cuarto lugar de esa
+     misma fila, que antes quedaba vacío. Estaba al final, debajo de
+     Procedimiento, y quedaba lejos de todo.
+     `sel` lo dibuja como lista desplegable y `bodega` lo limita a
+     Bodega/Administrador: Hospital no lo ve ni al crear ni al mirar una hoja,
+     y como los bucles de LECTURA usan la misma lista filtrada, tampoco lo
+     manda al guardar. Sin `req`: la base tiene DEFAULT 'HDT'. */
+  {k:'tipo_cirugia',l:'Tipo de Cirugía',sel:['HDT','Transitoria'],bodega:true},
+  {k:'diagnostico',l:'Diagnóstico',full:true,area:true,req:true},{k:'procedimiento',l:'Procedimiento',full:true,area:true}
 ];
 /* Los campos del encabezado que el rol actual puede ver Y mandar. Se usa en
    TODOS los bucles de ENC -los que dibujan y los que leen-, que es lo que
@@ -1852,7 +1877,11 @@ const BODEGA_DET_REQ = [{k:'codigo'},{k:'numero_equipo'},{k:'und'},{k:'reposicio
    Los dos datos siguen guardados y se ven al abrir la hoja. */
 const GRID_COLS = [
   {k:'consecutivo',l:'Consecutivo',link:true},
-  {k:'fecha',l:'Fecha y hora'},{k:'usuario',l:'Usuario'},{k:'numero_hoja',l:'N°',tag:true},
+  {k:'fecha',l:'Fecha y hora'},
+  /* Usuario son correos completos -«mcalderon@nutricare.co.cr»- y era la
+     segunda columna mas ancha: 192px medidos. Con `clip` se recorta a 150 y el
+     correo entero queda en el title; en tarjeta el @media se lo devuelve. */
+  {k:'usuario',l:'Usuario',clip:true},{k:'numero_hoja',l:'N°',tag:true},
   {k:'regimen',l:'Régimen'},
   {k:'diagnostico',l:'Diagnóstico'},
   /* Tipo de cirugía: solo Bodega/Administrador. Va antes de Artículos y Estado
