@@ -39,6 +39,15 @@ const MIN_TERMINOS   = 8;     // menos que esto es no haber leído nada útil
 const MIN_PUNTAJE    = 0.25;  // por debajo, no se afirma que sea la pedida
 const MIN_MARGEN     = 0.10;  // diferencia contra la segunda candidata
 const MARGEN_CONTRA  = 0.12;  // cuánto tiene que ganarle otra para decir «Incorrecta»
+/* Piso de «esto no es una bandeja». Es OTRA pregunta que la del umbral que no
+   se pudo cerrar: no «cual de las 118 es» sino «es alguna». Medido sobre las
+   fotos que pasan MIN_TERMINOS: el techo del ranking completo de las fotos
+   ajenas llega a 0.058, y la legitima mas floja -una sola foto, la peor de las
+   50- arranca en 0.309. El hueco entre las dos es de sobra. Se pone en 0.10,
+   pegado al lado de las ajenas, porque equivocarse hacia arriba cambiaria el
+   mensaje de una bandeja de verdad. Volver a medirlo cuando el catalogo este
+   leido, igual que MIN_PUNTAJE. */
+const MIN_PISO       = 0.10;
 
 const RE_MED = /\b(\d{1,2}[.,]\d)\s*mm\b/g;
 const RE_SW  = /\bsw\s*(\d{1,2}[.,]?\d?)/g;
@@ -73,6 +82,64 @@ function terminos(texto) {
     RE_COD.lastIndex = 0; while ((m = RE_COD.exec(l))) suma('COD:' + m[1], PESO_DISC);
   }
   return t;
+}
+
+/* ===========================================================================
+   FOTOS QUE NO SON DE UNA BANDEJA
+   ---------------------------------------------------------------------------
+   Se subieron fotos de la HOJA DE CONSUMO impresa y pantallazos de Dynamics.
+   Tienen muchisimo texto, asi que pasan MIN_TERMINOS de sobra y el motor
+   contesta como si fueran una bandeja mal fotografiada: «coincide poco,
+   compare a ojo y confirme usted». Ese es el problema. Ese camino deja que
+   Bodega estampe «Correcta» sobre la foto de un papel.
+
+   COMO SE RECONOCEN. Por los rotulos FIJOS que imprimimos nosotros mismos —
+   los encabezados de columna y los pies de firma de imprimirDoc(), la barra de
+   Dynamics, los rotulos de esta propia pantalla—. No por el contenido escrito
+   a mano, que varia. Son pares de palabras a proposito: «nutricare» sola no
+   sirve porque las bandejas llevan la marca, y «cirujano» sola tampoco.
+
+   MEDIDO contra el texto real de las 60 fotos del Paso 0: CERO marcadas por
+   error. Una hoja de consumo dispara 5 marcas y un pantallazo de Dynamics 4,
+   asi que pedir DOS deja margen de sobra y una coincidencia sola no alcanza.
+
+   OJO CON POR QUE ESTO NO ES UN ADORNO. Hoy una hoja de consumo puntea casi
+   cero porque las etiquetas de las bandejas estan en ingles -«locking screws»,
+   «plate holding instruments»- y la hoja lleva codigos de articulo. Pero 5790
+   de los 6060 productos del catalogo son codigos de 6 a 8 digitos, y este
+   motor los pesa DOCE veces como discriminadores. El dia que una bandeja
+   tenga sus codigos impresos visibles en las fotos de referencia -ya hay 2 de
+   14 asi-, la hoja de consumo de esa cirugia lista exactamente esos codigos y
+   va a puntear ALTO contra esa misma bandeja. Ahi el veredicto diria
+   «Correcta» sobre un papel. Esto es lo que lo evita.
+   ======================================================================== */
+const HUELLAS = [
+  { tipo: 'hoja', etiqueta: 'una hoja de consumo',
+    marcas: ['reposicion_anaquel', 'und._reposicion', 'codigo_numero', 'numero_equipo',
+             'firma_cirujano', 'firma_soporte', 'soporte_quirurgico',
+             'hospital_del', 'del_trauma', 'trauma_ins'] },
+  { tipo: 'dynamics', etiqueta: 'un pantallazo de Dynamics',
+    marcas: ['vista_estandar', 'guardar_cerrar', 'numero_articulo', 'articulos_del',
+             'inicio_recientes', 'recientes_anclado', 'articulo_nombre', 'cantidad_unidad'] },
+  { tipo: 'app', etiqueta: 'un pantallazo de esta misma pantalla',
+    marcas: ['corporacion_nutricare', 'validar_bandeja', 'bandeja_alistada',
+             'fotos_bandeja', 'elegir_galeria', 'puedo_determinarlo'] }
+];
+const MIN_HUELLA = 2;
+
+/* Devuelve null si el texto puede ser de una bandeja, o { tipo, etiqueta,
+   marcas } si es uno de nuestros propios documentos. Gana la huella con mas
+   marcas: una foto de la hoja apoyada sobre la pantalla puede tocar dos. */
+function clasificarAjena(texto) {
+  const t = terminos(texto);
+  let mejor = null;
+  for (const h of HUELLAS) {
+    const m = h.marcas.filter((k) => t.has(k));
+    if (m.length >= MIN_HUELLA && (!mejor || m.length > mejor.marcas.length)) {
+      mejor = { tipo: h.tipo, etiqueta: h.etiqueta, marcas: m };
+    }
+  }
+  return mejor;
 }
 
 /* Junta los textos de varias fotos en un solo conjunto. Es a propósito: un
@@ -128,11 +195,32 @@ function coseno(a, b) {
    Devuelve { resultado, motivo, puntaje, candidato, candidato_puntaje, ranking }
    --------------------------------------------------------------------------- */
 function veredicto({ textosEntrega, pedida, refs, gemelas = [], color = null }) {
-  const tEnt = terminosDeVarias(textosEntrega);
+  /* Primero se apartan las fotos que no son de una bandeja. No se descartan en
+     silencio: se dice cuales y de que son, porque el que las subio tiene que
+     saber cual sacar. */
+  const todas = (textosEntrega || []).map((tx, i) => ({ i, tx, ajena: clasificarAjena(tx) }));
+  const ajenas = todas.filter((x) => x.ajena)
+    .map((x) => ({ indice: x.i + 1, tipo: x.ajena.tipo, etiqueta: x.ajena.etiqueta }));
+  const propias = todas.filter((x) => !x.ajena).map((x) => x.tx);
+  const listaAjenas = () => ajenas.map((a) => 'la ' + a.indice + ' parece ' + a.etiqueta).join(', ');
+
+  /* Todas ajenas: no hay nada que comparar, y el mensaje NO invita a confirmar
+     a mano. Confirmar sobre un papel es justo lo que hay que evitar. */
+  if (ajenas.length && !propias.length) {
+    return { resultado: 'No puedo determinarlo', puntaje: null, candidato: null, candidato_puntaje: null,
+      ranking: [], ajenas,
+      motivo: (ajenas.length === 1
+          ? 'La foto subida no es de la bandeja: parece ' + ajenas[0].etiqueta + '. '
+          : 'Ninguna de las ' + ajenas.length + ' fotos es de la bandeja (' + listaAjenas() + '). ')
+        + 'Elimínela' + (ajenas.length === 1 ? '' : 's')
+        + ' y fotografíe los recipientes de la bandeja, con las etiquetas a la vista.' };
+  }
+
+  const tEnt = terminosDeVarias(propias);
   const nombresRef = Object.keys(refs || {}).filter((c) => (refs[c] || []).some((x) => String(x || '').trim()));
 
   if (tEnt.size < MIN_TERMINOS) {
-    return { resultado: 'No puedo determinarlo', puntaje: null, candidato: null, candidato_puntaje: null, ranking: [],
+    return { resultado: 'No puedo determinarlo', puntaje: null, candidato: null, candidato_puntaje: null, ranking: [], ajenas,
       /* Es el caso mas comun y hay que decir que hacer, no solo que fallo. En la
          NUT-0001330, por ejemplo, las cajas plasticas de tornillos casi no
          tienen texto y el recipiente de instrumental lo tiene todo: fotografiar
@@ -142,7 +230,7 @@ function veredicto({ textosEntrega, pedida, refs, gemelas = [], color = null }) 
         + 'o compare a ojo con la referencia y confirme usted.' };
   }
   if (!nombresRef.includes(pedida)) {
-    return { resultado: 'No puedo determinarlo', puntaje: null, candidato: null, candidato_puntaje: null, ranking: [],
+    return { resultado: 'No puedo determinarlo', puntaje: null, candidato: null, candidato_puntaje: null, ranking: [], ajenas,
       motivo: 'Esta bandeja no tiene fotos de referencia leídas en el catálogo, así que no hay contra qué '
         + 'compararla. Súbalas en Mantenimiento → Bandejas.' };
   }
@@ -164,8 +252,24 @@ function veredicto({ textosEntrega, pedida, refs, gemelas = [], color = null }) 
     puntaje: mio.puntaje,
     candidato: mejorOtra.codigo,
     candidato_puntaje: mejorOtra.puntaje,
-    ranking: ranking.slice(0, 5)
+    ranking: ranking.slice(0, 5),
+    ajenas
   };
+
+  /* NINGUNA bandeja del catalogo se parece a esto. Es distinto de «no se
+     distingue cual es»: el texto que se leyo no parece el de una bandeja. Va
+     ANTES de «Incorrecta» a proposito -con todo el ranking en el piso, la
+     segunda le puede ganar por centesimas y no significa nada- y devuelve
+     candidato en null, porque un candidato de 0.040 no es un candidato: la
+     pantalla agregaba «Se parece mas a X» y mandaba a buscar otra bandeja. */
+  if (!ranking.length || ranking[0].puntaje < MIN_PISO) {
+    return { ...base, resultado: 'No puedo determinarlo', candidato: null, candidato_puntaje: null,
+      motivo: 'Se leyó texto, pero no se parece al de NINGUNA de las ' + nombresRef.length
+        + ' bandejas del catálogo: la más alta quedó en ' + (ranking.length ? ranking[0].puntaje.toFixed(3) : '0.000')
+        + ' y esta bandeja en ' + mio.puntaje.toFixed(3) + '. No es que no se distinga cuál es: es que esto no '
+        + 'parece una bandeja. Revise que las fotos sean de los recipientes'
+        + (ajenas.length ? ' —' + listaAjenas() + '—' : '') + ' y no de un documento o una pantalla.' };
+  }
 
   /* Otra bandeja le gana por un margen claro -> es otra, y se dice cuál. Es la
      primera pregunta que se hace Bodega frente a un «Incorrecta»: ¿cuál es? */
@@ -223,6 +327,24 @@ function veredicto({ textosEntrega, pedida, refs, gemelas = [], color = null }) 
     motivo: 'El texto impreso corresponde a esta bandeja (' + mio.puntaje.toFixed(3)
       + ') y la siguiente candidata queda en ' + (mejorOtra.puntaje || 0).toFixed(3)
       + '. Ninguna otra bandeja del catálogo tiene este contenido.' };
+}
+
+/* El veredicto de arriba, con la nota de las fotos apartadas pegada al final
+   del motivo. Se hace aca y no en cada rama para no repetirla nueve veces, y
+   porque el motivo es lo que se graba y lo que sale en el correo: si el
+   puntaje se calculo ignorando dos fotos, eso tiene que quedar escrito. */
+function veredictoConNota(args) {
+  const v = veredicto(args);
+  const a = v.ajenas || [];
+  if (!a.length) return v;
+  const lista = a.map((x) => 'la ' + x.indice + ' parece ' + x.etiqueta).join(', ');
+  /* Las dos ramas que ya hablan de las apartadas -todas ajenas, y el piso- las
+     nombran en su propio motivo. No se repite. */
+  if (v.motivo.indexOf(lista) !== -1) return v;
+  if (a.length === 1 && v.motivo.indexOf('parece ' + a[0].etiqueta) !== -1) return v;
+  return { ...v, motivo: v.motivo + ' Se ignoró ' + (a.length === 1 ? '1 foto que no es de la bandeja'
+    : a.length + ' fotos que no son de la bandeja') + ' (' + lista + '): no cuenta' + (a.length === 1 ? '' : 'n')
+    + ' para el puntaje.' };
 }
 
 /* Debajo de esto, un parecido entre dos fotos es ruido: dos fotos de
@@ -294,6 +416,8 @@ function parear(refs, entrega) {
   return par;
 }
 
-module.exports = { veredicto, parear, terminos, terminosDeVarias, normalizar,
-                   construirIdf, vector, coseno,
-                   PESO_DISC, MIN_TERMINOS, MIN_PUNTAJE, MIN_MARGEN, MARGEN_CONTRA, MIN_PAREO, MARGEN_PAREO };
+module.exports = { veredicto: veredictoConNota, veredictoCrudo: veredicto,
+                   clasificarAjena, parear, terminos, terminosDeVarias, normalizar,
+                   construirIdf, vector, coseno, HUELLAS,
+                   PESO_DISC, MIN_TERMINOS, MIN_PUNTAJE, MIN_MARGEN, MARGEN_CONTRA,
+                   MIN_PISO, MIN_HUELLA, MIN_PAREO, MARGEN_PAREO };

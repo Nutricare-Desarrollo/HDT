@@ -2760,10 +2760,18 @@ app.http('solicitud-validacion-get', {
         referencia: ref.rows.map(({ texto, ...x }) => x),
         referencia_leidas: ref.rows.filter((x) => x.leida).length,
         pareo,
-        fotos: ent.rows.map(({ texto, ...x }) => ({
-          ...x,
-          puede_eliminar: puede && String(x.usuario_email || '').toLowerCase() === String(user.email || '').toLowerCase()
-        })),
+        /* `ajena` sale del MISMO clasificador que usa el veredicto, para que la
+           pantalla y el motivo nunca digan cosas distintas de la misma foto.
+           Se calcula al vuelo con el texto que ya esta en la fila: no hace
+           falta columna nueva ni migracion. */
+        fotos: ent.rows.map(({ texto, ...x }) => {
+          const aj = texto ? comparar.clasificarAjena(texto) : null;
+          return {
+            ...x,
+            ajena: aj ? { tipo: aj.tipo, etiqueta: aj.etiqueta } : null,
+            puede_eliminar: puede && String(x.usuario_email || '').toLowerCase() === String(user.email || '').toLowerCase()
+          };
+        }),
         veredicto: await veredictoDe(id, cod),
         /* Se puede validar en cuanto haya una foto. */
         puede_validar: puede,

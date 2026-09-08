@@ -382,6 +382,14 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .vb-selbar .n{font-weight:700;color:var(--txt);flex:1 1 auto}
 .vb-selbar button{font-size:12.5px;padding:6px 10px}
 .vb-f .sinleer{color:var(--warn);font-weight:700}
+/* «No es de la bandeja» pesa mas que «sin texto leido»: la foto no solo no
+   aporta, esta de mas. Va en rojo y con el borde de la miniatura marcado, para
+   que se vea cual sacar sin leer los pies uno por uno. */
+.vb-f .ajena{color:var(--danger,#c0392b);font-weight:700}
+.vb-f.es-ajena .im{outline:2px solid var(--danger,#c0392b);outline-offset:-2px}
+/* El resumen de arriba. Caja propia y no .chk-ayuda, que no tiene borde. */
+.vb-aviso-ajena{border:1.5px solid var(--danger);border-left-width:5px;border-radius:8px;
+  background:#fdf3f2;color:#8c2b20;font-size:13px;line-height:1.45;padding:9px 12px;margin:10px 0 4px}
 /* Tambien en la galeria del catalogo: la regla estaba atada a .vb-f y
    ahi el aviso salia en gris, que es justo lo que no se mira. */
 .bfot .sinleer{color:var(--warn);font-weight:700}
@@ -7111,12 +7119,26 @@ function valZonaSubida(){
 function valTirasEntrega(){
   const fs=VAL.fotos||[];
   if(!fs.length) return `<div class="vb-vacio" style="margin-top:10px">Todavía no hay fotos de esta entrega.</div>`;
-  let h=`<div class="vb-tiras">`;
+  let h='';
+  /* El resumen arriba, antes de las miniaturas. Con cinco fotos y tres
+     intrusas, leer los pies uno por uno para darse cuenta es trabajo de mas:
+     el numero va primero y dice que hacer. */
+  const naj=fs.filter(f=>f.ajena).length;
+  if(naj) h+=`<div class="vb-aviso-ajena">
+      <b>${naj===1?'Una de estas fotos no es de la bandeja':naj+' de estas fotos no son de la bandeja'}</b> —
+      ${naj===1?'está marcada abajo':'están marcadas abajo'}. No cuenta${naj===1?'':'n'} para el veredicto.
+      Elimíne${naj===1?'la':'las'} y fotografíe los recipientes, con las etiquetas a la vista.</div>`;
+  h+=`<div class="vb-tiras">`;
   fs.forEach((f,i)=>{
     const id=valId(f), marc=VAL_SEL.has(id);
+    /* Tres estados posibles en el pie, y solo uno a la vez: la foto no es de
+       la bandeja, o no se le leyo texto, o esta bien. El primero manda: si es
+       una hoja de consumo, que se haya leido o no da igual. */
     const rot=`Foto ${i+1}${f.nombre?' · '+esc(String(f.nombre).slice(0,28)):''}`
-      + (f.leida?'':'<br><span class="sinleer">'+esc(f.error_ocr||'sin texto leído')+'</span>');
-    h+=`<div class="vb-f${marc?' marcada':''}">
+      + (f.ajena
+          ? '<br><span class="ajena">no es de la bandeja: parece '+esc(f.ajena.etiqueta)+'</span>'
+          : (f.leida?'':'<br><span class="sinleer">'+esc(f.error_ocr||'sin texto leído')+'</span>'));
+    h+=`<div class="vb-f${marc?' marcada':''}${f.ajena?' es-ajena':''}">
           <div class="im" id="valEnt_${attr(id)}"></div>`;
     /* La casilla va al PIE, junto al nombre, y no encima de la miniatura: la
        miniatura es chica y una casilla flotando le tapaba una esquina. De
