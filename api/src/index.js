@@ -150,7 +150,32 @@ app.http('productos-list', {
     try {
       const force = (request.query.get('refresh') || '') === '1';
       const data = await getCatalogo(force);
-      return json(200, data);
+      /* Se le pega el CODIGO SIMA a cada producto. Va acá y no en los endpoints
+         de la hoja porque el imprimible lo necesita en los TRES caminos que lo
+         generan -el wizard, la vista de Bodega y la de Hospital- y este
+         catálogo ya lo carga el navegador en todos los roles, igual que la
+         descripción que usa catDesc(). Con esto no hay que tocar ninguna
+         consulta de hojas ni preguntarse quién puede ver qué: el código Sima
+         va impreso en el documento oficial, así que lo ve quien lo imprima.
+
+         SOLO EL CODIGO. El precio y los demás campos Sima NO se agregan: esos
+         son de la pantalla de Mantenimiento, que es solo Bodega/Administrador.
+
+         Si la consulta falla se devuelve el catálogo SIN el código Sima en vez
+         de dar error: este endpoint es el que valida los códigos en todas las
+         pantallas, y tumbarlo por un dato de impresión sería mucho peor que
+         imprimir una columna vacía. */
+      let sima = new Map();
+      try {
+        const r = await query(
+          `SELECT ProductoCodigo AS cod, CodigoSima AS sima FROM cat.ProductoSima
+            WHERE CodigoSima IS NOT NULL AND BTRIM(CodigoSima) <> ''`);
+        sima = new Map(r.rows.map((x) => [normCod(x.cod), x.sima]));
+      } catch (e) {
+        context.warn('No se pudieron leer los códigos Sima: ' + e.message);
+      }
+      const conSima = (data || []).map((p) => ({ ...p, codigo_sima: sima.get(normCod(p.codigo)) || '' }));
+      return json(200, conSima);
     } catch (e) {
       context.error(e);
       return json(502, { error: 'No se pudo obtener el catálogo de productos', detail: e.message });

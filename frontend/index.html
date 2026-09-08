@@ -2018,17 +2018,28 @@ function logout(){ location.href='/.auth/logout?post_logout_redirect_uri=/'; }
 
 /* ===== Catálogo de productos Nutricare ===== */
 let CATALOGO=null; // Map(codigo -> descripcion)
+/* Map(codigo de producto -> codigo Sima). Viaja en el MISMO /productos que las
+   descripciones, asi que esta disponible en los tres caminos que generan el
+   imprimible -el wizard, la vista de Bodega y la de Hospital- y en todos los
+   roles. Solo el codigo: el precio y los demas campos Sima son de la pantalla
+   de Mantenimiento, que es solo Bodega/Administrador. */
+let SIMA=null;
 const normCod = c => String(c==null?'':c).replace(/\s+/g,'').trim();
 function catReady(){ return CATALOGO instanceof Map && CATALOGO.size>0; }
 function catDesc(cod){ return catReady() ? (CATALOGO.get(normCod(cod))||'') : ''; }
+/* Devuelve '' cuando no hay dato -producto sin codigo Sima, o catalogo que no
+   cargo-. La columna del imprimible queda vacia, que es lo correcto: no todos
+   los productos tienen equivalente Sima. */
+function simaCodigo(cod){ return (SIMA instanceof Map) ? (SIMA.get(normCod(cod))||'') : ''; }
 // Fail-open: si el catálogo no cargó, no bloquea (devuelve true). Un código vacío nunca es válido.
 function catCodigoValido(cod){ const c=normCod(cod); if(!c) return false; if(!catReady()) return true; return CATALOGO.has(c); }
 async function loadCatalogo(){
   try{
     const arr=await api('GET','/productos');
-    const m=new Map();
-    (arr||[]).forEach(p=>{ const c=normCod(p.codigo); if(c) m.set(c, p.descripcion||''); });
-    CATALOGO=m;
+    const m=new Map(), sm=new Map();
+    (arr||[]).forEach(p=>{ const c=normCod(p.codigo); if(!c) return;
+      m.set(c, p.descripcion||''); if(p.codigo_sima) sm.set(c, p.codigo_sima); });
+    CATALOGO=m; SIMA=sm;
     revalidarDetalle();
   }catch(e){ CATALOGO=null; toast('No se pudo cargar el catálogo de productos: '+e.message); }
 }
@@ -2486,10 +2497,12 @@ async function recargarProductos(){
   if(btn){ btn.disabled=true; btn.textContent='Cargando…'; }
   try{
     const arr=await api('GET','/productos?refresh=1');
-    const m=new Map();
-    (arr||[]).forEach(p=>{ const c=normCod(p.codigo); if(c) m.set(c, p.descripcion||''); });
-    CATALOGO=m;
+    const m=new Map(), sm=new Map();
+    (arr||[]).forEach(p=>{ const c=normCod(p.codigo); if(!c) return;
+      m.set(c, p.descripcion||''); if(p.codigo_sima) sm.set(c, p.codigo_sima); });
+    CATALOGO=m; SIMA=sm;
     let msg='Catálogo cargado: '+m.size+' producto'+(m.size===1?'':'s')+'.';
+    if(sm.size) msg+=' Códigos Sima: '+sm.size+'.';
     try{ await loadLotes(); if(lotesReady()) msg+=' Lotes: '+LOTES.size+' códigos.'; }catch(_){}
     try{ await loadEquipos(); if(equipoReady()) msg+=' Equipos: '+EQUIPOS.size+'.'; }catch(_){}
     toast(msg);
@@ -3254,6 +3267,7 @@ function imprimirHoja(){
   const src = document.getElementById('verDetBody') ? (VER_DET||[]) : (h.detalle||[]);
   const filas=src.filter(noVacia).map(d=>({
     codigo: d.codigo||'',
+    sima: simaCodigo(d.codigo),
     equipo: equipoDemarcado(d.numero_equipo),
     // En Bodega la DESCRIPCIÓN oficial es la Descripción Nutricare (del catálogo),
     // con la nota de Hospital pegada atrás (no hay columna propia en el formato).
@@ -3277,7 +3291,15 @@ function imprimirDoc(enc, filas){
     // viene vacía, la celda va EN BLANCO. El guion se reserva para las filas de
     // relleno, donde sí indica que la línea no tiene nada.
     const rpTxt = rep!=='' ? esc(rep) : (und!=='' ? '' : esc(''));
-    rows+=`<tr><td class="cod">${esc(r.codigo||'')}</td><td class="eq">${esc(r.equipo||'')}</td><td class="ds">${esc(r.desc||'')}</td><td class="un">${esc(und)}</td><td class="rp">${rpTxt}</td></tr>`;
+    /* CODIGO SIMA: la misma regla que REPOSICION, y por la misma razon. En una
+       fila CON datos cuyo producto no tiene equivalente Sima, la celda va en
+       BLANCO; el guion queda reservado para las filas de relleno. Si no, el
+       mismo guion significaria dos cosas distintas en la misma tabla -«esta
+       linea no existe» y «este producto no tiene codigo Sima»- y en una hoja
+       firmada eso se presta a confusion. */
+    const simTxt = String(r.sima==null?'':r.sima).trim()!=='' ? esc(r.sima)
+                 : (und!=='' ? '' : esc(''));
+    rows+=`<tr><td class="cod">${esc(r.codigo||'')}</td><td class="sim">${simTxt}</td><td class="eq">${esc(r.equipo||'')}</td><td class="ds">${esc(r.desc||'')}</td><td class="un">${esc(und)}</td><td class="rp">${rpTxt}</td></tr>`;
   }
   const doc=`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Hoja de consumo ${esc(enc.numero_hoja||'')}</title>
 <style>
@@ -3323,11 +3345,15 @@ table{border-collapse:collapse}
 .det{width:100%;table-layout:fixed}
 .det th{background:#000;color:#fff;font-size:9pt;font-weight:bold;text-align:center;padding:5px 3px;border:1px solid #000;border-left-color:#fff;border-right-color:#fff;line-height:1.1}
 .det td{border:1px solid #000;height:17pt;padding:1.5pt 4px;font-size:9.5pt}
+/* Suman 100. El ancho del CODIGO SIMA -12%- sale de DESCRIPCION (47 -> 36) y
+   un punto de REPOSICION (16 -> 15). Descripcion era la unica con holgura, y
+   los codigos Sima del catalogo son cortos: «QX2-0103», ocho caracteres. */
 .det .cod{width:13%}
+.det .sim{width:12%;text-align:center}
 .det .eq{width:15%;text-align:center}
-.det .ds{width:47%}
+.det .ds{width:36%}
 .det .un{width:9%;text-align:center}
-.det .rp{width:16%;text-align:center}
+.det .rp{width:15%;text-align:center}
 .obs{border:1.5px solid #000;border-radius:8px;height:62pt;padding:4px 8px;font-size:8.75pt;font-weight:bold}
 .firmas{display:flex;gap:10px}
 .firmas .f{flex:1;border:1.5px solid #000;border-radius:8px;height:53pt;padding:3px 8px;font-size:8.75pt;font-weight:bold}
@@ -3351,7 +3377,7 @@ table{border-collapse:collapse}
     <tr><td><b>Diagnóstico:</b> ${esc(enc.diagnostico||'')}</td></tr>
   </table></div>
   <div class="detwrap"><table class="det">
-    <thead><tr><th class="cod">CÓDIGO</th><th class="eq">NÚMERO DE EQUIPO</th><th class="ds">DESCRIPCIÓN</th><th class="un">UND.</th><th class="rp">REPOSICIÓN ANAQUEL</th></tr></thead>
+    <thead><tr><th class="cod">CÓDIGO</th><th class="sim">CÓDIGO SIMA</th><th class="eq">NÚMERO DE EQUIPO</th><th class="ds">DESCRIPCIÓN</th><th class="un">UND.</th><th class="rp">REPOSICIÓN ANAQUEL</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
   <div class="obs">OBSERVACIONES</div>
@@ -3369,7 +3395,7 @@ function imprimirWizard(){
   const enc={}; encCampos().forEach(f=>{ const el=document.getElementById('enc_'+f.k); enc[f.k]= el ? el.value.trim() : ''; });
   const noVacia=(d)=> ['codigo','numero_equipo','und','reposicion_anaquel'].some(k=> String(d[k]==null?'':d[k]).trim()!=='');
   const filas=(WIZ.detalle||[]).filter(noVacia).map(d=>({
-    codigo:d.codigo||'', equipo:equipoDemarcado(d.numero_equipo),
+    codigo:d.codigo||'', sima:simaCodigo(d.codigo), equipo:equipoDemarcado(d.numero_equipo),
     desc: conNota(catDesc(d.codigo) || d.descripcion_nutricare || '', d.descripcion_adicional),
     und:(d.und==null?'':d.und), rep:(d.reposicion_anaquel==null?'':d.reposicion_anaquel)
   }));
