@@ -134,17 +134,23 @@ tbody tr:hover{background:#f5fafc}
    Solo de 641px para arriba: abajo de eso las tablas se vuelven tarjetas
    (el @media de .cards) y ahi no hay columna que anclar. */
 @media(min-width:641px){
-  #grid thead th:last-child,#pendGrid thead th:last-child,
-  #simaGrid thead th:last-child{position:sticky;right:0;z-index:3}
+  #grid thead th:last-child,#pendGrid thead th:last-child{position:sticky;right:0;z-index:3}
   #grid tbody tr:not(.aviso) td:last-child,
-  #pendGrid tbody tr:not(.aviso) td:last-child,
-  #simaGrid tbody tr:not(.aviso) td:last-child{
+  #pendGrid tbody tr:not(.aviso) td:last-child{
     position:sticky;right:0;background:#fff;
     box-shadow:-7px 0 7px -7px rgba(0,0,0,.22);
   }
   #grid tbody tr:not(.aviso):hover td:last-child,
-  #pendGrid tbody tr:not(.aviso):hover td:last-child,
-  #simaGrid tbody tr:not(.aviso):hover td:last-child{background:#f5fafc}
+  #pendGrid tbody tr:not(.aviso):hover td:last-child{background:#f5fafc}
+  /* Codigo Sima va por CLASE y no por :last-child: en el rol Hospital no hay
+     columna de acciones, asi que la ultima celda es el PRECIO y anclarla
+     dejaria el precio flotando sobre el resto de la tabla. */
+  #simaGrid thead th.sima-acc{position:sticky;right:0;z-index:3}
+  #simaGrid tbody tr:not(.aviso) td.sima-acc{
+    position:sticky;right:0;background:#fff;
+    box-shadow:-7px 0 7px -7px rgba(0,0,0,.22);
+  }
+  #simaGrid tbody tr:not(.aviso):hover td.sima-acc{background:#f5fafc}
 }
 .tag{background:#e8f4fb;color:var(--brand-d);padding:3px 9px;border-radius:20px;font-size:12px;font-weight:600}
 /* Numero de linea del detalle: es el mismo que muestran "Diferencias" e
@@ -1305,7 +1311,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div><h2>Código Sima</h2><div class="sub" id="simaSub">Códigos, descripción y precio Sima de cada producto</div></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           <button class="btn-ghost" onclick="loadSima()">🔄 Actualizar</button>
-          <button class="btn-primary" onclick="abrirSimaExcel()">📄 Subir Excel</button>
+          <button class="btn-primary hidden" id="simaXlsBtn2" onclick="abrirSimaExcel()">📄 Subir Excel</button>
         </div>
       </div>
       <div class="card">
@@ -2693,7 +2699,10 @@ function navGrupos(){
     { titulo:'MANTENIMIENTO', items:[
       {id:'bandejas',    ic:'\u{1F9F0}', l:'Bandejas',                 fn:showBandejas,    ver:canBodega},
       {id:'hospitales',  ic:'\u{1F3E5}', l:'Hospitales',               fn:showHospitales,  ver:canBodega},
-      {id:'sima',        ic:'\u{1F3F7}\uFE0F', l:'Código Sima',          fn:showSima,        ver:canBodega},
+      /* Para TODOS los roles: es pantalla de consulta. Hospital la ve completa
+         -precio incluido- pero de solo lectura; editar y subir Excel siguen
+         siendo de Bodega/Administrador, tambien en la API. */
+      {id:'sima',        ic:'\u{1F3F7}\uFE0F', l:'Código Sima',          fn:showSima,        ver:()=>true},
       {id:'notificaciones',ic:'\u2709\uFE0F', l:'Notificaciones',       fn:showNotificaciones, ver:canBodega},
       {id:'config',      ic:'\u2699\uFE0F',  l:'Configuración',            fn:showConfig,      ver:canBodega}
     ]},
@@ -5756,9 +5765,14 @@ const SIMA_COLS=[
   {k:'precio_sima',      l:'Precio', num:true}
 ];
 
+/* Un solo lugar decide si esta pantalla es de lectura o de edicion. Lo usan el
+   grid -para la columna del boton-, el modal y el boton de Excel. La API tiene
+   la misma regla en el PUT y en el importar: esto es la cara visible, no el
+   candado. */
+function simaPuedeEditar(){ return canBodega(); }
 async function showSima(){
-  if(!canBodega()){ toast('Su rol no tiene acceso a Código Sima'); showInicio(); return; }
   setTab('sima'); showOnly('viewSima');
+  document.getElementById('simaXlsBtn2').classList.toggle('hidden', !simaPuedeEditar());
   await loadSima();
 }
 async function loadSima(){
@@ -5781,8 +5795,12 @@ const simaPrecioTxt=(v)=> (v===''||v==null) ? '' : Number(v).toFixed(2);
 
 function renderSima(){
   const head=document.getElementById('simaHead');
-  head.innerHTML=`<tr>${SIMA_COLS.map(c=>`<th${c.num?' class="sima-num"':''}>${c.l}</th>`).join('')}<th></th></tr>`
-    +`<tr class="filter-row">${SIMA_COLS.map(c=>`<th><input placeholder="Filtrar…" oninput="onSimaFilter('${c.k}',this.value)" value="${attr(SIMA_COLF[c.k])}"></th>`).join('')}<th></th></tr>`;
+  /* La columna de acciones se dibuja SOLO si el rol puede editar. No se deja
+     vacia: quedaria una celda anclada a la derecha, con sombra y sin nada
+     adentro. */
+  const acc = simaPuedeEditar();
+  head.innerHTML=`<tr>${SIMA_COLS.map(c=>`<th${c.num?' class="sima-num"':''}>${c.l}</th>`).join('')}${acc?'<th class="sima-acc"></th>':''}</tr>`
+    +`<tr class="filter-row">${SIMA_COLS.map(c=>`<th><input placeholder="Filtrar…" oninput="onSimaFilter('${c.k}',this.value)" value="${attr(SIMA_COLF[c.k])}"></th>`).join('')}${acc?'<th class="sima-acc"></th>':''}</tr>`;
   const rows=simaFiltered();
   const b=document.getElementById('simaBody'); b.innerHTML='';
   document.getElementById('simaEmpty').classList.toggle('hidden', SIMA_ROWS.length>0);
@@ -5790,7 +5808,7 @@ function renderSima(){
   const foot=document.getElementById('simaFoot');
   if(!SIMA_ROWS.length){ foot.textContent=''; return; }
   foot.textContent = rows.length===1?'1 producto':(rows.length+' productos');
-  if(!rows.length){ b.innerHTML=`<tr class="aviso"><td colspan="${SIMA_COLS.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  if(!rows.length){ b.innerHTML=`<tr class="aviso"><td colspan="${SIMA_COLS.length+(acc?1:0)}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
   rows.forEach(r=>{
     const tds=SIMA_COLS.map(c=>{
       const v = c.num ? simaPrecioTxt(r[c.k]) : (r[c.k]==null?'':r[c.k]);
@@ -5798,12 +5816,15 @@ function renderSima(){
       return `<td${cls.trim()?` class="${cls.trim()}"`:''}${c.desc?` title="${attr(r[c.k])}"`:''}>${esc(v)}</td>`;
     }).join('');
     const tr=document.createElement('tr');
-    tr.innerHTML=tds+`<td><button class="icon-btn" onclick="editarSima('${attr(r.codigo)}')">✏️ Editar</button></td>`;
+    tr.innerHTML=tds+(acc?`<td class="sima-acc"><button class="icon-btn" onclick="editarSima('${attr(r.codigo)}')">✏️ Editar</button></td>`:'');
     b.appendChild(tr);
   });
 }
 
 function editarSima(cod){
+  /* Sin el boton nadie llega acá, pero la funcion es global y se puede llamar
+     desde la consola: la regla se repite donde se ejecuta. */
+  if(!simaPuedeEditar()){ toast('Su rol no puede editar los códigos Sima'); return; }
   const r=SIMA_ROWS.find(x=>String(x.codigo)===String(cod));
   if(!r){ toast('No se encontró el producto'); return; }
   SIMA_ACT=r;
@@ -8633,7 +8654,7 @@ const CARDS_FILAS = {
   /* Codigo Sima: el titulo de la tarjeta es el codigo de producto -la primera-
      y las cuatro descripciones largas van a lo ancho, si no la tarjeta queda
      ilegible en el celular. */
-  simaGrid:    () => [SIMA_COLS, {extras:[''], acciones:true,
+  simaGrid:    () => [SIMA_COLS, {extras: simaPuedeEditar()?['']:[], acciones: simaPuedeEditar(),
                       ancho:['descripcion','descripcion_sima','partida_sima','renglon_sima']}],
   notGrid:     () => [NOT_COLS, {extras:[''], acciones:true}],
   /* La accion es lo que se lee de la fila, asi que hace de titulo; el

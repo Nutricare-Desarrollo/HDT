@@ -265,7 +265,10 @@ app.http('productos-sima-list', {
   handler: async (request, context) => {
     const user = getUser(request);
     if (!user) return json(401, { error: 'No autenticado' });
-    if (!puedeBodega(await getRole(user))) return json(403, { error: 'Solo Bodega/Administrador' });
+    /* LEER lo puede CUALQUIER rol autenticado, Hospital incluido: la pantalla
+       de Código Sima es de consulta para todos y el precio se muestra igual
+       que en Bodega. ESCRIBIR sigue siendo de Bodega/Administrador — ver el
+       PUT y el importar, que mantienen su puedeBodega(). */
     try {
       const [cat, r] = await Promise.all([getCatalogo(false), query(SIMA_SELECT)]);
       const porCod = new Map(r.rows.map((x) => [normCod(x.producto_codigo), x]));
