@@ -21,7 +21,11 @@ const ETIQUETAS_ENC = {
   cirujano: 'Cirujano',
   instrumentista: 'Instrumentista',
   diagnostico: 'Diagnóstico',
-  procedimiento: 'Procedimiento'
+  procedimiento: 'Procedimiento',
+  /* Solo lo cambia Bodega/Administrador, y cambia a dónde va la cirugía:
+     es exactamente el tipo de campo por el que después se pregunta quién lo
+     tocó y cuándo. */
+  tipo_cirugia: 'Tipo de Cirugía'
 };
 
 /* Campos del detalle que se auditan. Quedan fuera a propósito:

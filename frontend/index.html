@@ -1088,6 +1088,18 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
           </div>
         </div>
         <div class="card pad">
+          <!-- Cirugía Transitoria. Es una AREA más de dbo.Configuracion: Origen y
+               Destino es exactamente lo que esa tabla guarda por área.
+               SIN el asterisco de requerido, a diferencia de las otras tres: si
+               fuera obligatoria, nadie podría guardar la configuración -ni tocar
+               el consecutivo- hasta completar este panel. -->
+          <div class="section-title" style="margin-top:0">Cirugía Transitoria</div>
+          <div class="cfg-grid">
+            <div class="field"><label>Origen</label><input id="cfg_transitoria_origen" type="text" autocomplete="off"></div>
+            <div class="field"><label>Destino</label><input id="cfg_transitoria_destino" type="text" autocomplete="off"></div>
+          </div>
+        </div>
+        <div class="card pad">
           <div class="section-title" style="margin-top:0">Consecutivo Hojas de consumo</div>
           <div class="cfg-grid">
             <div class="field">
@@ -1795,8 +1807,18 @@ const ENC = [
   {k:'paciente',l:'Paciente'},{k:'identificacion',l:'Identificación'},{k:'tipo',l:'Tipo'},
   {k:'fecha_accidente',l:'Fecha de accidente',t:'date'},{k:'fecha_cirugia',l:'Fecha de cirugía',t:'date'},{k:'fecha_hoja',l:'Fecha de la hoja',t:'date',req:true},
   {k:'cirujano',l:'Cirujano',req:true,cat:'cirujano'},{k:'instrumentista',l:'Instrumentista',req:true},
-  {k:'diagnostico',l:'Diagnóstico',full:true,area:true,req:true},{k:'procedimiento',l:'Procedimiento',full:true,area:true}
+  {k:'diagnostico',l:'Diagnóstico',full:true,area:true,req:true},{k:'procedimiento',l:'Procedimiento',full:true,area:true},
+  /* Tipo de Cirugía. `sel` lo dibuja como lista desplegable y `bodega` lo
+     limita a Bodega/Administrador: Hospital no lo ve ni al crear ni al mirar
+     una hoja, y como los bucles de LECTURA usan la misma lista filtrada,
+     tampoco lo manda al guardar. Sin `req`: la base tiene DEFAULT 'HDT'. */
+  {k:'tipo_cirugia',l:'Tipo de Cirugía',sel:['HDT','Transitoria'],bodega:true}
 ];
+/* Los campos del encabezado que el rol actual puede ver Y mandar. Se usa en
+   TODOS los bucles de ENC -los que dibujan y los que leen-, que es lo que
+   hace que Hospital no pise el tipo de cirugía al guardar: si no se dibuja, no
+   se lee, y si no se lee, no viaja en el body. */
+function encCampos(){ return ENC.filter(f=>!f.bodega || canBodega()); }
 // Columnas para Hospital: la "Descripción" es SIEMPRE la del catálogo (por código),
 // derivada y de solo lectura. No se usa el texto que venga del OCR de la foto.
 // Tope de la nota libre por linea. Igual al ancho de la columna en la base
@@ -1832,10 +1854,15 @@ const GRID_COLS = [
   {k:'consecutivo',l:'Consecutivo',link:true},
   {k:'fecha',l:'Fecha y hora'},{k:'usuario',l:'Usuario'},{k:'numero_hoja',l:'N°',tag:true},
   {k:'regimen',l:'Régimen'},
-  {k:'diagnostico',l:'Diagnóstico'},{k:'cantidad_lineas',l:'Artículos'},{k:'estado',l:'Estado',estado:true}
+  {k:'diagnostico',l:'Diagnóstico'},
+  /* Tipo de cirugía: solo Bodega/Administrador. Va antes de Artículos y Estado
+     porque es un dato de la hoja, no del avance del trámite. */
+  {k:'tipo_cirugia',l:'Tipo de cirugía',bodega:true},
+  {k:'cantidad_lineas',l:'Artículos'},{k:'estado',l:'Estado',estado:true}
 ];
-// Antes esto filtraba columnas por rol; ya no hay ninguna que dependa del rol.
-function gridCols(){ return GRID_COLS; }
+/* Volvió a haber columnas que dependen del rol: `bodega` las limita a
+   Bodega/Administrador. Hospital no ve el tipo de cirugía en ninguna pantalla. */
+function gridCols(){ return GRID_COLS.filter(c=>!c.bodega || canBodega()); }
 const ESTADOS = ['Enviado','En revisión','Creando TR','Finalizada','Error'];
 const ESTADO_COLOR = {'Enviado':'#0a5c8a','En revisión':'#e08e0b','Creando TR':'#7a3ea8','Finalizada':'#1e8f5a','Error':'#c0392b'};
 const PEND='Pendiente reposición'; // estado de una hoja guardada sin la reposición todavía
@@ -2601,7 +2628,11 @@ async function showInicio(){
 }
 
 /* ===== CONFIGURACIÓN (solo Bodega / Administrador) ===== */
-const CFG_AREAS=['anaquel','nutricare','facturacion'];
+const CFG_AREAS=['anaquel','nutricare','facturacion','transitoria'];
+/* Las que el formulario EXIGE. 'transitoria' queda afuera a proposito: si
+   entrara, la pantalla no dejaria guardar nada -ni el consecutivo- hasta
+   que alguien complete el panel nuevo. */
+const CFG_AREAS_REQ=['anaquel','nutricare','facturacion'];
 async function showConfig(){
   if(!canBodega()){ toast('Su rol no tiene acceso a Configuración'); showInicio(); return; }
   setTab('config'); showOnly('viewConfig');
@@ -2627,7 +2658,7 @@ async function loadConfig(){
     if(n) n.value=(c.consecutivo!=null?String(c.consecutivo):'');
   }catch(e){ toast('No se pudo cargar la configuración: '+e.message); }
 }
-const CFG_LABELS={anaquel:'Anaquel',nutricare:'Nutricare',facturacion:'Facturación'};
+const CFG_LABELS={anaquel:'Anaquel',nutricare:'Nutricare',facturacion:'Facturación',transitoria:'Cirugía Transitoria'};
 async function guardarConfig(){
   if(!canBodega()){ toast('Su rol no tiene acceso a Configuración'); return; }
   const cfg={};
@@ -2645,7 +2676,7 @@ async function guardarConfig(){
   // Todos los campos son requeridos.
   document.querySelectorAll('#viewConfig .invalid').forEach(el=>el.classList.remove('invalid'));
   const faltan=[];
-  CFG_AREAS.forEach(a=>{
+  CFG_AREAS_REQ.forEach(a=>{
     [['origen','Origen'],['destino','Destino']].forEach(([k,l])=>{
       if(!cfg[a][k]){
         faltan.push(CFG_LABELS[a]+' · '+l);
@@ -2875,7 +2906,7 @@ async function verHoja(id, keepDyn){
 /* Vista solo lectura (Hospital): sin columna Lote. */
 function renderVerReadonly(h){
   let html='<div class="section-title" style="margin-top:0">Encabezado</div><div class="kv">';
-  ENC.forEach(f=>{ html+=`<div class="k">${f.l}</div><div>${esc(h[f.k])}</div>`; });
+  encCampos().forEach(f=>{ html+=`<div class="k">${f.l}</div><div>${esc(h[f.k])}</div>`; });
   html+='</div>';
   html+='<div class="section-title">Detalle ('+(h.detalle?h.detalle.length:0)+' líneas)</div>';
   html+='<div class="tbl-wrap"><table><thead><tr><th class="det-num">#</th>'+DET_COLS.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
@@ -2898,7 +2929,7 @@ function renderReemplazoView(h){
   CUR_VER=h; VER_DET=(h.detalle||[]).map(d=>Object.assign({},d,{numero_equipo:equipoDemarcado(d.numero_equipo)}));
   document.getElementById('verSub').innerHTML=`Reemplazo / corrección · N° ${esc(h.numero_hoja||'—')} · ${esc(estadoTxt(h.estado))}`;
   let html='<div class="section-title" style="margin-top:0">Encabezado</div><div class="kv">';
-  ENC.forEach(f=>{ html+=`<div class="k">${f.l}</div><div>${esc(h[f.k])}</div>`; });
+  encCampos().forEach(f=>{ html+=`<div class="k">${f.l}</div><div>${esc(h[f.k])}</div>`; });
   html+='</div>';
   const org = (h.origen_numero_hoja!=null && h.origen_numero_hoja!=='') ? ('N° '+h.origen_numero_hoja) : ('#'+(h.hoja_origen_id||'—'));
   html+='<div class="section-title">Origen</div>';
@@ -2999,12 +3030,22 @@ function renderVerEdit(h){
   }
   html+='<div class="section-title" style="margin-top:0">Encabezado</div><div class="form-grid">';
   const dis = bloq ? ' disabled' : '';
-  ENC.forEach(f=>{
+  encCampos().forEach(f=>{
     const val=h[f.k]!=null?h[f.k]:'';
     const cls='field'+(f.full?' full':'');
     const lbl=`${f.l}${f.req?' <span class="req">*</span>':''}`;
     if(f.area) html+=`<div class="${cls}"><label>${lbl}</label><textarea id="ver_${f.k}" rows="2"${dis}>${attr(val)}</textarea></div>`;
     else if(f.cat) html+=`<div class="${cls}"><label>${lbl}</label>`+catField(f.cat, 'ver_'+f.k, val, bloq)+`</div>`;
+    /* Lista cerrada. Sin «— Seleccione —»: la base tiene DEFAULT 'HDT' y no
+       existe el caso «sin tipo», asi que una opcion vacia solo permitiria
+       dejarlo en blanco. Si el valor guardado no estuviera en la lista se
+       agrega igual, para no perderlo de vista al abrir la hoja. */
+    else if(f.sel){
+      const ops=f.sel.includes(String(val))||!String(val) ? f.sel : f.sel.concat([String(val)]);
+      html+=`<div class="${cls}"><label>${lbl}</label><select id="ver_${f.k}"${dis}>`
+          + ops.map(o=>`<option value="${attr(o)}"${String(val)===o?' selected':''}>${esc(o)}</option>`).join('')
+          + `</select></div>`;
+    }
     else html+=`<div class="${cls}"><label>${lbl}</label><input id="ver_${f.k}" type="${f.t||'text'}" value="${attr(val)}"${dis}></div>`;
   });
   html+='</div>';
@@ -3087,7 +3128,7 @@ function rmVerDet(i){ VER_DET.splice(i,1); if(!VER_DET.length)VER_DET=[{}]; rend
 function imprimirHoja(){
   const h=CUR_VER||{};
   // Encabezado: usa los inputs editables (Bodega) si existen; si no, los datos guardados (Hospital).
-  const enc={}; ENC.forEach(f=>{ const el=document.getElementById('ver_'+f.k); enc[f.k]= el ? el.value.trim() : (h[f.k]!=null?String(h[f.k]):''); });
+  const enc={}; encCampos().forEach(f=>{ const el=document.getElementById('ver_'+f.k); enc[f.k]= el ? el.value.trim() : (h[f.k]!=null?String(h[f.k]):''); });
   const noVacia=(d)=> ['codigo','numero_equipo','und','reposicion_anaquel'].some(k=> String(d[k]==null?'':d[k]).trim()!=='');
   // Detalle: tabla editable (Bodega) -> VER_DET; solo lectura (Hospital) -> detalle guardado.
   const src = document.getElementById('verDetBody') ? (VER_DET||[]) : (h.detalle||[]);
@@ -3193,7 +3234,7 @@ table{border-collapse:collapse}
 
 /* Imprime desde el wizard (creación/edición): usa los inputs enc_ y WIZ.detalle. */
 function imprimirWizard(){
-  const enc={}; ENC.forEach(f=>{ const el=document.getElementById('enc_'+f.k); enc[f.k]= el ? el.value.trim() : ''; });
+  const enc={}; encCampos().forEach(f=>{ const el=document.getElementById('enc_'+f.k); enc[f.k]= el ? el.value.trim() : ''; });
   const noVacia=(d)=> ['codigo','numero_equipo','und','reposicion_anaquel'].some(k=> String(d[k]==null?'':d[k]).trim()!=='');
   const filas=(WIZ.detalle||[]).filter(noVacia).map(d=>({
     codigo:d.codigo||'', equipo:equipoDemarcado(d.numero_equipo),
@@ -3206,14 +3247,14 @@ function imprimirWizard(){
 async function guardarVer(){
   if(!canBodega()){ toast('Su rol no puede editar hojas'); return; }
   if(hojaBloqueada(CUR_VER)){ toast('La hoja está bloqueada: sus trabajos ya se enviaron a Dynamics.'); return; }
-  const enc={}; ENC.forEach(f=>{ const el=document.getElementById('ver_'+f.k); enc[f.k]=el?el.value.trim():''; });
+  const enc={}; encCampos().forEach(f=>{ const el=document.getElementById('ver_'+f.k); enc[f.k]=el?el.value.trim():''; });
 
   document.querySelectorAll('#verBody .invalid, #verBody .combo-invalid').forEach(el=>{ el.classList.remove('invalid','combo-invalid'); el.title=''; });
   const errores=[];
 
   // 1) Requeridos del encabezado
   const faltanEnc=[];
-  ENC.filter(f=>f.req).forEach(f=>{
+  encCampos().filter(f=>f.req).forEach(f=>{
     if(!enc[f.k]){ faltanEnc.push(f.l); const el=document.getElementById('ver_'+f.k); if(el) el.classList.add('invalid'); }
   });
   if(faltanEnc.length) errores.push('Complete los campos requeridos del encabezado: '+faltanEnc.join(', ')+'.');
@@ -4386,12 +4427,18 @@ function fillStep2(enc, det){
   // consecutivo sugerido. El usuario lo puede cambiar; al guardar se valida.
   if(!WIZ.editId && WIZ.numeroSugerido) enc=Object.assign({}, enc||{}, {numero_hoja:WIZ.numeroSugerido});
   const c=document.getElementById('encFields'); c.innerHTML='';
-  ENC.forEach(f=>{
+  encCampos().forEach(f=>{
     const w=document.createElement('div'); w.className='field'+(f.full?' full':'');
     const val=enc[f.k]!=null?enc[f.k]:'';
     const lbl=`${f.l}${f.req?' <span class="req">*</span>':''}`;
     if(f.area) w.innerHTML=`<label>${lbl}</label><textarea id="enc_${f.k}" rows="2">${attr(val)}</textarea>`;
     else if(f.cat) w.innerHTML=`<label>${lbl}</label>`+catField(f.cat, 'enc_'+f.k, val);
+    else if(f.sel){
+      const ops=f.sel.includes(String(val))||!String(val) ? f.sel : f.sel.concat([String(val)]);
+      w.innerHTML=`<label>${lbl}</label><select id="enc_${f.k}">`
+        + ops.map(o=>`<option value="${attr(o)}"${String(val)===o?' selected':''}>${esc(o)}</option>`).join('')
+        + `</select>`;
+    }
     else w.innerHTML=`<label>${lbl}</label><input id="enc_${f.k}" type="${f.t||'text'}" value="${attr(val)}">`;
     c.appendChild(w);
   });
@@ -4517,7 +4564,7 @@ function motivosDetalle(){
    agregarlo sin salir de la pantalla. */
 function motivosEncabezado(){
   const out=[];
-  ENC.filter(f=>f.cat).forEach(f=>{
+  encCampos().filter(f=>f.cat).forEach(f=>{
     const el=document.getElementById('enc_'+f.k); if(!el) return;
     const v=String(el.value||'').trim();
     if(v && !catEnCat(f.cat, v))
@@ -4609,7 +4656,7 @@ function rmDet(i){ WIZ.detalle.splice(i,1); if(!WIZ.detalle.length)WIZ.detalle=[
    Se excluyen las columnas derivadas (la Descripción del catálogo) porque no las
    escribe el usuario. */
 function wizSnapshot(){
-  const enc = ENC.map(f=>{
+  const enc = encCampos().map(f=>{
     const el=document.getElementById('enc_'+f.k);
     return f.k+'='+(el ? String(el.value).trim() : '');
   }).join('|');
@@ -4642,19 +4689,19 @@ function verImagenActual(){ if(WIZ.dataUrl) openImg(WIZ.dataUrl); else toast('No
 /* Junta encabezado + detalle del wizard, valida y marca errores en pantalla.
    reqReposicion=true exige la columna Reposición en cada línea (solo al Enviar). */
 function recolectarWizard(reqReposicion){
-  const enc={}; ENC.forEach(f=>{ const el=document.getElementById('enc_'+f.k); enc[f.k]=el?el.value.trim():''; });
+  const enc={}; encCampos().forEach(f=>{ const el=document.getElementById('enc_'+f.k); enc[f.k]=el?el.value.trim():''; });
   document.querySelectorAll('#encFields .invalid, #detBody .invalid, #detBody .combo-invalid').forEach(el=>{ el.classList.remove('invalid','combo-invalid'); el.title=''; });
   const errores=[];
 
   // Requeridos del encabezado
   const faltanEnc=[];
-  ENC.filter(f=>f.req).forEach(f=>{
+  encCampos().filter(f=>f.req).forEach(f=>{
     if(!enc[f.k]){ faltanEnc.push(f.l); const el=document.getElementById('enc_'+f.k); if(el) el.classList.add('invalid'); }
   });
   if(faltanEnc.length) errores.push('Complete los campos requeridos del encabezado: '+faltanEnc.join(', ')+'.');
   // Cinturon y tirantes: el boton ya esta deshabilitado por updateEnviarState,
   // pero un valor fuera del catalogo no debe poder colarse por ningun lado.
-  ENC.filter(f=>f.cat).forEach(f=>{
+  encCampos().filter(f=>f.cat).forEach(f=>{
     const el=document.getElementById('enc_'+f.k); if(!el) return;
     const v=String(el.value||'').trim();
     if(v && !catEnCat(f.cat, v)){

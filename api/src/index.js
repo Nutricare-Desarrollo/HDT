@@ -3084,6 +3084,32 @@ const ENC_FIELDS = [
 ];
 const DATE_KEYS = new Set(['fecha_accidente', 'fecha_cirugia', 'fecha_hoja']);
 
+/* ============================================================
+   Tipo de cirugía (HDT / Transitoria)
+   ------------------------------------------------------------
+   NO va en ENC_FIELDS a propósito. Ese arreglo se recorre entero en el POST y
+   en el PUT y escribe TODAS sus columnas: si el tipo estuviera ahí, un PUT de
+   Hospital -que no ve el campo y por lo tanto no lo manda- lo pisaría con
+   NULL en cada guardado. Se maneja aparte y con candado de rol.
+
+   La regla es la misma en las dos puntas: el tipo lo tocan Bodega y
+   Administrador. Hospital no lo ve en la pantalla, y aunque alguien armara el
+   pedido a mano, acá no pasa: tipoCirugiaDe() devuelve null y la columna no
+   se toca. En el POST, null significa dejar que el DEFAULT de la base lo
+   ponga en 'HDT' -que es lo pedido para todo lo que crea Hospital-.
+   ============================================================ */
+const TIPOS_CIRUGIA = ['HDT', 'Transitoria'];
+
+/* Devuelve el valor a grabar, o null si no corresponde tocar la columna. */
+function tipoCirugiaDe(enc, rol) {
+  if (!puedeBodega(rol)) return null;
+  const v = String((enc && enc.tipo_cirugia) == null ? '' : enc.tipo_cirugia).trim();
+  if (!v) return null;
+  /* Se compara sin distinguir mayúsculas pero se graba el valor del catálogo:
+     el CHECK de la base es sensible a la caja y «transitoria» lo violaría. */
+  return TIPOS_CIRUGIA.find((t) => t.toLowerCase() === v.toLowerCase()) || null;
+}
+
 /* Estados en los que la hoja queda BLOQUEADA: ya se dispararon sus trabajos en
    Dynamics. 'Creando TR' se pone en cuanto el usuario toca el botón, así que el
    bloqueo empieza ahí y no cuando el flujo responde.
@@ -3244,6 +3270,11 @@ app.http('hoja-create', {
     cols.push('CirugiaId'); vals.push(Number.isFinite(cirugiaId) ? cirugiaId : null); ph.push('$' + (++i));
     cols.push('CreadoPor'); vals.push(user.name || user.email); ph.push('$' + (++i));
     cols.push('CreadoPorEmail'); vals.push(user.email); ph.push('$' + (++i));
+    /* Tipo de cirugía: solo si lo manda Bodega/Administrador. Si no, la columna
+       NO se nombra en el INSERT y el DEFAULT de la base la pone en 'HDT', que
+       es lo pedido para todo lo que crea Hospital. */
+    const tipoCir = tipoCirugiaDe(enc, await getRole(user));
+    if (tipoCir) { cols.push('TipoCirugia'); vals.push(tipoCir); ph.push('$' + (++i)); }
 
     const client = await getClient();
     try {
@@ -3307,7 +3338,8 @@ app.http('hojas-list', {
       const r = await query(
         `SELECT h.Id AS id, h.Consecutivo AS consecutivo, h.NumeroHoja AS numero_hoja, h.NumeroDocumento AS numero_documento,
                 h.Regimen AS regimen, h.Cirujano AS cirujano, h.Instrumentista AS instrumentista,
-                h.Diagnostico AS diagnostico, h.Estado AS estado, h.CreadoPor AS usuario,
+                h.Diagnostico AS diagnostico, h.TipoCirugia AS tipo_cirugia,
+                h.Estado AS estado, h.CreadoPor AS usuario,
                 h.CreadoPorEmail AS usuario_email,
                 to_char((h.FechaCreacion AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica', 'YYYY-MM-DD HH24:MI') AS fecha,
                 (SELECT COUNT(*) FROM dbo.HojaConsumoDetalle d WHERE d.HojaConsumoId = h.Id) AS cantidad_lineas,
@@ -3334,7 +3366,8 @@ app.http('hoja-get', {
                 to_char(FechaCirugia,'YYYY-MM-DD') AS fecha_cirugia,
                 to_char(FechaHoja,'YYYY-MM-DD') AS fecha_hoja,
                 Cirujano AS cirujano, Instrumentista AS instrumentista, Diagnostico AS diagnostico,
-                Procedimiento AS procedimiento, ImagenBase64 AS imagen_base64, ImagenTipo AS imagen_tipo,
+                Procedimiento AS procedimiento, TipoCirugia AS tipo_cirugia,
+                ImagenBase64 AS imagen_base64, ImagenTipo AS imagen_tipo,
                 Estado AS estado, CreadoPor AS usuario, CreadoPorEmail AS usuario_email,
                 EsReemplazo AS es_reemplazo, HojaOrigenId AS hoja_origen_id, CirugiaId AS cirugia_id,
                 ObservacionResolucion AS observacion_resolucion, ResueltoPor AS resuelto_por,
@@ -3402,7 +3435,8 @@ app.http('hoja-update', {
                 to_char(FechaCirugia,'YYYY-MM-DD')   AS fecha_cirugia,
                 to_char(FechaHoja,'YYYY-MM-DD')      AS fecha_hoja,
                 Cirujano AS cirujano, Instrumentista AS instrumentista,
-                Diagnostico AS diagnostico, Procedimiento AS procedimiento, Estado AS estado
+                Diagnostico AS diagnostico, Procedimiento AS procedimiento,
+                TipoCirugia AS tipo_cirugia, Estado AS estado
            FROM dbo.HojaConsumo WHERE Id=$1`, [id]);
       const ad = await query(
         `SELECT Codigo AS codigo, NumeroEquipo AS numero_equipo, Und AS und,
@@ -3436,6 +3470,11 @@ app.http('hoja-update', {
       sets.push(`${col}=$${i}`); vals.push(v);
     }
     if (nuevoEstado) { i++; sets.push(`Estado=$${i}`); vals.push(nuevoEstado); }
+    /* Tipo de cirugía: si el rol no puede o no vino, NO se agrega el SET y la
+       columna queda como estaba. Es lo que evita que un guardado de Hospital
+       -que no manda el campo- borre lo que puso Bodega. */
+    const tipoCirUp = tipoCirugiaDe(enc, rolEditor);
+    if (tipoCirUp) { i++; sets.push(`TipoCirugia=$${i}`); vals.push(tipoCirUp); }
     const idPh = '$' + (++i); vals.push(id);
 
     const client = await getClient();
@@ -3470,7 +3509,11 @@ app.http('hoja-update', {
           descripcion_adicional: descAdicional(d)
         }));
         const cambios = audit.diffHoja(antes, {
-          encabezado: enc,
+          /* El tipo de cirugía va con el valor EFECTIVO, no con el que trajo el
+             body: si el rol no puede tocarlo -Hospital- la columna no se
+             escribió, y comparar contra un campo que no vino inventaría un
+             cambio «Tipo de Cirugía: HDT -> (vacío)» en cada guardado. */
+          encabezado: { ...enc, tipo_cirugia: tipoCirUp || (antes.encabezado || {}).tipo_cirugia || null },
           detalle: detNorm,
           estado: nuevoEstado || estadoActual
         });
@@ -3558,7 +3601,7 @@ app.http('hoja-diferencias', {
               to_char(FechaHoja,'YYYY-MM-DD')      AS fecha_hoja,
               Cirujano AS cirujano, Instrumentista AS instrumentista,
               Diagnostico AS diagnostico, Procedimiento AS procedimiento,
-              HojaOrigenId AS hoja_origen_id
+              TipoCirugia AS tipo_cirugia, HojaOrigenId AS hoja_origen_id
          FROM dbo.HojaConsumo WHERE Id=$1`;
     const SEL_DET = `SELECT Codigo AS codigo, NumeroEquipo AS numero_equipo, Und AS und,
               ReposicionAnaquel AS reposicion_anaquel, NumeroLote AS numero_lote,
@@ -4163,7 +4206,11 @@ app.http('cirugias-ingest', {
 /* ============================================================
    Configuración (ubicaciones Origen/Destino) — solo Bodega/Administrador
    ============================================================ */
-const CONFIG_AREAS = ['anaquel', 'nutricare', 'facturacion'];
+/* 'transitoria' es el panel «Cirugía Transitoria». Es una AREA más de la
+   misma tabla: lo que pide -Origen y Destino- es exactamente lo que
+   dbo.Configuracion ya guarda por área, así que no hay tabla nueva.
+   Ojo: a diferencia de las otras tres, la pantalla NO la exige. */
+const CONFIG_AREAS = ['anaquel', 'nutricare', 'facturacion', 'transitoria'];
 
 /* Devuelve { anaquel:{origen,destino}, nutricare:{...}, facturacion:{...} }. */
 app.http('config-get', {
