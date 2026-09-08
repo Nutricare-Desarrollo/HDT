@@ -4298,11 +4298,28 @@ app.http('config-save', {
    URL de seguimiento; el navegador consulta el estado hasta que termina.
    ============================================================ */
 
-// Arma el objeto que espera el flujo: { Consecutivo, Detalle, Configuracion }.
+/* Arma el objeto que espera el flujo: { Consecutivo, Cirugia, Detalle, Configuracion }.
+
+   `Cirugia` es el Tipo de Cirugía que eligió Bodega en el encabezado -'HDT' o
+   'Transitoria'-. Va como campo propio y no dentro de Configuracion porque es
+   un dato DE ESTA HOJA, no de la configuración del sistema: dice qué cirugía
+   se hizo, mientras Configuracion dice a dónde mover el inventario.
+
+   `Configuracion` sale de dbo.Configuracion SIN filtrar áreas, así que desde la
+   migración 35 -que sembró la fila- ya viaja el área «transitoria» con el
+   Origen y el Destino del panel «Cirugía Transitoria», sin que haya que
+   nombrarla acá. El área va en MINÚSCULA, igual que las otras tres y tal como
+   está en la base. */
 async function construirPayloadDynamics(hojaId) {
-  const h = await query(`SELECT Id AS id, Consecutivo AS consecutivo FROM dbo.HojaConsumo WHERE Id=$1`, [hojaId]);
+  const h = await query(
+    `SELECT Id AS id, Consecutivo AS consecutivo, TipoCirugia AS tipo_cirugia
+       FROM dbo.HojaConsumo WHERE Id=$1`, [hojaId]);
   if (!h.rows.length) throw new Error('Hoja de consumo no encontrada');
   const consecutivo = h.rows[0].consecutivo;
+  /* La columna es NOT NULL con DEFAULT 'HDT', así que en la práctica siempre
+     trae valor. El respaldo está por si algún día se le quita el default: es
+     mejor mandar 'HDT' que una cadena vacía, que el flujo no sabría interpretar. */
+  const Cirugia = h.rows[0].tipo_cirugia || 'HDT';
 
   const det = await query(
     `SELECT Codigo AS codigo, NumeroLote AS numero_lote, Und AS und, ReposicionAnaquel AS reposicion_anaquel,
@@ -4320,7 +4337,7 @@ async function construirPayloadDynamics(hojaId) {
   const cfg = await query(`SELECT Area AS area, Origen AS origen, Destino AS destino FROM dbo.Configuracion ORDER BY Area`);
   const Configuracion = cfg.rows.map(c => ({ area: c.area, origen: c.origen || '', destino: c.destino || '' }));
 
-  return { Consecutivo: consecutivo, Detalle, Configuracion };
+  return { Consecutivo: consecutivo, Cirugia, Detalle, Configuracion };
 }
 
 // ¿El proceso es "Pedido Pendiente"? (tolerante a mayúsculas/espacios)
