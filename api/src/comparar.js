@@ -17,6 +17,27 @@
    Después, TF-IDF y coseno. El IDF importa: una etiqueta que aparece en todas
    las bandejas no distingue nada, y una que aparece en una sola vale oro.
 
+   LAS TRES RESPUESTAS, y qué significa cada una:
+
+     Correcta               el texto corresponde a la bandeja pedida.
+     Incorrecta             el texto NO es de esta bandeja. Dos casos muy
+                            distintos, y el motivo dice cuál:
+                              · es OTRA bandeja del catálogo, y se nombra;
+                              · no es NINGUNA bandeja —fotos de documentos o
+                                pantallas—, y ahí no hay candidato que dar.
+     No puedo determinarlo  el dato NO ALCANZA para decidir: se leyó poco
+                            texto, la bandeja no tiene referencia, o dos
+                            candidatas quedaron demasiado cerca.
+
+   LA LÍNEA ENTRE «INCORRECTA» Y «NO PUEDO DETERMINARLO» es si hay un
+   HALLAZGO o una FALTA DE DATO, no cuán mal salió el puntaje. Un puntaje en
+   el piso no es falta de dato: es el dato diciendo que esto no es una
+   bandeja. Estaba del otro lado y era un error con consecuencia: con «No
+   puedo determinarlo» la pantalla invita a «Comparar y decidir», y alguien
+   podía estampar «Confirmo que es la NUT-…» sobre cinco fotos de papeles.
+   Nada de esto bloquea el despacho —lo que diga la persona sigue pisando al
+   veredicto—, pero el aviso al despachar ahora sí nombra la bandeja.
+
    POR QUÉ HAY UN «NO PUEDO DETERMINARLO». Porque no existe un umbral que
    separe limpio. Medido sobre 13 bandejas contra las 118: con el corte en
    0,20 acepta 12 de 13 correctas pero deja pasar 7 ajenas; con 0,30 rechaza 4
@@ -40,7 +61,9 @@ const MIN_PUNTAJE    = 0.25;  // por debajo, no se afirma que sea la pedida
 const MIN_MARGEN     = 0.10;  // diferencia contra la segunda candidata
 const MARGEN_CONTRA  = 0.12;  // cuánto tiene que ganarle otra para decir «Incorrecta»
 /* Piso de «esto no es una bandeja». Es OTRA pregunta que la del umbral que no
-   se pudo cerrar: no «cual de las 118 es» sino «es alguna». Medido sobre las
+   se pudo cerrar: no «cual de las 118 es» sino «es alguna». Y por eso su
+   respuesta es «Incorrecta» y no una duda: es un hallazgo, no una falta de
+   dato. Medido sobre las
    fotos que pasan MIN_TERMINOS: el techo del ranking completo de las fotos
    ajenas llega a 0.058, y la legitima mas floja -una sola foto, la peor de las
    50- arranca en 0.309. El hueco entre las dos es de sobra. Se pone en 0.10,
@@ -204,10 +227,13 @@ function veredicto({ textosEntrega, pedida, refs, gemelas = [], color = null }) 
   const propias = todas.filter((x) => !x.ajena).map((x) => x.tx);
   const listaAjenas = () => ajenas.map((a) => 'la ' + a.indice + ' parece ' + a.etiqueta).join(', ');
 
-  /* Todas ajenas: no hay nada que comparar, y el mensaje NO invita a confirmar
-     a mano. Confirmar sobre un papel es justo lo que hay que evitar. */
+  /* Todas ajenas: no hay nada que comparar. Es «Incorrecta» por lo mismo que
+     la rama del piso, y con mas razon: aca las fotos estan RECONOCIDAS como
+     documentos nuestros. El mensaje no invita a confirmar a mano -confirmar
+     sobre un papel es justo lo que hay que evitar-, y el estado tampoco.
+     Sin puntaje: no se comparo nada, y un 0 se leeria como un puntaje medido. */
   if (ajenas.length && !propias.length) {
-    return { resultado: 'No puedo determinarlo', puntaje: null, candidato: null, candidato_puntaje: null,
+    return { resultado: 'Incorrecta', puntaje: null, candidato: null, candidato_puntaje: null,
       ranking: [], ajenas,
       motivo: (ajenas.length === 1
           ? 'La foto subida no es de la bandeja: parece ' + ajenas[0].etiqueta + '. '
@@ -257,14 +283,18 @@ function veredicto({ textosEntrega, pedida, refs, gemelas = [], color = null }) 
   };
 
   /* NINGUNA bandeja del catalogo se parece a esto. Es distinto de «no se
-     distingue cual es»: el texto que se leyo no parece el de una bandeja. Va
-     ANTES de «Incorrecta» a proposito -con todo el ranking en el piso, la
-     segunda le puede ganar por centesimas y no significa nada- y devuelve
-     candidato en null, porque un candidato de 0.040 no es un candidato: la
-     pantalla agregaba «Se parece mas a X» y mandaba a buscar otra bandeja. */
+     distingue cual es»: el texto que se leyo no parece el de una bandeja.
+     RESPONDE «Incorrecta», porque es un hallazgo y no una falta de dato: el
+     caso que lo motivo son cinco fotos de documentos que puntearon 0.018, y
+     como duda la pantalla ofrecia confirmarlas a mano.
+     Va ANTES de la otra rama de «Incorrecta» a proposito -con todo el ranking
+     en el piso, la segunda le puede ganar por centesimas y no significa nada-
+     y devuelve candidato en null, porque un candidato de 0.040 no es un
+     candidato: la pantalla agregaba «Se parece mas a X» y mandaba a buscar
+     otra bandeja. */
   if (!ranking.length || ranking[0].puntaje < MIN_PISO) {
-    return { ...base, resultado: 'No puedo determinarlo', candidato: null, candidato_puntaje: null,
-      motivo: 'Se leyó texto, pero no se parece al de NINGUNA de las ' + nombresRef.length
+    return { ...base, resultado: 'Incorrecta', candidato: null, candidato_puntaje: null,
+      motivo: 'El texto de estas fotos no corresponde a NINGUNA de las ' + nombresRef.length
         + ' bandejas del catálogo: la más alta quedó en ' + (ranking.length ? ranking[0].puntaje.toFixed(3) : '0.000')
         + ' y esta bandeja en ' + mio.puntaje.toFixed(3) + '. No es que no se distinga cuál es: es que esto no '
         + 'parece una bandeja. Revise que las fotos sean de los recipientes'
