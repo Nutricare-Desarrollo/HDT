@@ -3312,6 +3312,72 @@ function imprimirHoja(conSima){
   }));
   imprimirDoc(enc, filas, conSima);
 }
+/* ===========================================================================
+   LOS IMPRIMIBLES SE ABREN EN OTRO PROCESO DEL NAVEGADOR
+   ---------------------------------------------------------------------------
+   EL SINTOMA: después de imprimir, la aplicación quedaba muerta. No es que no
+   respondiera al clic: no marcaba ni el hover al pasar el mouse por un botón, y
+   una caja de texto no tomaba el foco ni con doble clic. Seguía así al cambiar
+   de pantalla o de rol —o mejor dicho, PARECIA que se cambiaba: en realidad no
+   pasaba nada—.
+
+   LA CAUSA, medida: `window.open()` crea la ventana con relación de opener, y
+   Chrome la pone EN EL MISMO PROCESO de renderizado que la aplicación, porque
+   es del mismo origen. `window.print()` es un bucle modal SINCRONICO: mientras
+   el diálogo de impresión está abierto, bloquea el hilo principal de ese
+   proceso —el de las dos pestañas—. Con la aplicación en ese mismo hilo no hay
+   hover, ni foco, ni clic, ni repintado: está congelada, no rota.
+
+   El experimento, con un bloqueo de 3 segundos dentro de la ventana hija:
+
+       window.open(url, '_blank')              -> el opener se congeló 3008 ms
+       window.open(url, '_blank', 'noopener')  ->      "        siguió en  50 ms
+
+   Y por qué aparecía «en varias ocasiones» y no siempre: el diálogo tiene que
+   quedar abierto. Imprimir, NO cerrar esa pestaña, volver a la aplicación e
+   imprimir otra vez es la forma más fácil de dejarlo así —y con los dos botones
+   de impresión uno al lado del otro, es lo que uno hace—.
+
+   LA SOLUCION: el documento se sirve como Blob y la ventana se abre con
+   `noopener`, que no es solo «sin window.opener»: hace que Chrome le dé SU
+   PROPIO proceso. Desde ahí su diálogo de impresión no puede tocar el hilo de
+   la aplicación. Sale más barato que con document.write, además, porque no hay
+   que escribir el HTML en la otra ventana.
+
+   EL PRECIO: con `noopener`, window.open devuelve null SIEMPRE —haya abierto o
+   no—, así que el aviso de «el navegador bloqueó la ventana» ya no puede salir
+   del valor de retorno. El imprimible avisa que cargó por BroadcastChannel, que
+   es del mismo origen y cruza procesos; si en dos segundos no llegó nada, es
+   que no se abrió.
+   ======================================================================== */
+const IMP_CANAL='hdt-imprimible';
+/* El <script> que va DENTRO del imprimible: avisa que cargó y manda a imprimir.
+   El cierre va escapado -<\/script>- porque si no, el parser de HTML cerraría
+   ACA el <script> de la aplicación. */
+const IMP_SCRIPT='<script>'
+  +'try{new BroadcastChannel("'+IMP_CANAL+'").postMessage(1);}catch(e){}'
+  +'window.onload=function(){setTimeout(function(){window.print();},150);};'
+  +'<\/script>';
+
+function abrirImprimible(doc){
+  let url;
+  try{ url=URL.createObjectURL(new Blob([doc],{type:'text/html;charset=utf-8'})); }
+  catch(e){ toast('No se pudo preparar el documento para imprimir: '+e.message); return; }
+  /* Sin BroadcastChannel no hay forma de saber si abrió, y en ese caso es mejor
+     no avisar nada que avisar en falso cada vez que se imprime. */
+  let llego=false, ch=null;
+  try{ ch=new BroadcastChannel(IMP_CANAL); ch.onmessage=()=>{ llego=true; }; }
+  catch(e){ llego=true; }
+  window.open(url,'_blank','noopener');
+  setTimeout(()=>{
+    if(ch){ try{ ch.close(); }catch(e){} }
+    if(!llego) toast('El navegador bloqueó la ventana de impresión. Permití los pop-ups e intentá de nuevo.');
+    /* Se revoca DESPUES de que cargó: revocarlo antes deja la ventana en
+       blanco. Un minuto es de sobra, y no deja el blob colgado toda la sesión. */
+    setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} }, 60000);
+  }, 2000);
+}
+
 /* Las columnas del imprimible, con su ancho en los DOS formatos. Estan en una
    sola lista a proposito: el ancho es un porcentaje y los dos juegos tienen que
    sumar 100, asi que tenerlos separados era garantia de que un dia dejaran de
@@ -3450,11 +3516,9 @@ ${cols.map((c)=>'.det .'+c.k+'{width:'+ancho(c)+'%'
   <div class="obs">OBSERVACIONES</div>
   <div class="firmas"><div class="f">FIRMA CIRUJANO</div><div class="f">INSTRUMENTISTA</div><div class="f">FIRMA SOPORTE QUIRÚRGICO</div></div>
 </div>
-<script>window.onload=function(){setTimeout(function(){window.print();},150);};<\/script>
+${IMP_SCRIPT}
 </body></html>`;
-  const w=window.open('','_blank');
-  if(!w){ toast('El navegador bloqueó la ventana de impresión. Permití los pop-ups e intentá de nuevo.'); return; }
-  w.document.open(); w.document.write(doc); w.document.close();
+  abrirImprimible(doc);
 }
 
 /* Imprime desde el wizard (creación/edición): usa los inputs enc_ y WIZ.detalle. */
@@ -4468,7 +4532,10 @@ function descargarImagen(){
 }
 function abrirImagenNuevaPestana(){
   const url=imagenBlobUrl(); if(!url){ toast('No hay imagen para abrir'); return; }
-  window.open(url,'_blank');
+  /* `noopener` también acá: no hace falta el handle, y así esa pestaña queda en
+     su propio proceso. Si alguien le da Ctrl+P, su diálogo no congela la app
+     -es el mismo caso que el de los imprimibles-. */
+  window.open(url,'_blank','noopener');
   setTimeout(()=>URL.revokeObjectURL(url), 60000);
 }
 
@@ -8407,11 +8474,11 @@ function docImprimir(titulo, cuerpo){
   const doc=`<!doctype html><html lang="es"><head><meta charset="utf-8">`
     +`<title>${attr(titulo)}</title><style>${DOC_CSS}</style></head>`
     +`<body><div class="doc">${cuerpo}</div>`
-    +`<script>window.onload=function(){setTimeout(function(){window.print();},150);};<\/script>`
+    +IMP_SCRIPT
     +`</body></html>`;
-  const w=window.open('','_blank');
-  if(!w){ toast('El navegador bloqueó la ventana de impresión. Permití los pop-ups e intentá de nuevo.'); return; }
-  w.document.open(); w.document.write(doc); w.document.close();
+  /* El check list y la solicitud de equipo salen por el mismo camino: el
+     congelamiento no era de la hoja de consumo, era de window.open + print. */
+  abrirImprimible(doc);
 }
 
 /* Cantidad tal como vino del catalogo, igual que en pantalla: el 0 se senala
