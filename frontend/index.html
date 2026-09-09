@@ -1094,7 +1094,8 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div id="detAviso" class="det-aviso hidden"></div>
         <div class="foot">
           <button class="btn-ghost" id="verImgBtn" onclick="verImagenActual()">🖼️ Ver hoja de consumo</button>
-          <button class="btn-ghost" id="wizPrintBtn" onclick="imprimirWizard()">🖨️ Imprimir</button>
+          <button class="btn-ghost" id="wizPrintBtn" onclick="imprimirWizard(false)">🖨️ Imprimir</button>
+          <button class="btn-ghost" id="wizPrintSimaBtn" onclick="imprimirWizard(true)">🏷️ Imprimir Código Sima</button>
           <button class="btn-ghost" onclick="cancelWizard()">Cancelar</button>
           <button class="btn-ghost" id="guardarBtn" onclick="guardar()">💾 Guardar</button>
           <button class="btn-primary" id="enviarBtn" onclick="enviar()">Enviar hoja de consumo</button>
@@ -3076,7 +3077,8 @@ function renderVerReadonly(h){
   html+='</tbody></table></div>';
   html+='<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">';
   if(h.imagen_base64){ html+=`<button class="btn-ghost" onclick="verImagenGuardada()">🖼️ Ver hoja de consumo</button>`; }
-  html+=`<button class="btn-ghost" onclick="imprimirHoja()">🖨️ Imprimir</button>`;
+  html+=`<button class="btn-ghost" onclick="imprimirHoja(false)">🖨️ Imprimir</button>`;
+  html+=`<button class="btn-ghost" onclick="imprimirHoja(true)">🏷️ Imprimir Código Sima</button>`;
   if(canSubir() && !h.es_reemplazo){ html+=`<button class="btn-ghost" onclick="openReemplazo(${h.id})">🔁 Crear reemplazo / corrección</button>`; }
   html+='</div>';
   html+='<div class="section-title" style="margin-top:22px">Fotos de la hoja sellada</div>';
@@ -3123,7 +3125,8 @@ function renderReemplazoView(h){
   }
 
   html+='<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">';
-  html+=`<button class="btn-ghost" onclick="imprimirHoja()">🖨️ Imprimir</button>`;
+  html+=`<button class="btn-ghost" onclick="imprimirHoja(false)">🖨️ Imprimir</button>`;
+  html+=`<button class="btn-ghost" onclick="imprimirHoja(true)">🏷️ Imprimir Código Sima</button>`;
   if(canBodega() && !resuelto){ html+=`<button class="btn-primary" onclick="resolverReemplazo(${h.id})">✔️ Marcar como resuelto</button>`; }
   html+='</div>';
   document.getElementById('verBody').innerHTML=html;
@@ -3224,7 +3227,8 @@ function renderVerEdit(h){
   html+=`<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
       ${bloq ? '' : `<button class="btn-primary" id="verSaveBtn" onclick="guardarVer()">💾 Guardar cambios</button>
       <button class="btn-dyn" id="verDynBtn" onclick="crearTrabajosDynamics()" ${dynEnabled?'':'disabled'} title="${dynEnabled?'Crear los trabajos en Dynamics':'Primero guardá los cambios (valida los códigos) para habilitar'}">🔗 Crear Trabajos en Dynamics</button>`}
-      <button class="btn-ghost" onclick="imprimirHoja()">🖨️ Imprimir</button>
+      <button class="btn-ghost" onclick="imprimirHoja(false)">🖨️ Imprimir</button>
+      <button class="btn-ghost" onclick="imprimirHoja(true)">🏷️ Imprimir Código Sima</button>
       ${(canSubir() && !h.es_reemplazo) ? `<button class="btn-ghost" onclick="openReemplazo(${h.id})">🔁 Crear reemplazo / corrección</button>` : ''}
     </div>`;
   html+='<div class="section-title" style="margin-top:22px">Fotos de la hoja sellada</div>';
@@ -3287,7 +3291,9 @@ function rmVerDet(i){ VER_DET.splice(i,1); if(!VER_DET.length)VER_DET=[{}]; rend
 
 /* Imprime la hoja de consumo con el formato oficial de Nutricare.
    Usa los valores en pantalla (incluye ediciones sin guardar). */
-function imprimirHoja(){
+/* Los dos botones entran por aca: `false` es la hoja de siempre y `true` la que
+   lleva la columna CODIGO SIMA. */
+function imprimirHoja(conSima){
   const h=CUR_VER||{};
   // Encabezado: usa los inputs editables (Bodega) si existen; si no, los datos guardados (Hospital).
   const enc={}; encCampos().forEach(f=>{ const el=document.getElementById('ver_'+f.k); enc[f.k]= el ? el.value.trim() : (h[f.k]!=null?String(h[f.k]):''); });
@@ -3304,10 +3310,42 @@ function imprimirHoja(){
     und: (d.und==null?'':d.und),
     rep: (d.reposicion_anaquel==null?'':d.reposicion_anaquel)
   }));
-  imprimirDoc(enc, filas);
+  imprimirDoc(enc, filas, conSima);
 }
-/* Genera el documento imprimible (formato oficial Nutricare) y abre la impresión. */
-function imprimirDoc(enc, filas){
+/* Las columnas del imprimible, con su ancho en los DOS formatos. Estan en una
+   sola lista a proposito: el ancho es un porcentaje y los dos juegos tienen que
+   sumar 100, asi que tenerlos separados era garantia de que un dia dejaran de
+   sumar. `soloSima` marca la que existe unicamente en el formato con Sima.
+
+   El 12% del CODIGO SIMA sale de DESCRIPCION (47 -> 36) y un punto de
+   REPOSICION (16 -> 15): descripcion era la unica con holgura, y los codigos
+   Sima del catalogo son cortos -«QX2-0103», ocho caracteres-. */
+const IMP_COLS=[
+  {k:'cod', th:'CÓDIGO',             con:13, sin:13},
+  {k:'sim', th:'CÓDIGO SIMA',        con:12, soloSima:true},
+  {k:'eq',  th:'NÚMERO DE EQUIPO',   con:15, sin:15},
+  {k:'ds',  th:'DESCRIPCIÓN',        con:36, sin:47},
+  {k:'un',  th:'UND.',               con:9,  sin:9},
+  {k:'rp',  th:'REPOSICIÓN ANAQUEL', con:15, sin:16}
+];
+
+/* Genera el documento imprimible (formato oficial Nutricare) y abre la impresión.
+
+   `conSima` decide si va la columna CODIGO SIMA. Son DOS hojas distintas y las
+   dos se usan: la de siempre —sin Sima— es la que se manda al hospital, y la
+   otra es para el tramite de Sima. Por eso no es una preferencia guardada ni un
+   interruptor en Configuracion: se elige en el momento, con el boton, porque la
+   misma hoja se imprime de las dos formas segun a donde vaya.
+
+   NO TIENE VALOR POR DEFECTO A PROPOSITO: `conSima===true` y nada mas. Un
+   `conSima=true` de fabrica haria que cualquier llamada futura que se olvide
+   del argumento saque la hoja CON los codigos Sima sin que nadie lo haya
+   pedido, y eso es justo lo que no puede pasar en la que va al hospital.
+   Olvidarse el argumento saca la hoja de siempre. */
+function imprimirDoc(enc, filas, conSima){
+  conSima = (conSima===true);
+  const cols = IMP_COLS.filter((c)=> conSima || !c.soloSima);
+  const ancho = (c)=> conSima ? c.con : c.sin;
   const fp=(enc.fecha_hoja||'').split('-'); // [YYYY, MM, DD]
   const anio=fp[0]||'', mes=fp[1]||'', dia=fp[2]||'';
   const MIN=18, total=Math.max(filas.length, MIN);
@@ -3328,9 +3366,14 @@ function imprimirDoc(enc, filas){
        firmada eso se presta a confusion. */
     const simTxt = String(r.sima==null?'':r.sima).trim()!=='' ? esc(r.sima)
                  : (und!=='' ? '' : esc(''));
-    rows+=`<tr><td class="cod">${esc(r.codigo||'')}</td><td class="sim">${simTxt}</td><td class="eq">${esc(r.equipo||'')}</td><td class="ds">${esc(r.desc||'')}</td><td class="un">${esc(und)}</td><td class="rp">${rpTxt}</td></tr>`;
+    const celda={ cod:esc(r.codigo||''), sim:simTxt, eq:esc(r.equipo||''),
+                   ds:esc(r.desc||''), un:esc(und), rp:rpTxt };
+    rows+='<tr>'+cols.map((c)=>`<td class="${c.k}">${celda[c.k]}</td>`).join('')+'</tr>';
   }
-  const doc=`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Hoja de consumo ${esc(enc.numero_hoja||'')}</title>
+  /* El titulo distingue las dos: es el nombre que propone el navegador al
+     guardar como PDF, y con las dos hojas en la carpeta de descargas hace falta
+     saber cual es cual sin abrirlas. */
+  const doc=`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Hoja de consumo ${esc(enc.numero_hoja||'')}${conSima?' — con código Sima':''}</title>
 <style>
 /* TAMANOS EN PUNTOS, NO EN PIXELES. Esto se imprime, y el punto es una unidad
    fisica -1pt = 1/72 pulgada- mientras el pixel CSS depende de una equivalencia
@@ -3374,15 +3417,10 @@ table{border-collapse:collapse}
 .det{width:100%;table-layout:fixed}
 .det th{background:#000;color:#fff;font-size:9pt;font-weight:bold;text-align:center;padding:5px 3px;border:1px solid #000;border-left-color:#fff;border-right-color:#fff;line-height:1.1}
 .det td{border:1px solid #000;height:17pt;padding:1.5pt 4px;font-size:9.5pt}
-/* Suman 100. El ancho del CODIGO SIMA -12%- sale de DESCRIPCION (47 -> 36) y
-   un punto de REPOSICION (16 -> 15). Descripcion era la unica con holgura, y
-   los codigos Sima del catalogo son cortos: «QX2-0103», ocho caracteres. */
-.det .cod{width:13%}
-.det .sim{width:12%;text-align:center}
-.det .eq{width:15%;text-align:center}
-.det .ds{width:36%}
-.det .un{width:9%;text-align:center}
-.det .rp{width:15%;text-align:center}
+/* Los anchos salen de IMP_COLS, asi que suman 100 en los dos formatos sin que
+   haya que acordarse. Centradas todas menos CODIGO y DESCRIPCION. */
+${cols.map((c)=>'.det .'+c.k+'{width:'+ancho(c)+'%'
+   + (c.k==='cod'||c.k==='ds' ? '' : ';text-align:center') + '}').join('\n')}
 .obs{border:1.5px solid #000;border-radius:8px;height:62pt;padding:4px 8px;font-size:8.75pt;font-weight:bold}
 .firmas{display:flex;gap:10px}
 .firmas .f{flex:1;border:1.5px solid #000;border-radius:8px;height:53pt;padding:3px 8px;font-size:8.75pt;font-weight:bold}
@@ -3406,7 +3444,7 @@ table{border-collapse:collapse}
     <tr><td><b>Diagnóstico:</b> ${esc(enc.diagnostico||'')}</td></tr>
   </table></div>
   <div class="detwrap"><table class="det">
-    <thead><tr><th class="cod">CÓDIGO</th><th class="sim">CÓDIGO SIMA</th><th class="eq">NÚMERO DE EQUIPO</th><th class="ds">DESCRIPCIÓN</th><th class="un">UND.</th><th class="rp">REPOSICIÓN ANAQUEL</th></tr></thead>
+    <thead><tr>${cols.map((c)=>'<th class="'+c.k+'">'+c.th+'</th>').join('')}</tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
   <div class="obs">OBSERVACIONES</div>
@@ -3420,7 +3458,7 @@ table{border-collapse:collapse}
 }
 
 /* Imprime desde el wizard (creación/edición): usa los inputs enc_ y WIZ.detalle. */
-function imprimirWizard(){
+function imprimirWizard(conSima){
   const enc={}; encCampos().forEach(f=>{ const el=document.getElementById('enc_'+f.k); enc[f.k]= el ? el.value.trim() : ''; });
   const noVacia=(d)=> ['codigo','numero_equipo','und','reposicion_anaquel'].some(k=> String(d[k]==null?'':d[k]).trim()!=='');
   const filas=(WIZ.detalle||[]).filter(noVacia).map(d=>({
@@ -3428,7 +3466,7 @@ function imprimirWizard(){
     desc: conNota(catDesc(d.codigo) || d.descripcion_nutricare || '', d.descripcion_adicional),
     und:(d.und==null?'':d.und), rep:(d.reposicion_anaquel==null?'':d.reposicion_anaquel)
   }));
-  imprimirDoc(enc, filas);
+  imprimirDoc(enc, filas, conSima);
 }
 
 async function guardarVer(){
@@ -4643,18 +4681,28 @@ function fillStep2(enc, det){
     if(WIZ.editId) sellCargar(WIZ.editId, 'wizSellBody');
   }
 }
-/* El botón Imprimir del wizard se habilita solo cuando la hoja YA está guardada
-   (WIZ.editId con valor). Antes se podía imprimir un borrador que la base nunca
-   vio, así que circulaba una hoja de consumo sin registro detrás. En una hoja
-   nueva queda deshabilitado hasta el primer Guardar; después se imprime desde la
-   hoja abierta (Pendientes de reposición o el listado), que sí existe en la base. */
+/* Los botones de imprimir del wizard se habilitan solo cuando la hoja YA está
+   guardada (WIZ.editId con valor). Antes se podía imprimir un borrador que la
+   base nunca vio, así que circulaba una hoja de consumo sin registro detrás. En
+   una hoja nueva quedan deshabilitados hasta el primer Guardar; después se
+   imprime desde la hoja abierta (Pendientes de reposición o el listado), que sí
+   existe en la base.
+
+   SON LOS DOS, y el bucle es para que siga siendo así: el candado no es sobre el
+   formato de la hoja sino sobre si existe en la base, y eso no cambia porque
+   lleve una columna más. */
+const WIZ_PRINT_BTNS=[
+  {id:'wizPrintBtn',     ok:'Imprimir la hoja de consumo'},
+  {id:'wizPrintSimaBtn', ok:'Imprimir la hoja de consumo con la columna Código Sima'}
+];
 function syncWizPrintBtn(){
-  const b=document.getElementById('wizPrintBtn'); if(!b) return;
   const guardada = !!WIZ.editId;
-  b.disabled = !guardada;
-  b.title = guardada
-    ? 'Imprimir la hoja de consumo'
-    : 'Primero guarde la hoja: solo se puede imprimir una hoja ya registrada.';
+  for(const x of WIZ_PRINT_BTNS){
+    const el=document.getElementById(x.id); if(!el) continue;
+    el.disabled = !guardada;
+    el.title = guardada ? x.ok
+      : 'Primero guarde la hoja: solo se puede imprimir una hoja ya registrada.';
+  }
 }
 function renderDet(){
   const b=document.getElementById('detBody'); b.innerHTML='';
