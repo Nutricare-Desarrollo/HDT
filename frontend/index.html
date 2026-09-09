@@ -142,9 +142,10 @@ tbody tr:hover{background:#f5fafc}
   }
   #grid tbody tr:not(.aviso):hover td:last-child,
   #pendGrid tbody tr:not(.aviso):hover td:last-child{background:#f5fafc}
-  /* Codigo Sima va por CLASE y no por :last-child: en el rol Hospital no hay
-     columna de acciones, asi que la ultima celda es el PRECIO y anclarla
-     dejaria el precio flotando sobre el resto de la tabla. */
+  /* Codigo Sima va por CLASE y no por :last-child: la columna de acciones se
+     dibuja solo si el rol puede editar -hoy los tres, pero no siempre fue
+     asi-, y sin ella la ultima celda es el PRECIO; anclarla dejaria el precio
+     flotando sobre el resto de la tabla. */
   #simaGrid thead th.sima-acc{position:sticky;right:0;z-index:3}
   #simaGrid tbody tr:not(.aviso) td.sima-acc{
     position:sticky;right:0;background:#fff;
@@ -1305,7 +1306,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       </div>
     </section>
 
-    <!-- CODIGO SIMA — el catalogo de productos con sus campos Sima (Bodega / Admin) -->
+    <!-- CODIGO SIMA — el catalogo de productos con sus campos Sima (los tres roles) -->
     <section id="viewSima" class="hidden">
       <div class="page-head">
         <div><h2>Código Sima</h2><div class="sub" id="simaSub">Códigos, descripción y precio Sima de cada producto</div></div>
@@ -5743,9 +5744,9 @@ async function confirmarVaciarDetalle(){
 }
 
 /* ===== CODIGO SIMA: el catalogo de productos con sus campos Sima =====
-   Solo Bodega / Administrador. El grid lista TODO el catalogo -con los campos
-   Sima vacios en los productos que no tienen-, porque es la unica forma de
-   completar uno nuevo sin poder agregar productos.
+   Los tres roles: Hospital tambien edita e importa. El grid lista TODO el
+   catalogo -con los campos Sima vacios en los productos que no tienen-, porque
+   es la unica forma de completar uno nuevo sin poder agregar productos.
 
    NO HAY «NUEVO PRODUCTO», a proposito: las filas las manda el catalogo
    externo. La regla tambien esta en la API -el PUT rechaza con 404 un codigo
@@ -5767,9 +5768,15 @@ const SIMA_COLS=[
 
 /* Un solo lugar decide si esta pantalla es de lectura o de edicion. Lo usan el
    grid -para la columna del boton-, el modal y el boton de Excel. La API tiene
-   la misma regla en el PUT y en el importar: esto es la cara visible, no el
-   candado. */
-function simaPuedeEditar(){ return canBodega(); }
+   la misma regla en el PUT y en el importar -`puedeSima`-: esto es la cara
+   visible, no el candado.
+
+   LOS TRES ROLES editan e importan, y por eso no reusa canBodega() ni
+   canSubir(): esta pantalla no reparte por rol, la levanta quien tenga el
+   archivo de Sima. Se enumeran los tres y no se pone `true` para que un cuarto
+   rol futuro no entre por descuido. */
+const canSima=()=> ROL==='Hospital'||ROL==='Bodega'||ROL==='Administrador';
+function simaPuedeEditar(){ return canSima(); }
 async function showSima(){
   setTab('sima'); showOnly('viewSima');
   document.getElementById('simaXlsBtn2').classList.toggle('hidden', !simaPuedeEditar());
@@ -5846,7 +5853,7 @@ function editarSima(cod){
 function closeSima(){ document.getElementById('simaModal').classList.add('hidden'); SIMA_ACT=null; }
 
 async function guardarSima(){
-  if(!canBodega()){ toast('Su rol no puede editar los códigos Sima'); return; }
+  if(!simaPuedeEditar()){ toast('Su rol no puede editar los códigos Sima'); return; }
   if(!SIMA_ACT) return;
   const err=document.getElementById('simaErr'); err.textContent='';
   const body={

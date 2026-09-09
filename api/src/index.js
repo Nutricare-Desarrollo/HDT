@@ -82,6 +82,12 @@ async function getRole(user) {
 }
 const puedeSubir = (rol) => rol === 'Hospital' || rol === 'Administrador';
 const puedeBodega = (rol) => rol === 'Bodega' || rol === 'Administrador';
+/* Codigo Sima lo edita e importa CUALQUIERA DE LOS TRES ROLES. Es la unica
+   pantalla asi: los datos Sima los levanta quien tiene el archivo, no un rol
+   en particular. Se enumeran los tres a proposito y no se acepta «cualquier
+   autenticado»: getRole devuelve 'Hospital' cuando el usuario no esta en
+   UsuarioRol, y un cuarto rol futuro no deberia entrar por descuido. */
+const puedeSima = (rol) => rol === 'Hospital' || rol === 'Bodega' || rol === 'Administrador';
 
 /* ============================================================
    Bitacora: se envuelve app.http UNA vez, aca, antes de que se registre
@@ -184,7 +190,7 @@ app.http('productos-list', {
 });
 
 /* ============================================================
-   Códigos Sima del catálogo  (solo Bodega / Administrador)
+   Códigos Sima del catálogo  (los tres roles)
    ------------------------------------------------------------
    El catálogo de productos es EXTERNO -lo sirve PRODUCTOS_API_URL- así que los
    seis campos Sima viven en cat.ProductoSima, indexados por el código de
@@ -305,7 +311,7 @@ app.http('productos-sima-save', {
   handler: async (request, context) => {
     const user = getUser(request);
     if (!user) return json(401, { error: 'No autenticado' });
-    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para editar los códigos Sima' });
+    if (!puedeSima(await getRole(user))) return json(403, { error: 'No tiene permiso para editar los códigos Sima' });
     const cod = normCod(decodeURIComponent(request.params.codigo || ''));
     if (!cod) return json(400, { error: 'Código de producto inválido' });
     try {
@@ -350,7 +356,7 @@ app.http('productos-sima-importar', {
   handler: async (request, context) => {
     const user = getUser(request);
     if (!user) return json(401, { error: 'No autenticado' });
-    if (!puedeBodega(await getRole(user))) return json(403, { error: 'No tiene permiso para importar los códigos Sima' });
+    if (!puedeSima(await getRole(user))) return json(403, { error: 'No tiene permiso para importar los códigos Sima' });
     const b = await request.json().catch(() => ({}));
     const filas = Array.isArray(b.filas) ? b.filas : [];
     if (!filas.length) return json(400, { error: 'El archivo no trae filas' });
