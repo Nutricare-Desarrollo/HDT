@@ -818,6 +818,12 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 }
 
 .overlay{position:fixed;inset:0;background:rgba(10,40,60,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:60}
+/* El de «cargando» va MAS ARRIBA que los demas overlay. Todos son .overlay con
+   z-index 60, y con el mismo z-index gana el que esta despues en el HTML:
+   #loadModal esta antes que casi todos los modales, asi que se dibujaba DEBAJO
+   del modal abierto y sus botones seguian recibiendo clics mientras la peticion
+   viajaba. 90 y no mas: el toast es 100 y tiene que verse encima. */
+#loadModal{z-index:90}
 .modal{background:#fff;border-radius:14px;max-width:820px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden}
 .modal-head{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
 .modal-head h3{margin:0;font-size:16px;color:var(--brand-d)}
@@ -1906,6 +1912,19 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       <button class="btn-ghost" onclick="document.getElementById('simaXlsInput').click()">Seleccionar archivo…</button>
       <button class="btn-primary hidden" id="simaXlsBtn" onclick="simaXlsConfirmar()">Cargar</button>
     </div>
+  </div>
+</div>
+
+<!-- MODAL resultado de la carga de codigos Sima.
+     Es un modal APARTE y no el cuerpo del de subir, por lo mismo que en los
+     componentes de la bandeja: el de subir se cierra al terminar -es lo pedido,
+     y su cuerpo es markup estatico que no conviene reescribir-, pero los
+     rechazos hay que poder leerlos. Con 200 filas el toast se va antes. -->
+<div id="simaXlsResModal" class="overlay hidden">
+  <div class="modal">
+    <div class="modal-head"><h3>Filas que no entraron</h3><button class="x" onclick="closeSimaXlsRes()">×</button></div>
+    <div class="modal-body"><div id="simaXlsResBody"></div></div>
+    <div class="modal-foot"><button class="btn-primary" onclick="closeSimaXlsRes()">Entendido</button></div>
   </div>
 </div>
 
@@ -5889,7 +5908,11 @@ function abrirSimaExcel(){
 }
 function closeSimaExcel(){
   document.getElementById('simaXlsModal').classList.add('hidden');
-  document.getElementById('simaXlsBtn').disabled=false;
+  const bx=document.getElementById('simaXlsBtn');
+  /* El texto se devuelve a «Cargar». Ahora que el modal se cierra al terminar
+     bien, el boton se queda con el «Cargando…» de la corrida anterior y
+     reaparecia asi al elegir el siguiente archivo. */
+  bx.disabled=false; bx.textContent='Cargar'; bx.classList.add('hidden');
   SIMA_XLS=[];
 }
 /* La plantilla sale con TODO el catalogo y sus valores actuales: asi sirve para
@@ -6023,7 +6046,11 @@ async function simaXlsConfirmar(){
   if(!SIMA_XLS.length) return;
   const btn=document.getElementById('simaXlsBtn');
   btn.disabled=true; btn.textContent='Cargando…';
-  showLoading();
+  /* El overlay tapa la pantalla entera -tambien este modal, que por CSS queda
+     debajo- asi que mientras la carga viaja no se puede tocar nada: ni la X, ni
+     «Seleccionar archivo», ni «Cargar» de nuevo. Con su propio texto: el que
+     trae por defecto habla de leer la foto de una hoja de consumo. */
+  showLoading('Cargando los códigos Sima','Estamos guardando las filas del archivo…');
   try{
     const r=await api('POST','/productos/sima/importar',{filas:SIMA_XLS});
     let msg=(r.aplicadas||0)+' aplicadas';
@@ -6031,29 +6058,44 @@ async function simaXlsConfirmar(){
     if(r.actualizadas) msg+=' · '+r.actualizadas+' actualizadas';
     if(r.descartadas_total) msg+=' · '+r.descartadas_total+' descartadas';
     if(r.precio_invalido_total) msg+=' · '+r.precio_invalido_total+' con precio inválido';
-    toast(msg);
-    /* Los rechazos se muestran en la pantalla, no solo en el toast: con 200
-       filas el aviso se va antes de poder leerlo. */
-    const prev=document.getElementById('simaXlsPreview');
-    let h='<div class="cat-ocr">'+esc(msg)+'</div>';
-    if((r.precio_invalido||[]).length){
-      h+='<div class="err-detail" style="margin-top:10px"><b>Precios que no se pudieron leer:</b> '
-        + esc(r.precio_invalido.slice(0,12).map(x=>'línea '+x.linea+' («'+x.valor+'»)').join(', '))+'.</div>';
-    }
-    if((r.descartadas||[]).length){
-      h+='<div class="err-detail" style="margin-top:10px"><b>Descartadas:</b> '
-        + esc(r.descartadas.slice(0,12).map(x=>'línea '+x.linea+' ('+x.codigo+': '+x.motivo+')').join(', '))
-        + (r.descartadas_total>12?' y '+(r.descartadas_total-12)+' más':'')+'.</div>';
-    }
-    prev.innerHTML=h;
-    btn.classList.add('hidden');
-    SIMA_XLS=[];
+    /* Al terminar bien, el modal de subir SE CIERRA: la carga ya paso y volver
+       a dejarlo abierto invita a subir el archivo dos veces. */
+    closeSimaExcel();
     await loadSima();
+    toast(msg);
+    /* Y lo rechazado se pasa a su propio modal, porque es la lista de lo que
+       hay que corregir en el archivo y con 200 filas el toast se va antes de
+       poder leerlo. Si no hubo nada que rechazar, el toast alcanza. */
+    simaXlsResultado(r, msg);
   }catch(e){
+    /* El modal se queda ABIERTO y el boton vuelve a estar: la carga no se
+       hizo, y lo que el usuario quiere es reintentar sin volver a elegir el
+       archivo. */
     toast('No se pudo cargar: '+e.message);
     btn.disabled=false; btn.textContent='Cargar';
   }finally{ hideLoading(); }
 }
+/* Las filas que no entraron, en una tabla. Dos motivos distintos en la misma
+   lista -el precio ilegible y el codigo que no esta en el catalogo-, con la
+   linea del Excel adelante para poder ir a buscarla. */
+function simaXlsResultado(r, msg){
+  const filas=[]
+    .concat((r.precio_invalido||[]).map(x=>({ linea:x.linea, codigo:x.codigo,
+      motivo:'el precio «'+x.valor+'» no se pudo leer' })))
+    .concat((r.descartadas||[]).map(x=>({ linea:x.linea, codigo:x.codigo, motivo:x.motivo })))
+    .sort((a,b)=>Number(a.linea)-Number(b.linea));
+  if(!filas.length) return;
+  const total=(r.precio_invalido_total||0)+(r.descartadas_total||0);
+  document.getElementById('simaXlsResBody').innerHTML=
+    '<p style="margin-top:0">'+esc(msg)+'. Estas '+total+' fila(s) no entraron:</p>'
+    +'<div class="tbl-wrap" style="max-height:320px;overflow:auto"><table><thead><tr>'
+    +'<th>Línea</th><th>Código</th><th>Motivo</th></tr></thead><tbody>'
+    + filas.map(f=>'<tr><td>'+esc(f.linea)+'</td><td>'+esc(f.codigo||'')+'</td><td>'+esc(f.motivo)+'</td></tr>').join('')
+    +'</tbody></table></div>'
+    +(filas.length<total?'<div class="sub" style="margin-top:6px">Se muestran las primeras '+filas.length+' de '+total+'.</div>':'');
+  document.getElementById('simaXlsResModal').classList.remove('hidden');
+}
+function closeSimaXlsRes(){ document.getElementById('simaXlsResModal').classList.add('hidden'); }
 
 /* ----- Componentes de la bandeja: carga por Excel -----
    El archivo se lee EN EL NAVEGADOR con SheetJS -el mismo que ya usaba la
