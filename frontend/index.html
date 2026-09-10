@@ -854,7 +854,15 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 /* Campos requeridos / inválidos */
 label .req{color:var(--danger);margin-left:2px}
 input.invalid,select.invalid,textarea.invalid{border-color:var(--danger);box-shadow:0 0 0 3px rgba(192,57,43,.15)}
-input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224,142,11,.22)}
+/* El cruce codigo<->equipo va en el MISMO rojo que «no existe en el catalogo».
+   Estaba en ambar para distinguir los dos casos, y la distincion salio mal en la
+   practica: los DOS bloquean el guardado, pero el ambar lee como «ojo, quiza» y
+   el rojo como «esto esta mal». Caso real: sobre el codigo 35062035 se digito
+   NUT-10105 -que pertenece a los equipos 10126 y 10147, no a ese- y la persona
+   no vio la marca; el sistema si lo habia detectado y tenia Guardar apagado.
+   La diferencia entre los dos casos se mantiene donde sirve -el texto del aviso
+   del pie y el title de la celda-, no en el color del borde. */
+input.combo-invalid{border-color:var(--danger)!important;box-shadow:0 0 0 3px rgba(192,57,43,.15)}
 
 /* Buscador de código (autocompletado) */
 .ac-box{position:fixed;z-index:80;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);max-height:320px;overflow-y:auto;min-width:280px;padding:4px}
