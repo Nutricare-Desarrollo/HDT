@@ -87,17 +87,27 @@ function endpoints(src) {
     const getRole = async () => { if (tiraGetRole) throw new Error('base caída'); return ROL; };
     const json = (status, body) => ({ status, jsonBody: body });
     let USUARIO = { name: 'Kiosco', email: 'kiosco@x.cr' };
-    const arma = new Function('getUser','getRole','json','ROL_IMPRESION_TXT','ES_TXT','LISTA_TXT','CAND_TXT',
-      txtRol + '\n' + txtEs + '\n' + txtLista + ']);\n' + txtCand + '\nreturn candadoImpresion;')(
+    /* rolActuante y ROLES se extraen también: el candado los usa, y la
+       simulación de rol es justamente lo que hay que probar. */
+    const txtActuante = trozo(src, 'const HDR_ROL_SIMULADO =', '\n/* Método + ruta');
+    const txtRoles = (src.match(/^const ROLES = .*$/m) || [null])[0];
+    chk('el index.js define rolActuante() y la cabecera de simulación',
+        !!txtActuante && /rolActuante/.test(txtActuante || ''), txtActuante ? '' : 'no está');
+    const arma = new Function('getUser','getRole','json',
+      (txtRoles || "const ROLES=[];") + '\n' + txtRol + '\n' + txtEs + '\n' +
+      (txtActuante || 'async function rolActuante(request,user){ return getRole(user); }') + '\n' +
+      txtLista + ']);\n' + txtCand + '\nreturn candadoImpresion;')(
         getUser, getRole, json);
     const envolver = (metodo, ruta) => arma({
       methods: [metodo], route: ruta,
       handler: async () => { llamado++; return json(200, { ok: true }); }
     });
-    const pedir = async (metodo, ruta) => {
+    /* `simula` es lo que iría en la cabecera X-Rol-Simulado. */
+    const pedir = async (metodo, ruta, simula) => {
       llamado = 0;
       const cfg = envolver(metodo, ruta);
-      const r = await cfg.handler({ method: metodo, params: {} }, { error(){} });
+      const headers = { get: (k) => (String(k).toLowerCase() === 'x-rol-simulado' ? (simula || null) : null) };
+      const r = await cfg.handler({ method: metodo, params: {}, headers }, { error(){} });
       return { status: r && r.status, llamado };
     };
 
@@ -160,6 +170,51 @@ function endpoints(src) {
     chk('un pedido sin usuario (cirugias/ingest) no toca el candado',
         anon.status === 200 && anon.llamado === 1, 'status=' + anon.status);
     USUARIO = { name: 'Kiosco', email: 'kiosco@x.cr' };
+
+    /* ── LA SIMULACIÓN DE ROL ──────────────────────────────────────────
+       Existe para poder mostrarle la pantalla del kiosco a alguien sin tener
+       la portátil delante. Es la parte con más filo de todo esto, así que se
+       prueba por los cuatro lados: que sirva, y que no sea una puerta. */
+
+    /* Sirve: un Administrador que simula Impresión topa con el candado en las
+       LECTURAS, que es lo que hace que la bandeja del kiosco se vea de verdad. */
+    ROL = 'Administrador';
+    const simLee = await pedir('GET', 'bandejas', 'Impresión');
+    chk('SIMULACIÓN: el Administrador que simula Impresión recibe 403 en una lectura ajena',
+        simLee.status === 403 && simLee.llamado === 0, 'status=' + simLee.status);
+    const simSuya = await pedir('GET', 'hojas', 'Impresión');
+    chk('y sí pasa en las lecturas del kiosco',
+        simSuya.status === 200 && simSuya.llamado === 1, 'status=' + simSuya.status);
+
+    /* No cambia datos: en una ESCRITURA la cabecera se ignora y el pedido sale
+       con el rol real. Así la bitácora nunca registra un rol que no es de la
+       persona, y una simulación no puede tocar nada que el rol real no pueda. */
+    const simEscribe = await pedir('DELETE', 'hojas/{id}', 'Impresión');
+    chk('SIMULACIÓN: en una escritura la cabecera se ignora (sale con el rol real)',
+        simEscribe.status === 200 && simEscribe.llamado === 1, 'status=' + simEscribe.status);
+
+    /* NO ES UNA PUERTA, y estos tres son los asertos que lo sostienen. */
+    ROL = 'Hospital';
+    const noAdmin = await pedir('GET', 'usuarios', 'Administrador');
+    chk('SIMULACIÓN: quien NO es Administrador no logra nada mandando la cabecera',
+        noAdmin.status === 200 && noAdmin.llamado === 1,
+        'Hospital pidiendo simular Administrador -> ' + noAdmin.status);
+    /* El caso que más importa: el kiosco pidiendo ser Administrador. Si esto
+       dejara de dar 403, la cuenta compartida de la portátil tendría la app
+       entera con solo agregar una cabecera. */
+    ROL = 'Impresión';
+    const kioscoSube = await pedir('GET', 'bandejas', 'Administrador');
+    chk('SIMULACIÓN: el kiosco NO se puede ascender a Administrador con la cabecera',
+        kioscoSube.status === 403 && kioscoSube.llamado === 0, 'status=' + kioscoSube.status);
+    /* Un valor inventado se ignora en vez de tomarse como rol. */
+    ROL = 'Administrador';
+    const inventado = await pedir('GET', 'bandejas', 'Proveedor');
+    chk('SIMULACIÓN: un rol que no está en ROLES se ignora',
+        inventado.status === 200 && inventado.llamado === 1, 'status=' + inventado.status);
+    const vacia = await pedir('GET', 'bandejas', null);
+    chk('SIMULACIÓN: sin cabecera, el Administrador sigue siendo Administrador',
+        vacia.status === 200 && vacia.llamado === 1, 'status=' + vacia.status);
+    ROL = 'Impresión';
 
     /* Y si el rol NO se puede leer, no se sigue de largo: 503 y el handler no
        corre. Dejar pasar sería abrirle todo al kiosco justo cuando la base
@@ -482,6 +537,34 @@ function endpoints(src) {
     chk('si la marca falla, la hoja SE IMPRIME igual', !!i3.doc, 'no se armó el documento');
     await pg.close();
     }
+  }
+
+  /* La otra punta de la simulación: que el navegador mande la cabecera cuando
+     corresponde, y solo entonces. Se intercepta fetch y no api(), porque lo
+     que se prueba es justamente lo que api() le pone al pedido. */
+  {
+    const pg = await (await nav.newContext({ viewport: { width: 1000, height: 800 } })).newPage();
+    await pg.goto('file://' + IDX, { waitUntil: 'domcontentloaded' });
+    await pg.waitForTimeout(400);
+    const h = await pg.evaluate(async () => {
+      const vistos = [];
+      window.fetch = async (url, opt) => {
+        vistos.push((opt && opt.headers && opt.headers['X-Rol-Simulado']) || null);
+        return { ok: true, json: async () => [] };
+      };
+      const probar = async (rol, real) => { ROL = rol; REAL_ROL = real; await api('GET', '/hojas'); return vistos.pop(); };
+      return {
+        simulando:   await probar('Impresión', 'Administrador'),
+        sinSimular:  await probar('Administrador', 'Administrador'),
+        noAdmin:     await probar('Impresión', 'Hospital')
+      };
+    });
+    chk('el navegador manda X-Rol-Simulado cuando el Administrador simula',
+        h.simulando === 'Impresión', JSON.stringify(h.simulando));
+    chk('y NO la manda cuando no está simulando', h.sinSimular === null, JSON.stringify(h.sinSimular));
+    chk('ni cuando el rol real no es Administrador (igual el servidor la ignoraría)',
+        h.noAdmin === null, JSON.stringify(h.noAdmin));
+    await pg.close();
   }
 
   /* Con la base caída, /api/me devuelve 503: la pantalla tiene que DECIRLO en

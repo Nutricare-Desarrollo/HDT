@@ -166,6 +166,45 @@ async function hojaEnAlcanceImpresion(id) {
   return r.rows.length > 0;
 }
 
+/* ============================================================
+   Simulación de rol — para que la simulación no mienta
+   ------------------------------------------------------------
+   El selector de rol del Administrador siempre fue solo del navegador: pintaba
+   el menú del rol simulado y los datos los seguía trayendo el rol real. Con el
+   rol Impresión eso se volvió visible y confuso: la bandeja del kiosco salía
+   vacía —el servidor contestaba las hojas de HOY sin las pendientes, que es lo
+   que ve un Administrador— y parecía que la pantalla estaba rota.
+
+   Ahora el navegador manda la cabecera X-Rol-Simulado y el servidor le hace
+   caso, con TRES candados que hay que leer juntos:
+
+     1. Solo si el rol REAL es Administrador. Se resuelve el rol real contra la
+        base ANTES de mirar la cabecera; el que la manda sin ser Administrador
+        no logra nada. Es lo que evita que esto sea una puerta.
+     2. Solo en LECTURAS (GET). Una escritura siempre sale con el rol real, así
+        que en la bitácora nunca queda una fila con un rol que no es el de la
+        persona. Es también lo que hace que esto no pueda cambiar datos.
+     3. Solo un rol de la lista ROLES. Un valor inventado se ignora.
+
+   Y sobre todo: esto SOLO QUITA permisos, nunca da. Administrador es superset
+   de los otros tres —puedeSubir, puedeBodega y puedeSima lo incluyen, y
+   'usuarios/{email}' pide Administrador exacto—, así que simular otro rol
+   siempre es tener menos. Si algún día apareciera un rol con un permiso que
+   Administrador no tiene, esta función deja de ser segura: ahí hay que
+   comparar permisos y no confiar en el superset.
+   ============================================================ */
+const HDR_ROL_SIMULADO = 'x-rol-simulado';
+
+/* El rol con el que se está actuando. Es el rol real salvo simulación. */
+async function rolActuante(request, user) {
+  const real = await getRole(user);
+  if (real !== 'Administrador') return real;              // candado 1
+  if (request.method !== 'GET') return real;              // candado 2
+  let sim = '';
+  try { sim = String(request.headers.get(HDR_ROL_SIMULADO) || '').trim(); } catch { sim = ''; }
+  return (sim && ROLES.includes(sim)) ? sim : real;       // candado 3
+}
+
 /* Método + ruta, tal cual se registra el endpoint en app.http. */
 const IMPRESION_PERMITIDO = new Set([
   'GET me',
@@ -186,7 +225,12 @@ function candadoImpresion(cfg) {
          401 por su cuenta. */
       if (user) {
         let rol;
-        try { rol = await getRole(user); }
+        /* rolActuante y no getRole: si un Administrador está simulando el rol
+           Impresión, sus lecturas tienen que topar con el mismo candado que
+           topa el kiosco. Si no, la simulación seguiría mintiendo -menú de
+           kiosco, permisos de Administrador- y no serviría para mostrarle la
+           pantalla a nadie. */
+        try { rol = await rolActuante(request, user); }
         catch (e) {
           /* No se sigue de largo cuando el rol no se pudo leer. Dejar pasar
              sería abrirle el endpoint al kiosco justo cuando la base falla. */
@@ -3722,7 +3766,7 @@ app.http('hojas-list', {
     const user = getUser(request);
     if (!user) return json(401, { error: 'No autenticado' });
     try {
-      const rolLista = await getRole(user);
+      const rolLista = await rolActuante(request, user);
       const scope = (request.query.get('scope') || 'hoy').toLowerCase();
       const soloHoy = scope !== 'historial';
       const estadoF = request.query.get('estado');
@@ -3787,7 +3831,7 @@ app.http('hoja-get', {
          el listado completo, pero la regla tiene que valer para la llamada
          directa: un id escrito en la barra de direcciones es una llamada
          directa. */
-      if (esImpresion(await getRole(user)) && !(await hojaEnAlcanceImpresion(id)))
+      if (esImpresion(await rolActuante(request, user)) && !(await hojaEnAlcanceImpresion(id)))
         return json(403, { error: 'Esa hoja de consumo no est\u00e1 en la bandeja de impresi\u00f3n.' });
       const h = await query(
         `SELECT Id AS id, Consecutivo AS consecutivo, NumeroHoja AS numero_hoja, NumeroDocumento AS numero_documento, Regimen AS regimen,
