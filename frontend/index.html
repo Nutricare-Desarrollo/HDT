@@ -2562,7 +2562,13 @@ function equipoColorStyle(name){
 function paintEquipoCell(el, d){
   if(!el) return;
   el.style.background=''; el.style.color=''; el.style.textShadow='';
-  const st = (normEquipo(d.numero_equipo) && equipoValido(d.numero_equipo)) ? equipoColorStyle(equipoColor(d.numero_equipo)) : null;
+  /* El color de demarcacion NO se pinta cuando la celda esta MARCADA. Un fondo
+     cafe o negro se come el borde rojo justo en el momento en que hay que
+     verlo, y ahi lo que importa es el error, no el color. Con la celda limpia
+     se pinta como siempre.
+     `equipoCellCls` ya cubre el caso del equipo que no existe -devuelve
+     'invalid'-, asi que reemplaza a equipoValido() en vez de sumarsele. */
+  const st = (normEquipo(d.numero_equipo) && !equipoCellCls(d)) ? equipoColorStyle(equipoColor(d.numero_equipo)) : null;
   if(st){ el.style.background=st.background; el.style.color=st.color; if(st.shadow) el.style.textShadow=st.shadow; }
 }
 // Clase de estado de cada celda: '' | 'invalid' (no existe) | 'combo-invalid' (no cruza).
@@ -3545,7 +3551,9 @@ function renderVerDet(){
       let extra = (isCode||isLote||isEquipo) ? ' autocomplete="off"' : '';
       if(isEquipo) extra += ` onblur="equipoBlur(this,'#verDetBody')"`;
       if(stateCls==='combo-invalid') extra += ` title="${COMBO_MSG}"`;
-      if(isEquipo){ const st=(normEquipo(d.numero_equipo)&&equipoValido(d.numero_equipo))?equipoColorStyle(equipoColor(d.numero_equipo)):null; if(st) extra += ` style="background:${st.background};color:${st.color};${st.shadow?('text-shadow:'+st.shadow+';'):''}"`; }
+      /* Sin color de demarcacion si la celda va marcada: el fondo tapa el borde
+         rojo. `stateCls` vacio es celda limpia -ver paintEquipoCell()-. */
+      if(isEquipo){ const st=(normEquipo(d.numero_equipo)&&!stateCls)?equipoColorStyle(equipoColor(d.numero_equipo)):null; if(st) extra += ` style="background:${st.background};color:${st.color};${st.shadow?('text-shadow:'+st.shadow+';'):''}"`; }
       if(bloq) extra += ' disabled';
       return `<td><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onVerDet(this)"></td>`;
     }).join('');
@@ -5103,7 +5111,9 @@ function renderDet(){
       if(isEquipo) extra += ' placeholder="solo el n\u00famero"';
       if(isEquipo) extra += ` onblur="equipoBlur(this,'#detBody')"`;
       if(stateCls==='combo-invalid') extra += ` title="${COMBO_MSG}"`;
-      if(isEquipo){ const st=(normEquipo(d.numero_equipo)&&equipoValido(d.numero_equipo))?equipoColorStyle(equipoColor(d.numero_equipo)):null; if(st) extra += ` style="background:${st.background};color:${st.color};${st.shadow?('text-shadow:'+st.shadow+';'):''}"`; }
+      /* Sin color de demarcacion si la celda va marcada: el fondo tapa el borde
+         rojo. `stateCls` vacio es celda limpia -ver paintEquipoCell()-. */
+      if(isEquipo){ const st=(normEquipo(d.numero_equipo)&&!stateCls)?equipoColorStyle(equipoColor(d.numero_equipo)):null; if(st) extra += ` style="background:${st.background};color:${st.color};${st.shadow?('text-shadow:'+st.shadow+';'):''}"`; }
       return `<td class="dc-${c.a}" data-label="${attr(c.l)}"><input data-i="${i}" data-k="${c.k}" class="${cls}" type="${c.num?'number':'text'}" value="${attr(d[c.k])}"${extra} oninput="onDet(this)"></td>`;
     }).join('');
     const tr=document.createElement('tr');
