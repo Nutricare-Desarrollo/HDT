@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HDT · Hojas de Consumo</title>
+<title>RIC · Hojas de Consumo</title>
 <style>
 :root{
   --brand:#0a5c8a; --brand-d:#074663; --accent:#12a4b4; --bg:#eef3f7;
@@ -953,7 +953,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
 <!-- LOGIN -->
 <div id="login">
   <div class="login-card">
-    <div class="logo">HDT</div>
+    <div class="logo">RIC</div>
     <h1>Hojas de Consumo</h1>
     <p>Hospital del Trauma · Inicie sesión para continuar</p>
     <button class="ms-btn" onclick="msLogin()">
@@ -8456,7 +8456,7 @@ function docColor(nombre){
 function docPie(){
   const d=new Date(), p=(x)=>String(x).padStart(2,'0');
   const t=p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());
-  return `<div class="pie">Impreso el ${t}${USER&&USER.name?' por '+attr(USER.name):''} · Aplicación HDT</div>`;
+  return `<div class="pie">Impreso el ${t}${USER&&USER.name?' por '+attr(USER.name):''} · Aplicación RIC</div>`;
 }
 
 /* 'YYYY-MM-DD HH:MM' -> 'DD/MM/YYYY HH:MM'. La API manda el registro y el
