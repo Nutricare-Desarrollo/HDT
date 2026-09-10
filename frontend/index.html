@@ -955,7 +955,7 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
   <div class="login-card">
     <div class="logo">RIC</div>
     <h1>Hojas de Consumo</h1>
-    <p>Hospital del Trauma · Inicie sesión para continuar</p>
+    <p id="loginMsg">Hospital del Trauma · Inicie sesión para continuar</p>
     <button class="ms-btn" onclick="msLogin()">
       <span class="ms-logo"><span></span><span></span><span></span><span></span></span>
       Iniciar sesión con Microsoft
@@ -1030,11 +1030,24 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
       </div>
     </section>
 
+    <!-- IMPRIMIR HOJAS (rol Impresión: la portátil del hospital) -->
+    <section id="viewImprimir" class="hidden">
+      <div class="page-head">
+        <div><h2>Imprimir hojas</h2><div class="sub" id="prtSub">Hojas de consumo por imprimir</div></div>
+        <button class="btn-ghost" onclick="loadImprimirHojas()">🔄 Actualizar</button>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap"><table id="prtGrid" class="cards dos"><thead id="prtHead"></thead><tbody id="prtBody"></tbody></table></div>
+        <div id="prtEmpty" class="empty hidden"><div class="big">🖨️</div><div>No hay hojas de consumo para imprimir.</div></div>
+        <div class="grid-foot" id="prtFoot"></div>
+      </div>
+    </section>
+
     <!-- VER (solo lectura) -->
     <section id="viewVer" class="hidden">
       <div class="page-head">
         <div><h2>Hoja de consumo</h2><div class="sub" id="verSub"></div></div>
-        <button class="btn-ghost" onclick="showHojas()">← Volver al listado</button>
+        <button class="btn-ghost" onclick="volverDeVer()">← Volver al listado</button>
       </div>
       <div class="card pad" id="verBody"></div>
     </section>
@@ -2020,12 +2033,25 @@ const ESTADOS_BLOQUEADOS=['Creando TR','Finalizada'];
 const hojaBloqueada=(h)=> !!h && ESTADOS_BLOQUEADOS.includes(String(h.estado||''));
 
 let USER=null, ROL='Hospital', REAL_ROL='Hospital';
-const ROLES=['Administrador','Hospital','Bodega'];
+const ROLES=['Administrador','Hospital','Bodega','Impresión'];
 let SCOPE='hoy', ROWS=[], COLF={};
 let WIZ={dataUrl:'',base64:'',tipo:'',detalle:[]};
 
 const canSubir=()=> ROL==='Hospital'||ROL==='Administrador';
 const canBodega=()=> ROL==='Bodega'||ROL==='Administrador';
+/* Rol Impresión: la portátil compartida del hospital. Entra con una cuenta
+   compartida —el doble factor por compañera no es práctico en una máquina de
+   paso— y por eso tiene UNA pantalla: la cola de hojas por imprimir, la hoja
+   en solo lectura y el botón de imprimir. La regla que manda es la de la API;
+   esto es para que la pantalla no ofrezca lo que el servidor va a rechazar.
+
+   `verEstandar` es la lista blanca de los ítems de menú que existían antes de
+   este rol. Estaban en `ver:()=>true`, y con eso un rol nuevo heredaba Inicio,
+   Hojas de consumo y Código Sima de gratis. Enumerar los roles es lo que evita
+   que al próximo le pase lo mismo. */
+const ROL_IMPRESION='Impresión';
+const esImpresion=()=> ROL===ROL_IMPRESION;
+const verEstandar=()=> canSubir()||canBodega();
 
 /* ===== API ===== */
 async function api(method, path, body){
@@ -2659,14 +2685,22 @@ async function init(){
     setupRoleSwitcher();
     document.getElementById('login').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+    /* El catálogo de productos lo necesitan TODOS los roles, Impresión
+       incluido: de ahí salen la Descripción Nutricare y el Código Sima de cada
+       línea del imprimible. Sin él la hoja sale con las descripciones vacías.
+       Los otros cuatro son de pantallas que el kiosco no tiene y sus endpoints
+       le responden 403: pedirlos solo serviría para recibirlo con un toast de
+       error en la cara. El autocompletado tampoco: no hay dónde escribir. */
     loadCatalogo(); // catálogo de productos en segundo plano
-    loadLotes();    // catálogo de lotes por producto en segundo plano
-    loadEquipos();  // catálogo de equipos (Anexo #2) en segundo plano
-    loadCats();     // catálogos del encabezado (Cirujano, Régimen) en segundo plano
-    loadEquipoProd(); // relación equipo<->producto en segundo plano
-    acInit();       // buscador de código / lote (autocompletado)
+    if(!esImpresion()){
+      loadLotes();    // catálogo de lotes por producto en segundo plano
+      loadEquipos();  // catálogo de equipos (Anexo #2) en segundo plano
+      loadCats();     // catálogos del encabezado (Cirujano, Régimen) en segundo plano
+      loadEquipoProd(); // relación equipo<->producto en segundo plano
+      acInit();       // buscador de código / lote (autocompletado)
+    }
     buildNav();
-    showInicio();
+    inicioPorRol();
     /* Inicio queda pintado ANTES de intentar el enlace: si el enlace no sirve
        -rol sin permiso, solicitud borrada- la persona cae en una pantalla
        normal en vez de en una en blanco. */
@@ -2674,6 +2708,13 @@ async function init(){
   }catch(e){
     document.getElementById('app').classList.add('hidden');
     document.getElementById('login').classList.remove('hidden');
+    /* Hay que DECIR algo. /api/me ya no devuelve un rol inventado cuando la
+       base no contesta -antes contestaba 'Hospital' y la app se dibujaba con
+       un menú prestado-, así que esta rama se alcanza de verdad. Sin el aviso,
+       la persona ve la tarjeta de login, vuelve a entrar y da vueltas sin
+       enterarse de que el problema no es ella. */
+    const m=document.getElementById('loginMsg');
+    if(m) m.textContent='No se pudo cargar su usuario ('+((e&&e.message)||'error')+'). Intente de nuevo en un momento.';
   }
 }
 function setupRoleSwitcher(){
@@ -2695,7 +2736,7 @@ function changeRole(val){
   if(ROL!==REAL_ROL){ banner.textContent='👁️ Estás viendo la app como “'+ROL+'” (simulación). Tu rol real sigue siendo Administrador. Volvé a “Administrador” o recargá para salir.'; banner.classList.remove('hidden'); }
   else { banner.classList.add('hidden'); }
   buildNav();
-  showInicio();
+  inicioPorRol();
 }
 /* El menu se declara por grupos. Un grupo sin items visibles no se dibuja, y
    el encabezado solo aparece si el grupo tiene titulo: asi el rol Hospital
@@ -2705,8 +2746,10 @@ function changeRole(val){
 function navGrupos(){
   return [
     { titulo:null, items:[
-      {id:'inicio',      ic:'\u{1F3E0}', l:'Inicio',                   fn:showInicio,      ver:()=>true},
-      {id:'hojas',       ic:'\u{1F4CB}', l:'Hojas de consumo',         fn:showHojas,       ver:()=>true},
+      {id:'inicio',      ic:'\u{1F3E0}', l:'Inicio',                   fn:showInicio,      ver:verEstandar},
+      {id:'hojas',       ic:'\u{1F4CB}', l:'Hojas de consumo',         fn:showHojas,       ver:verEstandar},
+      /* La única pantalla del rol Impresión, y solo de ese rol. */
+      {id:'imprimir',    ic:'\u{1F5A8}\uFE0F', l:'Imprimir hojas',      fn:showImprimirHojas, ver:esImpresion},
       {id:'pendientes',  ic:'\u{1F552}', l:'Pendientes de reposición', fn:showPendientes,  ver:canSubir},
       {id:'solicitudes', ic:'\u{1F4E4}', l:'Solicitud de Equipo',     fn:showSolicitudes, ver:()=>canSubir()||canBodega()},
       {id:'cirugias',    ic:'\u{1F4C5}', l:'Cirugías',                 fn:showCirugias,    ver:canSubir}
@@ -2720,10 +2763,12 @@ function navGrupos(){
     { titulo:'MANTENIMIENTO', items:[
       {id:'bandejas',    ic:'\u{1F9F0}', l:'Bandejas',                 fn:showBandejas,    ver:canBodega},
       {id:'hospitales',  ic:'\u{1F3E5}', l:'Hospitales',               fn:showHospitales,  ver:canBodega},
-      /* Para TODOS los roles: es pantalla de consulta. Hospital la ve completa
-         -precio incluido- pero de solo lectura; editar y subir Excel siguen
-         siendo de Bodega/Administrador, tambien en la API. */
-      {id:'sima',        ic:'\u{1F3F7}\uFE0F', l:'Código Sima',          fn:showSima,        ver:()=>true},
+      /* Para los tres roles de siempre: es pantalla de consulta. Hospital la
+         ve completa -precio incluido- pero de solo lectura; editar y subir
+         Excel siguen siendo de Bodega/Administrador, tambien en la API.
+         Impresión NO la ve: un catálogo con precios no tiene nada que hacer en
+         una máquina de pasillo, y su candado en la API tampoco se lo permite. */
+      {id:'sima',        ic:'\u{1F3F7}\uFE0F', l:'Código Sima',          fn:showSima,        ver:verEstandar},
       {id:'notificaciones',ic:'\u2709\uFE0F', l:'Notificaciones',       fn:showNotificaciones, ver:canBodega},
       {id:'config',      ic:'\u2699\uFE0F',  l:'Configuración',            fn:showConfig,      ver:canBodega}
     ]},
@@ -2755,11 +2800,103 @@ function buildNav(){
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('ovl').classList.toggle('show'); }
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('ovl').classList.remove('show'); }
 function setTab(id){ document.querySelectorAll('#navTabs button').forEach(b=>b.classList.remove('active')); const t=document.getElementById('tab-'+id); if(t)t.classList.add('active'); }
-const VIEWS=['viewInicio','viewHojas','viewPendientes','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales','viewNotificaciones','viewSolicitudes','viewSolicitudDet','viewCheckList','viewValidacion','viewBitacora','viewSima'];
+const VIEWS=['viewInicio','viewHojas','viewPendientes','viewImprimir','viewVer','viewWizard','viewConfig','viewTrabajos','viewPedidos','viewPedidoDet','viewReemplazos','viewCirugias','viewUsuarios','viewAuditoria','viewBandejas','viewBandejaDet','viewHospitales','viewNotificaciones','viewSolicitudes','viewSolicitudDet','viewCheckList','viewValidacion','viewBitacora','viewSima'];
 function showOnly(id){ VIEWS.forEach(v=>document.getElementById(v).classList.toggle('hidden', v!==id)); }
+
+/* A dónde cae cada rol al entrar, y a dónde vuelve cuando una pantalla lo
+   rebota. El kiosco no tiene Inicio -su pantalla ES la cola de impresión-, y
+   antes todo el mundo caía en showInicio(). */
+function inicioPorRol(){ if(esImpresion()) showImprimirHojas(); else showInicio(); }
+
+/* El «Volver» de la hoja abierta. El kiosco no tiene el listado general. */
+function volverDeVer(){ if(esImpresion()) showImprimirHojas(); else showHojas(); }
+
+/* ===== IMPRIMIR HOJAS (rol Impresión) =====
+   La pantalla del kiosco del hospital. Una cola, un botón por fila, y de ahí a
+   la hoja en solo lectura -renderVerReadonly, la misma que ve Hospital- que ya
+   trae los dos botones de imprimir.
+
+   EL ALCANCE NO SE PIDE ACÁ: `GET /hojas` ignora scope, estado y reemplazos
+   cuando el rol es Impresión y devuelve siempre lo mismo -pendientes de
+   cualquier fecha, más las hojas de los últimos días-. Se hace así para que la
+   regla viva en un solo lado: si la decidiera la pantalla, una URL armada a
+   mano la ampliaría.
+
+   Las columnas son a propósito menos que las de Pendientes: sin Diagnóstico,
+   sin Régimen, sin Paciente. Esta lista queda abierta en una máquina de
+   pasillo todo el turno; la hoja abierta sí lleva los datos del paciente
+   -es la hoja-, pero para eso hay que abrirla. */
+let PRINT_ROWS=[], PRT_COLF={};
+const PRT_COLS=[
+  {k:'consecutivo', l:'Consecutivo'},
+  {k:'numero_hoja', l:'N°'},
+  {k:'fecha',       l:'Fecha y hora'},
+  {k:'usuario',     l:'Creada por', clip:true},
+  {k:'estado',      l:'Estado'},
+  {k:'impresa',     l:'Impresa'}
+];
+/* La marca, ya como texto y guardada en la fila. Se calcula al cargar y no al
+   pintar para que el filtro de la columna y el buscador del celular trabajen
+   sobre lo que se ve: los dos leen r[k]. */
+function textoImpresa(r){
+  const n=+(r.impresa_veces||0);
+  if(!n) return '';
+  return String(r.impresa_ultima||'') + (n>1 ? ' · '+n+' veces' : '');
+}
+async function showImprimirHojas(){
+  if(!esImpresion()){ toast('La cola de impresión es del rol Impresión'); showInicio(); return; }
+  setTab('imprimir'); showOnly('viewImprimir');
+  await loadImprimirHojas();
+}
+async function loadImprimirHojas(){
+  try{
+    const arr=await api('GET','/hojas');
+    PRINT_ROWS=(arr||[]).map(r=>Object.assign({}, r, {impresa:textoImpresa(r)}));
+  }catch(e){ PRINT_ROWS=[]; toast('Error al cargar: '+e.message); }
+  renderImprimirHojas();
+}
+function prtFiltered(){ return cardsFiltrar('prtGrid', PRINT_ROWS, PRT_COLF, PRT_COLS); }
+function onPrtFilter(k,v){ PRT_COLF[k]=v; renderImprimirHojas(); }
+function renderImprimirHojas(){
+  const head=document.getElementById('prtHead');
+  head.innerHTML=`<tr>${PRT_COLS.map(c=>`<th>${c.l}</th>`).join('')}<th></th></tr>`
+    +`<tr class="filter-row">${PRT_COLS.map(c=>`<th><input placeholder="Filtrar…" oninput="onPrtFilter('${c.k}',this.value)" value="${attr(PRT_COLF[c.k])}"></th>`).join('')}<th></th></tr>`;
+  const rows=prtFiltered();
+  const b=document.getElementById('prtBody'); b.innerHTML='';
+  document.getElementById('prtEmpty').classList.toggle('hidden', PRINT_ROWS.length>0);
+  document.getElementById('prtGrid').classList.toggle('hidden', PRINT_ROWS.length===0);
+  const foot=document.getElementById('prtFoot');
+  const sinImprimir=PRINT_ROWS.filter(r=>!r.impresa).length;
+  document.getElementById('prtSub').textContent = PRINT_ROWS.length
+    ? (sinImprimir===0 ? 'Todas las hojas de la lista ya se imprimieron'
+       : (sinImprimir===1 ? '1 hoja sin imprimir' : sinImprimir+' hojas sin imprimir'))
+    : 'Hojas de consumo por imprimir';
+  if(!PRINT_ROWS.length){ foot.textContent=''; return; }
+  foot.textContent = rows.length===1?'1 hoja':(rows.length+' hojas');
+  if(!rows.length){ b.innerHTML=`<tr class="aviso"><td colspan="${PRT_COLS.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  rows.forEach(r=>{
+    const tds=PRT_COLS.map(c=>{
+      if(c.k==='consecutivo'){ const txt=(r.consecutivo!=null&&r.consecutivo!=='')?r.consecutivo:r.id;
+        return `<td><span class="link-cell" onclick="verHoja(${r.id})" title="Abrir la hoja para imprimirla">${esc(txt)}</span></td>`; }
+      if(c.k==='numero_hoja') return `<td><span class="tag">${esc(r.numero_hoja)}</span></td>`;
+      if(c.k==='estado') return `<td>${estadoBadge(r.estado)}</td>`;
+      if(c.k==='impresa') return r.impresa
+        ? `<td>🖨️ ${esc(r.impresa)}</td>`
+        : `<td style="color:var(--muted)">Sin imprimir</td>`;
+      if(c.clip) return `<td class="clip" title="${attr(r[c.k])}">${esc(r[c.k])}</td>`;
+      return `<td>${esc(r[c.k])}</td>`;
+    }).join('');
+    const tr=document.createElement('tr');
+    tr.innerHTML=tds+`<td style="white-space:nowrap"><button class="icon-btn" onclick="verHoja(${r.id})">🖨️ Ver e imprimir</button></td>`;
+    b.appendChild(tr);
+  });
+}
 
 /* ===== INICIO ===== */
 async function showInicio(){
+  /* El kiosco no tiene Inicio: el resumen por estado no le sirve de nada y su
+     endpoint le responde 403. Cae acá cuando otra pantalla lo rebota. */
+  if(esImpresion()){ showImprimirHojas(); return; }
   setTab('inicio'); showOnly('viewInicio');
   const body=document.getElementById('inicioBody'); body.innerHTML='<div class="sub">Cargando…</div>';
   document.getElementById('inicioSub').textContent = canBodega() && !canSubir() ? 'Resumen de hojas por estado' : 'Resumen de hojas de consumo';
@@ -2875,6 +3012,10 @@ async function guardarConfig(){
 
 /* ===== GRID ===== */
 async function showHojas(){
+  /* El listado general no es del kiosco. La API igual le filtraría el
+     resultado a su alcance, pero la pantalla trae Diagnóstico y los botones de
+     subir y crear: mejor no abrirla. */
+  if(esImpresion()){ showImprimirHojas(); return; }
   setTab('hojas'); showOnly('viewHojas');
   document.getElementById('subirBtn').classList.toggle('hidden', !canSubir());
   document.getElementById('crearBtn').classList.toggle('hidden', !canSubir());
@@ -3081,10 +3222,16 @@ function renderVerReadonly(h){
   html+=`<button class="btn-ghost" onclick="imprimirHoja(true)">🏷️ Imprimir Código Sima</button>`;
   if(canSubir() && !h.es_reemplazo){ html+=`<button class="btn-ghost" onclick="openReemplazo(${h.id})">🔁 Crear reemplazo / corrección</button>`; }
   html+='</div>';
-  html+='<div class="section-title" style="margin-top:22px">Fotos de la hoja sellada</div>';
-  html+='<div id="verSellBody"></div>';
+  /* Las fotos de la hoja sellada no son del kiosco: no las sube -el servidor
+     decide eso con puede_subir, no la pantalla- y verlas no le aporta nada
+     para imprimir. Se le esconde la sección entera y no se pide el endpoint,
+     que además le responde 403. */
+  if(!esImpresion()){
+    html+='<div class="section-title" style="margin-top:22px">Fotos de la hoja sellada</div>';
+    html+='<div id="verSellBody"></div>';
+  }
   document.getElementById('verBody').innerHTML=html;
-  sellCargar(h.id, 'verSellBody');
+  if(!esImpresion()) sellCargar(h.id, 'verSellBody');
 }
 
 /* Vista de un reemplazo/corrección: detalle + referencia a la original + botón resolver (Bodega). */
@@ -3310,7 +3457,27 @@ function imprimirHoja(conSima){
     und: (d.und==null?'':d.und),
     rep: (d.reposicion_anaquel==null?'':d.reposicion_anaquel)
   }));
+  marcarImpresa(h.id, conSima);
   imprimirDoc(enc, filas, conSima);
+}
+
+/* Deja constancia de que la hoja se imprimió. Imprimir es todo del navegador
+   -el imprimible se arma acá y se abre en otra ventana-, así que sin esta
+   llamada no queda registro de ninguna clase: es lo único que le dice a la
+   compañera cuáles de la cola ya salieron.
+
+   VA SIN `await`, a propósito, y ANTES de imprimirDoc. Sin await porque si la
+   API no contesta la hoja tiene que imprimirse igual: perder la marca es
+   molesto, perder la impresión no. Y antes porque imprimirDoc abre el diálogo
+   de impresión, que bloquea el hilo hasta que la persona lo cierre.
+
+   Lo llaman los tres roles que imprimen, no solo el kiosco: si registrara solo
+   al kiosco, la marca diría «sin imprimir» en una hoja que Bodega ya imprimió. */
+function marcarImpresa(id, conSima){
+  if(!id) return;
+  api('POST','/hojas/'+id+'/impresa',{sima:!!conSima})
+    .then(()=>{ if(esImpresion()) loadImprimirHojas(); })   // que la marca aparezca sin darle a Actualizar
+    .catch(()=>{});
 }
 /* ===========================================================================
    LOS IMPRIMIBLES SE ABREN EN OTRO PROCESO DEL NAVEGADOR
@@ -3530,6 +3697,10 @@ function imprimirWizard(conSima){
     desc: conNota(catDesc(d.codigo) || d.descripcion_nutricare || '', d.descripcion_adicional),
     und:(d.und==null?'':d.und), rep:(d.reposicion_anaquel==null?'':d.reposicion_anaquel)
   }));
+  /* Los botones del wizard solo se habilitan cuando la hoja ya está guardada
+     -syncWizPrintBtn-, así que WIZ.editId tiene valor: la marca se puede
+     colgar de una hoja que existe. */
+  marcarImpresa(WIZ.editId, conSima);
   imprimirDoc(enc, filas, conSima);
 }
 
@@ -8798,6 +8969,9 @@ const CARDS_FILAS = {
      asi que su titulo ya no es el consecutivo sino el numero de hoja. */
   pendGrid:    () => [gridCols().filter(c=>!c.estado && !c.link),
                       {extras:[''], acciones:true, titulo:2, ancho:['diagnostico']}],
+  /* La cola de impresión: el N° de hoja es lo que identifica la fila para
+     quien está parado frente a la impresora, no el consecutivo. */
+  prtGrid:     () => [PRT_COLS, {extras:[''], acciones:true, titulo:1}],
   /* Usuarios no recorre USR_COLS para armar el cuerpo -lo escribe a mano-,
      asi que los rotulos van como lista. */
   usrGrid:     () => [['Cuenta','Nombre','Rol','Último acceso'], {}],
@@ -8858,6 +9032,7 @@ function cardsObservar(){
 const CARDS_BUSCADORES = {
   grid:        ['Buscar hoja, usuario, régimen…',          () => renderGrid()],
   pendGrid:    ['Buscar hoja, usuario, diagnóstico…',      () => renderPendientes()],
+  prtGrid:     ['Buscar hoja, consecutivo, quién la creó…', () => renderImprimirHojas()],
   usrGrid:     ['Buscar cuenta o nombre…',                 () => renderUsuarios()],
   trGrid:      ['Buscar hoja o proceso…',                  () => renderTrabajos()],
   audGrid:     ['Buscar hoja, usuario, campo…',            () => renderAuditoria()],

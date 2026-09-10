@@ -55,10 +55,20 @@ function getUser(request) {
   } catch { return null; }
 }
 
-const ROLES = ['Hospital', 'Bodega', 'Administrador'];
+const ROLES = ['Hospital', 'Bodega', 'Administrador', 'Impresión'];
 
-// Usuarios cuyo rol NO se puede cambiar (protegidos). Comparación en minúsculas.
-const EMAILS_PROTEGIDOS = new Set(['desarrollo@nutricare.co.cr']);
+/* Usuarios cuyo rol NO se puede cambiar (protegidos). Comparación en minúsculas.
+   KIOSCO_EMAIL suma la cuenta compartida de la portátil del hospital sin tener
+   que tocar el código cuando IT la cree: uno o varios correos separados por
+   coma. Es lo que evita que alguien le devuelva el rol Hospital desde
+   «Usuarios y roles» sin darse cuenta de que detrás hay una máquina de pasillo
+   y no una persona. Sin la variable el rol funciona igual, pero desprotegido. */
+const EMAILS_PROTEGIDOS = new Set(
+  ['desarrollo@nutricare.co.cr']
+    .concat(String(process.env.KIOSCO_EMAIL || '').split(','))
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+);
 const esProtegido = (email) => EMAILS_PROTEGIDOS.has(String(email || '').trim().toLowerCase());
 
 // Registra/actualiza al usuario y devuelve su rol. Un usuario nuevo entra como 'Hospital'.
@@ -90,14 +100,126 @@ const puedeBodega = (rol) => rol === 'Bodega' || rol === 'Administrador';
 const puedeSima = (rol) => rol === 'Hospital' || rol === 'Bodega' || rol === 'Administrador';
 
 /* ============================================================
-   Bitacora: se envuelve app.http UNA vez, aca, antes de que se registre
-   cualquier endpoint. Desde este punto todo lo que no sea GET queda en la
-   bitacora sin que haya que acordarse de llamarla en cada handler.
+   Rol 'Impresión' — el candado, en UN solo lugar
+   ------------------------------------------------------------
+   PARA QUÉ EXISTE EL ROL. En el hospital hay una portátil compartida para
+   imprimir las hojas de consumo. Entra con UNA cuenta —el doble factor por
+   compañera no es práctico en una máquina de paso— y esa cuenta tiene que
+   poder hacer exactamente una cosa: abrir una hoja e imprimirla.
+
+   POR QUÉ UNA LISTA BLANCA Y NO UN `puede*` POR ENDPOINT. Los otros tres
+   roles se resuelven con `puedeSubir`/`puedeBodega`/`puedeSima`, que enumeran
+   y por eso dejan afuera al rol nuevo sin tocarlos. Pero eso sirve para las
+   ESCRITURAS: las lecturas de la aplicación no piden rol —cualquier
+   autenticado lista hojas, lee catálogos, abre una solicitud—, y agregar un
+   candado a mano a cada GET es exactamente la clase de trabajo del que se
+   olvida uno. Con la lista blanca la regla se invierte: para este rol todo
+   está cerrado y se abre lo que está escrito acá. Un endpoint nuevo —el de
+   dentro de tres meses, el que nadie relacionó con esto— nace cerrado.
+
+   ES POR ESTO que el hueco de `POST /regimenes` y `PUT /regimenes/{id}` queda
+   tapado sin tocarlos: esos dos NO piden rol a propósito —el botón «+» del
+   régimen está tanto en el wizard de Hospital como en la edición de Bodega, y
+   está comentado allá abajo—, así que ponerles `puedeSubir` le habría quitado
+   el «+» a Bodega. No están en la lista, y con eso alcanza.
+
+   LO QUE SÍ PUEDE, y por qué cada uno:
+     GET  me                    - sin esto no sabe ni quién es
+     GET  hojas                 - su bandeja, con el alcance de abajo
+     GET  hojas/{id}            - la hoja que va a imprimir
+     GET  productos             - de acá salen la Descripción Nutricare y el
+                                  Código Sima de cada línea del imprimible. Sin
+                                  este permiso la hoja sale con las
+                                  descripciones vacías y la columna SIMA en
+                                  blanco, y sin ningún error visible.
+     POST hojas/{id}/impresa    - deja la constancia de que se imprimió
+   ============================================================ */
+const ROL_IMPRESION = 'Impresión';
+const esImpresion = (rol) => rol === ROL_IMPRESION;
+
+/* Cuántos días atrás alcanza el kiosco. Las pendientes las ve siempre, sin
+   importar la fecha; las ya enviadas, solo esta ventana.
+
+   POR QUÉ HACE FALTA LA VENTANA Y NO SOLO LAS PENDIENTES. Una hoja puede nacer
+   ya enviada: el botón Enviar de una hoja nueva hace POST /hojas con
+   estado 'Enviado' y nunca pasa por 'Pendiente reposición'. Si el kiosco solo
+   viera pendientes, esa hoja no existiría para él y no habría forma de
+   imprimirla. La ventana cubre además la reimpresión —se atascó el papel, se
+   manchó— y el viernes que se resuelve el lunes.
+
+   Los reemplazos/correcciones quedan fuera a propósito: su vista trae el panel
+   de Diferencias, que pide otro endpoint, y son flujo de Bodega. */
+const IMPRESION_DIAS = 7;
+
+/* La regla de alcance vive acá y en ningún otro lado: la usan el listado, el
+   detalle y el registro de impresión. Si estuviera escrita tres veces, un día
+   dirían tres cosas distintas. `a` es el alias de la tabla en la consulta. */
+const alcanceImpresion = (a) => {
+  const p = a ? a + '.' : '';
+  return `(${p}EsReemplazo = FALSE
+           AND (${p}Estado = 'Pendiente reposición'
+                OR ${p}FechaCreacion >= (now() at time zone 'utc') - interval '${IMPRESION_DIAS} days'))`;
+};
+async function hojaEnAlcanceImpresion(id) {
+  const r = await query(
+    `SELECT 1 FROM dbo.HojaConsumo h WHERE h.Id=$1 AND ${alcanceImpresion('h')}`, [id]);
+  return r.rows.length > 0;
+}
+
+/* Método + ruta, tal cual se registra el endpoint en app.http. */
+const IMPRESION_PERMITIDO = new Set([
+  'GET me',
+  'GET hojas',
+  'GET hojas/{id}',
+  'GET productos',
+  'POST hojas/{id}/impresa'
+]);
+
+function candadoImpresion(cfg) {
+  const original = cfg.handler;
+  const ruta = cfg.route;
+  return Object.assign({}, cfg, {
+    handler: async (request, context) => {
+      const user = getUser(request);
+      /* Sin usuario no se consulta rol: el endpoint anónimo de integración
+         (cirugias/ingest) tiene que seguir entrando, y los demás ya devuelven
+         401 por su cuenta. */
+      if (user) {
+        let rol;
+        try { rol = await getRole(user); }
+        catch (e) {
+          /* No se sigue de largo cuando el rol no se pudo leer. Dejar pasar
+             sería abrirle el endpoint al kiosco justo cuando la base falla. */
+          context.error(e);
+          return json(503, { error: 'No se pudo verificar su rol. Vuelva a intentarlo.' });
+        }
+        if (esImpresion(rol) && !IMPRESION_PERMITIDO.has(request.method + ' ' + ruta)) {
+          return json(403, { error: 'El rol Impresi\u00f3n solo puede consultar hojas de consumo e imprimirlas.' });
+        }
+      }
+      return original(request, context);
+    }
+  });
+}
+
+/* ============================================================
+   Bitacora y candado: se envuelve app.http UNA vez, aca, antes de que se
+   registre cualquier endpoint. Desde este punto todo lo que no sea GET queda
+   en la bitacora sin que haya que acordarse de llamarla en cada handler, y
+   todo endpoint -GET incluido- queda detras del candado del rol Impresion.
    Va despues de getUser y getRole porque son sus dependencias, y antes del
    primer app.http porque si no, los de arriba quedarian sin envolver.
+
+   EL ORDEN IMPORTA: el candado va ADENTRO del envoltorio de la bitacora, no
+   afuera. Asi el 403 que devuelve el candado lo ve la bitacora y queda
+   registrado -esa registra los 403 a proposito, son los intentos sin permiso-.
+   Al reves, un intento del kiosco contra algo que no le toca no dejaria rastro
+   en ninguna parte. Ojo con el alcance de eso: la bitacora no registra GETs
+   -por diseño, seria ruido-, asi que lo que queda escrito es el intento de
+   ESCRIBIR. Un GET rechazado devuelve 403 y no deja fila, igual que hoy.
    ============================================================ */
 const appHttp = app.http.bind(app);
-app.http = (nombre, cfg) => appHttp(nombre, bitacora.envolver(cfg, { getUser, getRole, query }));
+app.http = (nombre, cfg) => appHttp(nombre, bitacora.envolver(candadoImpresion(cfg), { getUser, getRole, query }));
 
 /* ============================================================
    /api/me  -> usuario autenticado + rol
@@ -111,8 +233,13 @@ app.http('me', {
       const rol = await ensureUserRole(user);
       return json(200, { ...user, rol });
     } catch (e) {
+      /* NO se inventa un rol. Esta rama devolvia 'Hospital' y, con la base
+         caida, la aplicacion se dibujaba con el menu de Hospital para
+         cualquiera -la cuenta del kiosco incluida-. Las escrituras igual se
+         rechazaban despues, pero el menu mentia y el kiosco mostraba pantallas
+         que no le tocan. Mejor no entrar que entrar con un rol prestado. */
       context.error(e);
-      return json(200, { ...user, rol: 'Hospital' });
+      return json(503, { error: 'No se pudo determinar su rol en este momento. Vuelva a cargar la p\u00e1gina.' });
     }
   }
 });
@@ -3595,13 +3722,19 @@ app.http('hojas-list', {
     const user = getUser(request);
     if (!user) return json(401, { error: 'No autenticado' });
     try {
-      await getRole(user);
+      const rolLista = await getRole(user);
       const scope = (request.query.get('scope') || 'hoy').toLowerCase();
       const soloHoy = scope !== 'historial';
       const estadoF = request.query.get('estado');
       const soloReemplazos = request.query.get('reemplazos') === '1';
       let where = '', params = [];
-      if (soloReemplazos) {
+      if (esImpresion(rolLista)) {
+        /* El kiosco no elige alcance: no lee `scope`, `estado` ni
+           `reemplazos`. Su bandeja es siempre la misma —pendientes de
+           cualquier fecha, más lo de los últimos días— y la decide el
+           servidor, no la pantalla. Así una URL armada a mano no la amplía. */
+        where = `WHERE ${alcanceImpresion('h')}`;
+      } else if (soloReemplazos) {
         // Bandeja de reemplazos/correcciones (Bodega): todas las marcadas como reemplazo.
         where = `WHERE h.EsReemplazo = TRUE`;
       } else if (estadoF) {
@@ -3623,8 +3756,19 @@ app.http('hojas-list', {
                 to_char((h.FechaCreacion AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica', 'YYYY-MM-DD HH24:MI') AS fecha,
                 (SELECT COUNT(*) FROM dbo.HojaConsumoDetalle d WHERE d.HojaConsumoId = h.Id) AS cantidad_lineas,
                 h.EsReemplazo AS es_reemplazo, h.HojaOrigenId AS hoja_origen_id,
-                (SELECT o.NumeroHoja FROM dbo.HojaConsumo o WHERE o.Id = h.HojaOrigenId) AS origen_numero_hoja
-         FROM dbo.HojaConsumo h ${where} ORDER BY h.FechaCreacion DESC`, params);
+                (SELECT o.NumeroHoja FROM dbo.HojaConsumo o WHERE o.Id = h.HojaOrigenId) AS origen_numero_hoja,
+                imp.veces AS impresa_veces,
+                to_char((imp.ultima AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica',
+                        'YYYY-MM-DD HH24:MI') AS impresa_ultima
+         FROM dbo.HojaConsumo h
+         /* Cuántas veces se imprimió y cuándo fue la última. LEFT JOIN LATERAL
+            y no un subselect por columna: así la tabla se recorre una vez por
+            hoja y no dos. Sin impresiones da veces=0 y ultima=NULL. */
+         LEFT JOIN LATERAL (
+           SELECT COUNT(*)::int AS veces, MAX(i.FechaHora) AS ultima
+             FROM dbo.HojaImpresion i WHERE i.IdHojaConsumo = h.Id
+         ) imp ON TRUE
+         ${where} ORDER BY h.FechaCreacion DESC`, params);
       return json(200, r.rows);
     } catch (e) { context.error(e); return json(500, { error: 'Error al listar', detail: e.message }); }
   }
@@ -3638,6 +3782,13 @@ app.http('hoja-get', {
     if (!user) return json(401, { error: 'No autenticado' });
     try {
       const id = parseInt(request.params.id, 10);
+      if (!id) return json(400, { error: 'Id inv\u00e1lido' });
+      /* El kiosco solo abre las hojas de SU bandeja. El menú ya no le ofrece
+         el listado completo, pero la regla tiene que valer para la llamada
+         directa: un id escrito en la barra de direcciones es una llamada
+         directa. */
+      if (esImpresion(await getRole(user)) && !(await hojaEnAlcanceImpresion(id)))
+        return json(403, { error: 'Esa hoja de consumo no est\u00e1 en la bandeja de impresi\u00f3n.' });
       const h = await query(
         `SELECT Id AS id, Consecutivo AS consecutivo, NumeroHoja AS numero_hoja, NumeroDocumento AS numero_documento, Regimen AS regimen,
                 Paciente AS paciente, Identificacion AS identificacion, Tipo AS tipo,
@@ -3664,6 +3815,56 @@ app.http('hoja-get', {
          FROM dbo.HojaConsumoDetalle WHERE HojaConsumoId=$1 ORDER BY Linea, Id`, [id]);
       return json(200, { ...h.rows[0], detalle: d.rows });
     } catch (e) { context.error(e); return json(500, { error: 'Error al obtener', detail: e.message }); }
+  }
+});
+
+/* ============================================================
+   POST /api/hojas/{id}/impresa -> deja constancia de que la hoja se imprimió
+   ------------------------------------------------------------
+   Imprimir se hace TODO en el navegador: el imprimible se arma ahí y se abre
+   en otra ventana con `noopener`, sin pasar por la API. Por eso hasta ahora no
+   había forma de saber si una hoja se había impreso, cuándo ni cuántas veces.
+
+   Este endpoint NO cambia la hoja. Escribe una fila en dbo.HojaImpresion —de
+   ahí sale la marca «impresa 10:42 · 2 veces» del listado— y, por el
+   envoltorio, otra en la bitácora.
+
+   LO LLAMAN TODOS LOS ROLES, no solo el kiosco. Si registrara solo al kiosco,
+   la marca mentiría en las demás pantallas: una hoja impresa desde Bodega
+   aparecería como no impresa.
+
+   El frontend lo dispara SIN ESPERAR la respuesta: si esto falla, la hoja se
+   imprime igual. Perder la marca es molesto; perder la impresión, no.
+   ============================================================ */
+app.http('hoja-impresa', {
+  methods: ['POST'], authLevel: 'anonymous', route: 'hojas/{id}/impresa',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    const id = parseInt(request.params.id, 10);
+    if (!id) return json(400, { error: 'Id inv\u00e1lido' });
+    try {
+      const rol = await getRole(user);
+      if (esImpresion(rol) && !(await hojaEnAlcanceImpresion(id)))
+        return json(403, { error: 'Esa hoja de consumo no est\u00e1 en la bandeja de impresi\u00f3n.' });
+      /* El cuerpo es opcional: sin él se asume la hoja de siempre. Un
+         `request.json()` sobre un cuerpo vacío tira excepción, de ahí el try. */
+      let conSima = false;
+      try { const b = await request.json(); conSima = !!(b && b.sima); } catch { conSima = false; }
+      const h = await query(`SELECT NumeroHoja AS numero_hoja FROM dbo.HojaConsumo WHERE Id=$1`, [id]);
+      if (!h.rows.length) return json(404, { error: 'No encontrada' });
+      await query(
+        `INSERT INTO dbo.HojaImpresion (IdHojaConsumo, ConSima, Usuario, UsuarioEmail, Rol)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [id, conSima, user.name || user.email, user.email, rol]);
+      /* El N° de hoja va en la respuesta para que la bitácora lo ponga en su
+         columna Registro en vez del Id: registroDe() lo lee de ahí, y una fila
+         que dice «HDT-0447» sirve y una que dice «417» no. */
+      return json(201, { ok: true, numero_hoja: h.rows[0].numero_hoja, con_sima: conSima });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo registrar la impresi\u00f3n', detail: e.message });
+    }
   }
 });
 

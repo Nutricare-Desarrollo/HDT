@@ -68,6 +68,7 @@ const MAPA = {
   'hojas':                                       { p:'Hojas de consumo',    POST:'Registró una hoja de consumo' },
   'hojas/{id}':                                  { p:'Hojas de consumo',    PUT:'Editó la hoja de consumo',
                                                                             DELETE:'Eliminó la hoja de consumo' },
+  'hojas/{id}/impresa':                          { p:'Hojas de consumo',    POST:'Imprimió la hoja de consumo' },
   'hojas/{id}/selladas':                         { p:'Hojas de consumo',    POST:'Subió una foto de la hoja sellada' },
   'hojas/{id}/selladas/{sid}':                   { p:'Hojas de consumo',    DELETE:'Borró una foto de la hoja sellada' },
   'hojas/{id}/resolver':                         { p:'Reemplazos',          POST:'Marcó el reemplazo como resuelto' },
@@ -146,6 +147,9 @@ function detalleDe(cuerpo) {
   if (Array.isArray(c.avisos_validacion) && c.avisos_validacion.length) {
     partes.push('validación: ' + c.avisos_validacion.join(', '));
   }
+  /* Cuál de los dos imprimibles salió. Solo se anota el que lleva la columna
+     Código Sima: la hoja de siempre es el caso normal y no necesita nota. */
+  if (c.con_sima === true) partes.push('con la columna Código Sima');
   if (c.notificacion) {
     partes.push(c.notificacion.enviado
       ? ('avisó a ' + c.notificacion.cuentas + (c.notificacion.cuentas === 1 ? ' cuenta' : ' cuentas'))
