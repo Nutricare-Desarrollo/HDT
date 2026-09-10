@@ -2066,10 +2066,20 @@ async function api(method, path, body){
      parecia roto-. Ahora se le dice al servidor con que rol se esta mirando.
      El servidor solo le hace caso si tu rol real es Administrador, solo en
      lecturas y solo para QUITAR permisos; la regla vive alla, no aca.
-     La condicion incluye REAL_ROL para no mandar una cabecera que igual se va
-     a ignorar, y porque durante el arranque -antes del /me- los dos valen
-     'Hospital' y no hay nada que simular. */
-  if(ROL!==REAL_ROL && REAL_ROL==='Administrador') opt.headers['X-Rol-Simulado']=ROL;
+
+     VA EN LA URL Y NO EN UNA CABECERA. La primera version mandaba
+     `X-Rol-Simulado` y la cabecera no llegaba a la Function: Azure Static Web
+     Apps no la pasa a la API. Medido en produccion contra /api/bandejas, que
+     exige rol Bodega: simulando 'Hospital' devolvia 200 y las 118 bandejas en
+     vez de 403. Un parametro de consulta llega siempre.
+
+     Solo en las LECTURAS, igual que el servidor: mandarlo en un POST seria
+     pedir algo que la API va a ignorar. Y la condicion mira REAL_ROL porque
+     durante el arranque -antes del /me- los dos valen 'Hospital' y no hay
+     nada que simular. */
+  if(method==='GET' && ROL!==REAL_ROL && REAL_ROL==='Administrador'){
+    path += (path.indexOf('?')>=0 ? '&' : '?') + 'simular=' + encodeURIComponent(ROL);
+  }
   const res=await fetch('/api'+path, opt);
   let data=null; try{ data=await res.json(); }catch{}
   if(!res.ok){

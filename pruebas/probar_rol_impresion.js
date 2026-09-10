@@ -89,9 +89,9 @@ function endpoints(src) {
     let USUARIO = { name: 'Kiosco', email: 'kiosco@x.cr' };
     /* rolActuante y ROLES se extraen también: el candado los usa, y la
        simulación de rol es justamente lo que hay que probar. */
-    const txtActuante = trozo(src, 'const HDR_ROL_SIMULADO =', '\n/* Método + ruta');
+    const txtActuante = trozo(src, 'const PARAM_ROL_SIMULADO =', '\n/* Método + ruta');
     const txtRoles = (src.match(/^const ROLES = .*$/m) || [null])[0];
-    chk('el index.js define rolActuante() y la cabecera de simulación',
+    chk('el index.js define rolActuante() y el parámetro de simulación',
         !!txtActuante && /rolActuante/.test(txtActuante || ''), txtActuante ? '' : 'no está');
     const arma = new Function('getUser','getRole','json',
       (txtRoles || "const ROLES=[];") + '\n' + txtRol + '\n' + txtEs + '\n' +
@@ -102,12 +102,19 @@ function endpoints(src) {
       methods: [metodo], route: ruta,
       handler: async () => { llamado++; return json(200, { ok: true }); }
     });
-    /* `simula` es lo que iría en la cabecera X-Rol-Simulado. */
+    /* `simula` es lo que iría en el parámetro ?simular= de la URL. Se imita
+       `request.query`, que es un URLSearchParams y por lo tanto DESENCODA:
+       por eso acá se guarda el valor ya desencodado, como lo recibe la API. */
     const pedir = async (metodo, ruta, simula) => {
       llamado = 0;
       const cfg = envolver(metodo, ruta);
-      const headers = { get: (k) => (String(k).toLowerCase() === 'x-rol-simulado' ? (simula || null) : null) };
-      const r = await cfg.handler({ method: metodo, params: {}, headers }, { error(){} });
+      const query = { get: (k) => (k === 'simular' ? (simula || null) : null) };
+      /* La cabecera se pasa igual, y a propósito: si alguien devuelve la
+         simulación a una cabecera, los asertos de abajo se caen. En producción
+         Azure Static Web Apps NO le pasa las cabeceras propias a la Function
+         -medido-, así que una simulación por cabecera no funciona. */
+      const headers = { get: () => null };
+      const r = await cfg.handler({ method: metodo, params: {}, query, headers }, { error(){} });
       return { status: r && r.status, llamado };
     };
 
@@ -176,6 +183,17 @@ function endpoints(src) {
        la portátil delante. Es la parte con más filo de todo esto, así que se
        prueba por los cuatro lados: que sirva, y que no sea una puerta. */
 
+    /* EL VEHÍCULO. Esto no es cosmético: la primera versión usaba la cabecera
+       X-Rol-Simulado y en producción NO llegaba a la Function -Azure Static
+       Web Apps no se la pasa a la API-. Se midió contra /api/bandejas, que
+       exige rol Bodega: simulando 'Hospital' devolvía 200 con las 118 bandejas
+       en vez de 403. Si alguien lo devuelve a una cabecera, este aserto avisa
+       antes de que la pantalla vuelva a verse vacía sin explicación. */
+    chk('SIMULACIÓN: el rol simulado viaja en la URL y no en una cabecera',
+        /request\.query\.get\(PARAM_ROL_SIMULADO\)/.test(txtActuante || '') &&
+        !/headers\.get\(HDR_ROL_SIMULADO\)/.test(src),
+        (txtActuante || '').includes('headers.get') ? 'sigue leyendo una cabecera' : '');
+
     /* Sirve: un Administrador que simula Impresión topa con el candado en las
        LECTURAS, que es lo que hace que la bandeja del kiosco se vea de verdad. */
     ROL = 'Administrador';
@@ -190,13 +208,13 @@ function endpoints(src) {
        con el rol real. Así la bitácora nunca registra un rol que no es de la
        persona, y una simulación no puede tocar nada que el rol real no pueda. */
     const simEscribe = await pedir('DELETE', 'hojas/{id}', 'Impresión');
-    chk('SIMULACIÓN: en una escritura la cabecera se ignora (sale con el rol real)',
+    chk('SIMULACIÓN: en una escritura el parámetro se ignora (sale con el rol real)',
         simEscribe.status === 200 && simEscribe.llamado === 1, 'status=' + simEscribe.status);
 
     /* NO ES UNA PUERTA, y estos tres son los asertos que lo sostienen. */
     ROL = 'Hospital';
     const noAdmin = await pedir('GET', 'usuarios', 'Administrador');
-    chk('SIMULACIÓN: quien NO es Administrador no logra nada mandando la cabecera',
+    chk('SIMULACIÓN: quien NO es Administrador no logra nada mandando el parámetro',
         noAdmin.status === 200 && noAdmin.llamado === 1,
         'Hospital pidiendo simular Administrador -> ' + noAdmin.status);
     /* El caso que más importa: el kiosco pidiendo ser Administrador. Si esto
@@ -204,7 +222,7 @@ function endpoints(src) {
        entera con solo agregar una cabecera. */
     ROL = 'Impresión';
     const kioscoSube = await pedir('GET', 'bandejas', 'Administrador');
-    chk('SIMULACIÓN: el kiosco NO se puede ascender a Administrador con la cabecera',
+    chk('SIMULACIÓN: el kiosco NO se puede ascender a Administrador con el parámetro',
         kioscoSube.status === 403 && kioscoSube.llamado === 0, 'status=' + kioscoSube.status);
     /* Un valor inventado se ignora en vez de tomarse como rol. */
     ROL = 'Administrador';
@@ -212,7 +230,7 @@ function endpoints(src) {
     chk('SIMULACIÓN: un rol que no está en ROLES se ignora',
         inventado.status === 200 && inventado.llamado === 1, 'status=' + inventado.status);
     const vacia = await pedir('GET', 'bandejas', null);
-    chk('SIMULACIÓN: sin cabecera, el Administrador sigue siendo Administrador',
+    chk('SIMULACIÓN: sin parámetro, el Administrador sigue siendo Administrador',
         vacia.status === 200 && vacia.llamado === 1, 'status=' + vacia.status);
     ROL = 'Impresión';
 
@@ -549,21 +567,34 @@ function endpoints(src) {
     const h = await pg.evaluate(async () => {
       const vistos = [];
       window.fetch = async (url, opt) => {
-        vistos.push((opt && opt.headers && opt.headers['X-Rol-Simulado']) || null);
+        vistos.push({ url: String(url), cabecera: (opt && opt.headers && opt.headers['X-Rol-Simulado']) || null });
         return { ok: true, json: async () => [] };
       };
-      const probar = async (rol, real) => { ROL = rol; REAL_ROL = real; await api('GET', '/hojas'); return vistos.pop(); };
+      const probar = async (rol, real, metodo, ruta) => {
+        ROL = rol; REAL_ROL = real;
+        await api(metodo || 'GET', ruta || '/hojas', metodo === 'POST' ? {} : undefined);
+        return vistos.pop();
+      };
       return {
-        simulando:   await probar('Impresión', 'Administrador'),
-        sinSimular:  await probar('Administrador', 'Administrador'),
-        noAdmin:     await probar('Impresión', 'Hospital')
+        simulando:    await probar('Impresión', 'Administrador'),
+        conQuery:     await probar('Impresión', 'Administrador', 'GET', '/hojas?scope=historial'),
+        escribiendo:  await probar('Impresión', 'Administrador', 'POST', '/hojas/9/impresa'),
+        sinSimular:   await probar('Administrador', 'Administrador'),
+        noAdmin:      await probar('Impresión', 'Hospital')
       };
     });
-    chk('el navegador manda X-Rol-Simulado cuando el Administrador simula',
-        h.simulando === 'Impresión', JSON.stringify(h.simulando));
-    chk('y NO la manda cuando no está simulando', h.sinSimular === null, JSON.stringify(h.sinSimular));
-    chk('ni cuando el rol real no es Administrador (igual el servidor la ignoraría)',
-        h.noAdmin === null, JSON.stringify(h.noAdmin));
+    /* El valor va URL-encodado: el acento de «Impresión» viaja como %C3%B3 y
+       `request.query.get()` lo devuelve entero. */
+    chk('el navegador agrega ?simular= cuando el Administrador simula',
+        /[?&]simular=Impresi%C3%B3n$/.test(h.simulando.url), h.simulando.url);
+    chk('y respeta la URL que ya traía parámetros (& y no ?)',
+        /\?scope=historial&simular=/.test(h.conQuery.url), h.conQuery.url);
+    chk('NINGUNA petición lleva la cabecera vieja (Azure no la pasa a la API)',
+        h.simulando.cabecera === null && h.conQuery.cabecera === null, JSON.stringify(h.simulando.cabecera));
+    chk('en una ESCRITURA no se manda: el servidor la ignora igual',
+        !/simular=/.test(h.escribiendo.url), h.escribiendo.url);
+    chk('no se manda cuando no está simulando', !/simular=/.test(h.sinSimular.url), h.sinSimular.url);
+    chk('ni cuando el rol real no es Administrador', !/simular=/.test(h.noAdmin.url), h.noAdmin.url);
     await pg.close();
   }
 

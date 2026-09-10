@@ -175,8 +175,8 @@ async function hojaEnAlcanceImpresion(id) {
    vacía —el servidor contestaba las hojas de HOY sin las pendientes, que es lo
    que ve un Administrador— y parecía que la pantalla estaba rota.
 
-   Ahora el navegador manda la cabecera X-Rol-Simulado y el servidor le hace
-   caso, con TRES candados que hay que leer juntos:
+   Ahora el navegador agrega `?simular=<rol>` a sus LECTURAS y el servidor le
+   hace caso, con TRES candados que hay que leer juntos:
 
      1. Solo si el rol REAL es Administrador. Se resuelve el rol real contra la
         base ANTES de mirar la cabecera; el que la manda sin ser Administrador
@@ -193,7 +193,18 @@ async function hojaEnAlcanceImpresion(id) {
    Administrador no tiene, esta función deja de ser segura: ahí hay que
    comparar permisos y no confiar en el superset.
    ============================================================ */
-const HDR_ROL_SIMULADO = 'x-rol-simulado';
+/* VA EN LA URL Y NO EN UNA CABECERA, y esto está medido en producción, no
+   supuesto: la primera versión mandaba `X-Rol-Simulado` y la cabecera NUNCA
+   llegó a la Function. Azure Static Web Apps no se la pasa a la API. Se
+   comprobó con un valor sin acento -«Hospital»- contra /api/bandejas, que
+   exige rol Bodega: tenía que devolver 403 y devolvía 200 con las 118
+   bandejas, o sea que el servidor no vio nada. Un parámetro de consulta sí
+   llega siempre, y de paso `request.query.get()` lo desencoda, así que el
+   acento de «Impresión» viaja como %C3%B3 y vuelve entero -en una cabecera
+   HTTP el acento es otro problema esperando, porque los valores no son UTF-8-.
+
+   Si alguien lo vuelve a mover a una cabecera, la suite avisa. */
+const PARAM_ROL_SIMULADO = 'simular';
 
 /* El rol con el que se está actuando. Es el rol real salvo simulación. */
 async function rolActuante(request, user) {
@@ -201,7 +212,7 @@ async function rolActuante(request, user) {
   if (real !== 'Administrador') return real;              // candado 1
   if (request.method !== 'GET') return real;              // candado 2
   let sim = '';
-  try { sim = String(request.headers.get(HDR_ROL_SIMULADO) || '').trim(); } catch { sim = ''; }
+  try { sim = String(request.query.get(PARAM_ROL_SIMULADO) || '').trim(); } catch { sim = ''; }
   return (sim && ROLES.includes(sim)) ? sim : real;       // candado 3
 }
 
