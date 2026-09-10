@@ -1036,9 +1036,12 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
         <div><h2>Imprimir hojas</h2><div class="sub" id="prtSub">Hojas de consumo por imprimir</div></div>
         <button class="btn-ghost" onclick="loadImprimirHojas()">🔄 Actualizar</button>
       </div>
+      <div id="prtSim" class="sim-note hidden" style="margin:0 0 12px"></div>
       <div class="card">
         <div class="tbl-wrap"><table id="prtGrid" class="cards dos"><thead id="prtHead"></thead><tbody id="prtBody"></tbody></table></div>
-        <div id="prtEmpty" class="empty hidden"><div class="big">🖨️</div><div>No hay hojas de consumo para imprimir.</div></div>
+        <div id="prtEmpty" class="empty hidden"><div class="big">🖨️</div><div>No hay hojas de consumo para imprimir.</div>
+          <div class="sub" style="margin-top:6px">La lista trae las hojas <b>pendientes de reposición</b> de cualquier fecha, y las de los <b>últimos 7 días</b> en cualquier estado.</div>
+        </div>
         <div class="grid-foot" id="prtFoot"></div>
       </div>
     </section>
@@ -2057,6 +2060,16 @@ const verEstandar=()=> canSubir()||canBodega();
 async function api(method, path, body){
   const opt={method,headers:{}};
   if(body!==undefined){ opt.headers['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
+  /* SIMULACION DE ROL. Antes el selector del Administrador era solo del
+     navegador: pintaba el menu del rol simulado y los datos los traia el rol
+     real. Con el kiosco eso quedaba en evidencia -la bandeja salia vacia y
+     parecia roto-. Ahora se le dice al servidor con que rol se esta mirando.
+     El servidor solo le hace caso si tu rol real es Administrador, solo en
+     lecturas y solo para QUITAR permisos; la regla vive alla, no aca.
+     La condicion incluye REAL_ROL para no mandar una cabecera que igual se va
+     a ignorar, y porque durante el arranque -antes del /me- los dos valen
+     'Hospital' y no hay nada que simular. */
+  if(ROL!==REAL_ROL && REAL_ROL==='Administrador') opt.headers['X-Rol-Simulado']=ROL;
   const res=await fetch('/api'+path, opt);
   let data=null; try{ data=await res.json(); }catch{}
   if(!res.ok){
@@ -2858,6 +2871,20 @@ async function loadImprimirHojas(){
 function prtFiltered(){ return cardsFiltrar('prtGrid', PRINT_ROWS, PRT_COLF, PRT_COLS); }
 function onPrtFilter(k,v){ PRT_COLF[k]=v; renderImprimirHojas(); }
 function renderImprimirHojas(){
+  /* EL AVISO DE LA SIMULACIÓN. La simulación de rol del Administrador es solo
+     del navegador: el servidor sigue contestando con el rol REAL. Y el alcance
+     de esta pantalla lo decide el servidor, así que en simulación la lista que
+     llega es la del rol real —las hojas de hoy, sin las pendientes— y no la
+     bandeja del kiosco. Sin este aviso, la pantalla se ve vacía y parece rota.
+     Pasó en la primera prueba. */
+  const sim=document.getElementById('prtSim');
+  if(sim){
+    const simulando = ROL!==REAL_ROL;
+    sim.classList.toggle('hidden', !simulando);
+    if(simulando) sim.innerHTML='👁️ <b>Estás simulando el rol Impresión.</b> Esta lista es la de verdad: '
+      + 'el servidor te contesta las <b>lecturas</b> con este rol. Las escrituras siguen saliendo con tu '
+      + 'rol real (<b>'+esc(REAL_ROL)+'</b>), así que si imprimís desde acá la marca queda a tu nombre.';
+  }
   const head=document.getElementById('prtHead');
   head.innerHTML=`<tr>${PRT_COLS.map(c=>`<th>${c.l}</th>`).join('')}<th></th></tr>`
     +`<tr class="filter-row">${PRT_COLS.map(c=>`<th><input placeholder="Filtrar…" oninput="onPrtFilter('${c.k}',this.value)" value="${attr(PRT_COLF[c.k])}"></th>`).join('')}<th></th></tr>`;
