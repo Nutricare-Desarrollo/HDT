@@ -81,7 +81,8 @@ const MAPA = {
   'pedidos/{id}/envios':                         { p:'Pedido Pendiente',    PUT:'Guardó los envíos del pedido' },
   'pedidos/{id}/envios/pendientes':              { p:'Pedido Pendiente',    DELETE:'Canceló los envíos pendientes' },
   'pedidos/{id}/dynamics':                       { p:'Pedido Pendiente',    POST:'Envió el pedido a Dynamics' },
-  'usuarios/{email}':                            { p:'Usuarios y roles',    PUT:'Cambió el rol de un usuario' }
+  'usuarios/{email}':                            { p:'Usuarios y roles',    PUT:'Cambió el rol de un usuario' },
+  'usuarios/{email}/activo':                     { p:'Usuarios y roles',    PUT:'Cambió el estado de un usuario' }
 };
 
 const corta = (v, n) => {

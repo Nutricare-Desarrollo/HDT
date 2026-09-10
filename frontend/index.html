@@ -22,7 +22,8 @@ label{display:block;font-weight:600;margin-bottom:5px;font-size:13px;color:var(-
 .hidden{display:none!important}
 
 /* LOGIN */
-#login{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--brand-d),var(--accent));padding:20px}
+#login,#bloqueado{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--brand-d),var(--accent));padding:20px}
+#bloqueado.hidden{display:none}
 .login-card{background:#fff;border-radius:16px;padding:40px 32px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center}
 .login-card .logo{width:60px;height:60px;border-radius:15px;background:linear-gradient(135deg,var(--brand),var(--accent));margin:0 auto 18px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;font-weight:800}
 .login-card h1{font-size:20px;margin:0 0 6px}
@@ -950,6 +951,20 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
 </head>
 <body>
 
+<!-- ACCESO INACTIVO
+     Reusa el fondo y la tarjeta del login: es la misma situacion -no hay
+     aplicacion detras- y no vale la pena un estilo propio. Lo unico que se le
+     ofrece es cerrar sesion, que es lo unico que puede hacer. -->
+<div id="bloqueado" class="hidden">
+  <div class="login-card">
+    <div class="logo">RIC</div>
+    <h1>Su acceso está inactivo</h1>
+    <p>La cuenta <b id="bloqueadoCuenta"></b> no tiene acceso a RIC en este momento.
+       Si necesita entrar, hable con el administrador de la aplicación.</p>
+    <button class="ms-btn" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
 <!-- LOGIN -->
 <div id="login">
   <div class="login-card">
@@ -1186,7 +1201,10 @@ input.combo-invalid{border-color:#e08e0b!important;box-shadow:0 0 0 3px rgba(224
     <section id="viewUsuarios" class="hidden">
       <div class="page-head">
         <div><h2>Usuarios y roles</h2><div class="sub" id="usrSub">Asigná el rol de cada usuario registrado</div></div>
-        <button class="btn-ghost" onclick="loadUsuarios()">🔄 Actualizar</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <label class="hos-chk"><input type="checkbox" id="usrVerInactivos" onchange="renderUsuarios()"> Ver inactivos</label>
+          <button class="btn-ghost" onclick="loadUsuarios()">🔄 Actualizar</button>
+        </div>
       </div>
       <div class="card">
         <div class="tbl-wrap"><table id="usrGrid" class="cards dos"><thead id="usrHead"></thead><tbody id="usrBody"></tbody></table></div>
@@ -2091,6 +2109,16 @@ async function api(method, path, body){
 }
 function msLogin(){ location.href='/.auth/login/aad?post_login_redirect_uri=/'; }
 function logout(){ location.href='/.auth/logout?post_logout_redirect_uri=/'; }
+/* Le dice a la persona que su acceso esta inactivo, en vez de dejarla mirando
+   una pantalla vacia o un error suelto. */
+function mostrarInactivo(){
+  document.getElementById('login').classList.add('hidden');
+  document.getElementById('app').classList.add('hidden');
+  const c=document.getElementById('bloqueadoCuenta');
+  if(c) c.textContent=(USER&&(USER.email||USER.name))||'';
+  const b=document.getElementById('bloqueado');
+  if(b) b.classList.remove('hidden');
+}
 
 /* ===== Catálogo de productos Nutricare ===== */
 let CATALOGO=null; // Map(codigo -> descripcion)
@@ -2702,6 +2730,15 @@ async function init(){
     USER=await api('GET','/me');
     ROL=(USER&&USER.rol)||'Hospital';
     REAL_ROL=ROL;
+    /* USUARIO INACTIVO: no se dibuja la aplicacion. La API le responde 403 en
+       todo menos /api/me, asi que pedir los catalogos solo le llenaria la
+       pantalla de errores sin explicarle nada.
+
+       La comparacion es `===false` A PROPOSITO y no `!USER.activo`: una API que
+       todavia no manda el campo -la ventana entre el deploy del frontend y el
+       de la API- devuelve `undefined`, y con `!` eso dejaria a TODO EL MUNDO
+       afuera por unos minutos. */
+    if(USER && USER.activo===false){ mostrarInactivo(); return; }
     document.getElementById('userName').textContent=(USER&&USER.name)||'Usuario';
     document.getElementById('userEmail').textContent=(USER&&USER.email)||'';
     document.getElementById('roleBadge').textContent=ROL;
@@ -3109,7 +3146,8 @@ function estadoBadge(e){ const v=e||'Enviado'; const cls=v.normalize('NFD').repl
 
 /* ===== USUARIOS Y ROLES (solo Administrador) ===== */
 let USR_ROWS=[], USR_COLF={};
-const USR_COLS=[{k:'email',l:'Correo'},{k:'nombre',l:'Nombre'},{k:'rol',l:'Rol'},{k:'ultimo_acceso',l:'Último acceso'}];
+const USR_COLS=[{k:'email',l:'Correo'},{k:'nombre',l:'Nombre'},{k:'rol',l:'Rol'},
+                {k:'ultimo_acceso',l:'Último acceso'},{k:'estado',l:'Estado'}];
 async function showUsuarios(){
   if(ROL!=='Administrador'){ toast('Solo el Administrador puede gestionar usuarios'); showInicio(); return; }
   setTab('usuarios'); showOnly('viewUsuarios');
@@ -3118,23 +3156,39 @@ async function showUsuarios(){
 async function loadUsuarios(){
   try{ USR_ROWS=await api('GET','/usuarios'); }
   catch(e){ USR_ROWS=[]; toast('Error al cargar usuarios: '+e.message); }
+  /* El texto del estado se guarda en la fila, igual que en Hospitales: asi el
+     filtro de la columna y el buscador del celular trabajan sobre lo que se ve
+     -los dos leen r[k]- y no sobre un booleano. */
+  USR_ROWS.forEach(r=>{ r.estado = (r.activo===false) ? 'Inactivo' : 'Activo'; });
   renderUsuarios();
 }
-function usrFiltered(){ return cardsFiltrar('usrGrid', USR_ROWS, USR_COLF, USR_COLS); }
+function usrFiltered(){
+  /* El checkbox va antes de todo: es el alcance del listado, no un filtro mas.
+     Y es lo que hace REVERSIBLE la inactivacion: sin el, un usuario inactivo
+     desaparece de la pantalla y no queda donde hacerle clic para reactivarlo. */
+  const verInactivos=document.getElementById('usrVerInactivos').checked;
+  const rows=USR_ROWS.filter(r=>verInactivos || r.activo!==false);
+  return cardsFiltrar('usrGrid', rows, USR_COLF, USR_COLS);
+}
 function onUsrFilter(k,v){ USR_COLF[k]=v; renderUsuarios(); }
 function renderUsuarios(){
   const head=document.getElementById('usrHead');
-  head.innerHTML=`<tr>${USR_COLS.map(c=>`<th>${c.l}</th>`).join('')}</tr>`
-    +`<tr class="filter-row">${USR_COLS.map(c=> c.k==='rol'?'<th></th>':`<th><input placeholder="Filtrar…" oninput="onUsrFilter('${c.k}',this.value)" value="${attr(USR_COLF[c.k])}"></th>`).join('')}</tr>`;
+  /* La columna extra del final es la del botón: va sin rótulo y sin filtro. */
+  head.innerHTML=`<tr>${USR_COLS.map(c=>`<th>${c.l}</th>`).join('')}<th></th></tr>`
+    +`<tr class="filter-row">${USR_COLS.map(c=> c.k==='rol'?'<th></th>':`<th><input placeholder="Filtrar…" oninput="onUsrFilter('${c.k}',this.value)" value="${attr(USR_COLF[c.k])}"></th>`).join('')}<th></th></tr>`;
   const rows=usrFiltered();
   const b=document.getElementById('usrBody'); b.innerHTML='';
   document.getElementById('usrEmpty').classList.toggle('hidden', USR_ROWS.length>0);
   document.getElementById('usrGrid').classList.toggle('hidden', USR_ROWS.length===0);
   const foot=document.getElementById('usrFoot');
   if(!USR_ROWS.length){ foot.textContent=''; return; }
-  foot.textContent = rows.length===1?'1 usuario':(rows.length+' usuarios');
-  if(!rows.length){ b.innerHTML=`<tr class="aviso"><td colspan="${USR_COLS.length}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  const inact=USR_ROWS.filter(r=>r.activo===false).length;
+  const sufijo = inact ? ' · '+inact+(inact===1?' inactivo':' inactivos') : '';
+  foot.textContent = (rows.length===1?'1 usuario':(rows.length+' usuarios'))+sufijo;
+  if(!rows.length){ b.innerHTML=`<tr class="aviso"><td colspan="${USR_COLS.length+1}" style="text-align:center;color:var(--muted);padding:26px">Sin coincidencias con los filtros.</td></tr>`; return; }
+  const yo=String((USER&&USER.email)||'').trim().toLowerCase();
   rows.forEach(r=>{
+    const inactivo = r.activo===false;
     let rolCell;
     if(r.protegido){
       // Usuario protegido: rol de solo lectura (también bloqueado en el backend).
@@ -3143,10 +3197,45 @@ function renderUsuarios(){
       const opts=ROLES.map(x=>`<option value="${esc(x)}"${x===r.rol?' selected':''}>${esc(x)}</option>`).join('');
       rolCell=`<td><select class="usr-rol" data-prev="${attr(r.rol)}" onchange="cambiarRol('${encodeURIComponent(r.email)}',this.value,this)">${opts}</select></td>`;
     }
+    const estadoCell = inactivo ? '<td><b class="hos-off">Inactivo</b></td>' : '<td>Activo</td>';
+    /* El botón no sale para un correo protegido ni para el propio usuario: son
+       dos de los tres candados del servidor, y esconderlo evita ofrecer algo
+       que va a ser rechazado. El del último Administrador activo sí llega a la
+       API, porque depende de cómo esté el resto de la tabla. */
+    const esYo = String(r.email||'').trim().toLowerCase()===yo;
+    let accion='<td></td>';
+    if(r.protegido) accion=`<td><span class="usr-lock">protegido</span></td>`;
+    else if(esYo)   accion=`<td><span class="usr-lock">es su usuario</span></td>`;
+    else accion = inactivo
+      ? `<td style="white-space:nowrap"><button class="icon-btn" onclick="cambiarEstadoUsuario('${encodeURIComponent(r.email)}',true)">✔️ Reactivar</button></td>`
+      : `<td style="white-space:nowrap"><button class="icon-btn danger" onclick="cambiarEstadoUsuario('${encodeURIComponent(r.email)}',false)">🚫 Inactivar</button></td>`;
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${esc(r.email)}</td><td>${esc(r.nombre)}</td>${rolCell}<td>${esc(r.ultimo_acceso)}</td>`;
+    if(inactivo) tr.style.opacity='.62';
+    tr.innerHTML=`<td>${esc(r.email)}</td><td>${esc(r.nombre)}</td>${rolCell}<td>${esc(r.ultimo_acceso)}</td>${estadoCell}${accion}`;
     b.appendChild(tr);
   });
+}
+
+/* Inactivar o reactivar desde la fila. NO BORRA: el rol y el último acceso
+   quedan, así que reactivar devuelve a la persona como estaba. Inactivar pide
+   confirmación —le corta el acceso a alguien— y reactivar no, que es devolverlo
+   a la normalidad. */
+function cambiarEstadoUsuario(emailEnc, activo){
+  const email=decodeURIComponent(emailEnc);
+  const hacer=async function(){
+    try{
+      await api('PUT','/usuarios/'+emailEnc+'/activo',{activo});
+      const r=USR_ROWS.find(x=>x.email===email);
+      if(r){ r.activo=activo; r.estado=activo?'Activo':'Inactivo'; }
+      toast((activo?'Reactivado: ':'Inactivado: ')+email);
+      renderUsuarios();
+    }catch(e){ toast('No se pudo cambiar el estado: '+e.message); }
+  };
+  if(activo){ hacer(); return; }
+  askConfirm('Inactivar usuario',
+    email+' no va a poder entrar a RIC hasta que lo reactive. Sus hojas de consumo '
+    +'no se tocan, y el rol se conserva.',
+    'Sí, inactivar', hacer);
 }
 async function cambiarRol(emailEnc, rol, sel){
   const email=decodeURIComponent(emailEnc);
@@ -9011,7 +9100,8 @@ const CARDS_FILAS = {
   prtGrid:     () => [PRT_COLS, {extras:[''], acciones:true, titulo:1}],
   /* Usuarios no recorre USR_COLS para armar el cuerpo -lo escribe a mano-,
      asi que los rotulos van como lista. */
-  usrGrid:     () => [['Cuenta','Nombre','Rol','Último acceso'], {}],
+  usrGrid:     () => [['Cuenta','Nombre','Rol','Último acceso','Estado'],
+                      {extras:[''], acciones:true}],
   trGrid:      () => [TR_COLS, {}],
   /* La auditoria tiene nueve columnas; el numero de hoja es lo que identifica
      la fila y los dos valores del cambio son los textos largos. */

@@ -71,9 +71,15 @@ const EMAILS_PROTEGIDOS = new Set(
 );
 const esProtegido = (email) => EMAILS_PROTEGIDOS.has(String(email || '').trim().toLowerCase());
 
-// Registra/actualiza al usuario y devuelve su rol. Un usuario nuevo entra como 'Hospital'.
+/* Registra/actualiza al usuario y devuelve su estado. Un usuario nuevo entra
+   como 'Hospital' y activo: el alta sigue siendo automática, se decidió así.
+
+   OJO CON EL `ON CONFLICT`: actualiza Nombre y UltimoAcceso, y NO toca Activo
+   ni RolId. Es a propósito y es lo que sostiene la inactivación: si Activo
+   entrara en ese UPDATE, un usuario inactivo se reactivaría solo con volver a
+   abrir la aplicación, y nadie entendería por qué. No lo «arreglen». */
 async function ensureUserRole(user) {
-  if (!user || !user.email) return 'Hospital';
+  if (!user || !user.email) return { rol: 'Hospital', activo: true };
   await query(
     `INSERT INTO dbo.UsuarioRol (Email, Nombre, RolId, UltimoAcceso)
      VALUES ($1, $2, (SELECT Id FROM cat.Rol WHERE Nombre='Hospital'), (now() at time zone 'utc'))
@@ -81,15 +87,25 @@ async function ensureUserRole(user) {
         SET Nombre = EXCLUDED.Nombre, UltimoAcceso = (now() at time zone 'utc')`,
     [user.email, user.name || user.email]
   );
-  return getRole(user);
+  return estadoUsuario(user);
 }
-async function getRole(user) {
-  if (!user || !user.email) return 'Hospital';
+
+/* El estado del usuario en la aplicación: su rol y si sigue habilitado. Las dos
+   cosas salen de la misma fila y el envoltorio las necesita juntas en cada
+   pedido, así que una sola consulta.
+
+   Sin fila -alguien que nunca entró- es 'Hospital' y activo, que es el alta
+   automática de siempre. */
+async function estadoUsuario(user) {
+  if (!user || !user.email) return { rol: 'Hospital', activo: true };
   const r = await query(
-    `SELECT rol.Nombre AS rol FROM dbo.UsuarioRol u JOIN cat.Rol rol ON rol.Id = u.RolId WHERE u.Email = $1`,
+    `SELECT rol.Nombre AS rol, u.Activo AS activo
+       FROM dbo.UsuarioRol u JOIN cat.Rol rol ON rol.Id = u.RolId WHERE u.Email = $1`,
     [user.email]);
-  return r.rows.length ? r.rows[0].rol : 'Hospital';
+  if (!r.rows.length) return { rol: 'Hospital', activo: true };
+  return { rol: r.rows[0].rol, activo: r.rows[0].activo !== false };
 }
+async function getRole(user) { return (await estadoUsuario(user)).rol; }
 const puedeSubir = (rol) => rol === 'Hospital' || rol === 'Administrador';
 const puedeBodega = (rol) => rol === 'Bodega' || rol === 'Administrador';
 /* Codigo Sima lo edita e importa CUALQUIERA DE LOS TRES ROLES. Es la unica
@@ -258,7 +274,62 @@ function candadoImpresion(cfg) {
 }
 
 /* ============================================================
-   Bitacora y candado: se envuelve app.http UNA vez, aca, antes de que se
+   Usuario inactivo — el otro candado
+   ------------------------------------------------------------
+   Un usuario que ya no debe usar RIC se inactiva desde «Usuarios y roles» y
+   desde ese momento no puede hacer NADA. Va acá, en el mismo envoltorio y no
+   endpoint por endpoint, por la misma razón que el del rol Impresión: un
+   candado que hay que acordarse de poner en cada handler es un candado que un
+   día no se puso.
+
+   SE DEJA PASAR `GET me`, Y ES A PROPÓSITO. Es el único. Sin él la aplicación
+   no podría saber que está inactivo y la persona vería una pantalla en blanco
+   o un error suelto, sin entender qué le pasó; con él, /api/me contesta
+   `activo:false` y la pantalla explica que hable con el administrador. Que
+   pueda leer su propio nombre y su rol no le da acceso a ningún dato.
+
+   LO QUE ESTE CANDADO NO PUEDE HACER: impedir que la página cargue. Quién
+   puede pedir /index.html lo decide Static Web Apps -«authenticated»-, no
+   nosotros. El inactivo va a ver la pantalla de aviso, no la de login. Para
+   que no cargue ni eso hay que pedirle a IT «asignación de usuarios
+   requerida» en la Enterprise Application, y eso se decidió NO hacer por
+   ahora: el acceso se administra desde la aplicación.
+   ============================================================ */
+const ACTIVO_PERMITIDO = new Set(['GET me']);
+
+function candadoActivo(cfg) {
+  const original = cfg.handler;
+  const ruta = cfg.route;
+  return Object.assign({}, cfg, {
+    handler: async (request, context) => {
+      const user = getUser(request);
+      /* Sin usuario no hay a quién revisar: el endpoint anónimo de integración
+         sigue entrando y los demás ya devuelven 401 por su cuenta. */
+      if (user) {
+        let est;
+        try { est = await estadoUsuario(user); }
+        catch (e) {
+          /* Igual que el otro candado: si no se puede saber, no se sigue de
+             largo. Ojo, acá cae también el caso de la migración 39 sin
+             aplicar -no existe la columna Activo-, y por eso el script de push
+             pregunta por ella antes de subir. */
+          context.error(e);
+          return json(503, { error: 'No se pudo verificar su acceso. Vuelva a intentarlo.' });
+        }
+        if (!est.activo && !ACTIVO_PERMITIDO.has(request.method + ' ' + ruta)) {
+          /* `inactivo:true` es para la pantalla: le permite distinguir «te
+             inactivaron» de un 403 cualquiera de permisos. */
+          return json(403, { inactivo: true,
+            error: 'Su acceso a RIC est\u00e1 inactivo. Hable con el administrador.' });
+        }
+      }
+      return original(request, context);
+    }
+  });
+}
+
+/* ============================================================
+   Bitacora y candados: se envuelve app.http UNA vez, aca, antes de que se
    registre cualquier endpoint. Desde este punto todo lo que no sea GET queda
    en la bitacora sin que haya que acordarse de llamarla en cada handler, y
    todo endpoint -GET incluido- queda detras del candado del rol Impresion.
@@ -274,7 +345,14 @@ function candadoImpresion(cfg) {
    ESCRIBIR. Un GET rechazado devuelve 403 y no deja fila, igual que hoy.
    ============================================================ */
 const appHttp = app.http.bind(app);
-app.http = (nombre, cfg) => appHttp(nombre, bitacora.envolver(candadoImpresion(cfg), { getUser, getRole, query }));
+/* El orden de las tres capas, de afuera hacia adentro:
+     bitacora  ->  candadoActivo  ->  candadoImpresion  ->  el handler
+   La bitacora afuera, para que vea y registre los 403 de los dos candados.
+   `candadoActivo` antes que el de Impresion porque estar inactivo manda sobre
+   cualquier rol: no tiene sentido preguntar que puede hacer un usuario que no
+   deberia estar entrando. */
+app.http = (nombre, cfg) => appHttp(nombre,
+  bitacora.envolver(candadoActivo(candadoImpresion(cfg)), { getUser, getRole, query }));
 
 /* ============================================================
    /api/me  -> usuario autenticado + rol
@@ -285,8 +363,11 @@ app.http('me', {
     const user = getUser(request);
     if (!user) return json(401, { error: 'No autenticado' });
     try {
-      const rol = await ensureUserRole(user);
-      return json(200, { ...user, rol });
+      const est = await ensureUserRole(user);
+      /* `activo` lo usa la pantalla para mostrar el aviso de acceso inactivo en
+         vez del menú. Ver el candado de abajo: /api/me es el ÚNICO endpoint que
+         un usuario inactivo puede llamar, justamente para esto. */
+      return json(200, { ...user, rol: est.rol, activo: est.activo });
     } catch (e) {
       /* NO se inventa un rol. Esta rama devolvia 'Hospital' y, con la base
          caida, la aplicacion se dibujaba con el menu de Hospital para
@@ -5270,16 +5351,81 @@ app.http('usuarios-list', {
     try {
       if ((await getRole(user)) !== 'Administrador') return json(403, { error: 'Solo Administrador' });
       const r = await query(
-        `SELECT u.Email AS email, u.Nombre AS nombre, rol.Nombre AS rol,
+        `SELECT u.Email AS email, u.Nombre AS nombre, rol.Nombre AS rol, u.Activo AS activo,
                 to_char(u.UltimoAcceso,'YYYY-MM-DD HH24:MI') AS ultimo_acceso
          FROM dbo.UsuarioRol u JOIN cat.Rol rol ON rol.Id=u.RolId
-         ORDER BY u.UltimoAcceso DESC NULLS LAST, u.Email`);
+         ORDER BY u.Activo DESC, u.UltimoAcceso DESC NULLS LAST, u.Email`);
       // Marca los usuarios protegidos para que el frontend bloquee el cambio de rol.
       const rows = r.rows.map(x => ({ ...x, protegido: esProtegido(x.email) }));
       return json(200, rows);
     } catch (e) { context.error(e); return json(500, { error: 'Error al listar usuarios', detail: e.message }); }
   }
 });
+/* ============================================================
+   PUT /api/usuarios/{email}/activo -> inactiva o reactiva un usuario
+   ------------------------------------------------------------
+   Body: { activo: true | false }
+
+   NO BORRA NADA, y por eso se puede deshacer con el mismo botón: el rol, el
+   último acceso y el nombre quedan intactos, así que reactivar devuelve a la
+   persona como estaba —Bodega vuelve como Bodega, no como Hospital—. Las hojas
+   que hizo no se tocan de ninguna manera: CreadoPor guarda el nombre como
+   texto, no un id.
+
+   TRES CANDADOS, y los tres existen para que nadie quede afuera de la propia
+   aplicación sin manera de volver:
+     1. Un correo protegido (EMAILS_PROTEGIDOS) no se inactiva. Es el mismo
+        candado que ya impide cambiarle el rol.
+     2. Nadie se inactiva A SÍ MISMO. Es la forma clásica de quedarse afuera, y
+        desde la pantalla del inactivo no hay por dónde volver.
+     3. No se inactiva al ÚLTIMO Administrador activo. Si se pudiera, no
+        quedaría nadie con permiso para reactivar a nadie.
+
+   Si algún día los tres fallan, el rescate está escrito en la cabecera de
+   database/39_UsuarioActivo.sql: un UPDATE de una línea.
+   ============================================================ */
+app.http('usuario-set-activo', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'usuarios/{email}/activo',
+  handler: async (request, context) => {
+    const user = getUser(request);
+    if (!user) return json(401, { error: 'No autenticado' });
+    try {
+      if ((await getRole(user)) !== 'Administrador') return json(403, { error: 'Solo Administrador' });
+      const email = decodeURIComponent(request.params.email).trim().toLowerCase();
+      const body = await request.json();
+      const activo = !!(body && body.activo);
+
+      if (esProtegido(email))
+        return json(403, { error: 'Este usuario est\u00e1 protegido: no se puede inactivar.' });
+      if (!activo && email === String(user.email || '').trim().toLowerCase())
+        return json(400, { error: 'No puede inactivar su propio usuario.' });
+
+      const cur = await query(
+        `SELECT rol.Nombre AS rol, u.Activo AS activo
+           FROM dbo.UsuarioRol u JOIN cat.Rol rol ON rol.Id=u.RolId WHERE u.Email=$1`, [email]);
+      if (!cur.rows.length) return json(404, { error: 'Usuario no encontrado' });
+
+      if (!activo && cur.rows[0].rol === 'Administrador') {
+        const otros = await query(
+          `SELECT COUNT(*)::int AS n
+             FROM dbo.UsuarioRol u JOIN cat.Rol rol ON rol.Id=u.RolId
+            WHERE rol.Nombre='Administrador' AND u.Activo AND u.Email <> $1`, [email]);
+        if (!otros.rows[0].n)
+          return json(400, { error: 'Es el \u00faltimo Administrador activo: si lo inactiva, '
+            + 'nadie podr\u00eda volver a activar usuarios.' });
+      }
+
+      await query(`UPDATE dbo.UsuarioRol SET Activo=$2 WHERE Email=$1`, [email, activo]);
+      /* `email` y `estado` van en la respuesta para la bitácora: de ahí saca su
+         columna Registro y el detalle, sin que este handler la llame. */
+      return json(200, { ok: true, email, activo, estado: activo ? 'Activo' : 'Inactivo' });
+    } catch (e) {
+      context.error(e);
+      return json(500, { error: 'No se pudo cambiar el estado del usuario', detail: e.message });
+    }
+  }
+});
+
 app.http('usuario-set-rol', {
   methods: ['PUT'], authLevel: 'anonymous', route: 'usuarios/{email}',
   handler: async (request, context) => {
