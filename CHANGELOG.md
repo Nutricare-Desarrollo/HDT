@@ -2,6 +2,99 @@
 
 Registro de los cambios del proyecto, por parte/tanda.
 
+## [Parte 14] — El catálogo de productos deja de traerse en vivo de Dynamics
+
+### El caso: «Error 500» al cargar productos (16 de setiembre)
+
+El catálogo dejó de cargar y la pantalla mostraba un **`Error 500` sin explicación**. El flujo
+**no** estaba fallando: el historial de Power Automate tenía **todas** las corridas en
+`Succeeded`, pero tardando 50, 55, 56 y 71 segundos.
+
+**Azure Static Web Apps corta toda petición a la API a los 45 segundos.** Es un límite duro de la
+plataforma —igual en Free que en Standard, y en managed functions igual que en las propias— y **no
+se configura**. El 500 lo generaba el gateway mientras el flujo seguía trabajando, y por eso no
+traía ningún mensaje útil: no venía de este código.
+
+| Momento | Duración del flujo | Resultado |
+|---|---|---|
+| Antes del 11 de setiembre | 23-37 s | Funcionaba, con poco margen |
+| Tras agregarle el segundo catálogo y el cruce | 50-71 s | `Error 500` del gateway |
+| **Leyendo la tabla** (16 de setiembre, en régimen) | **1-5 s** | Resuelto, con margen de sobra |
+
+Medido en el historial del mismo día: `1:11` a las 07:33 con los dos catálogos de Dynamics, `0:24`
+tras revertir a uno solo, `0:04` con la tabla ya de por medio y `0:01` a las 10:35 en régimen. De
+26 segundos **arriba** del límite a 44 **abajo**.
+
+### La causa, y por qué no tenía arreglo por optimización
+
+Traer **los dos catálogos de Dynamics** —el maestro de ~9.566 productos y las ~10.000
+ubicaciones— costaba **~50 segundos en promedio**, y encima corría el cruce que le pega la bandeja
+a cada producto.
+
+O sea que el piso eran 50 segundos contra un techo de 45: **ni con el cruce gratis cabía**.
+Mientras las llamadas a Dynamics vivieran dentro de una petición sincrónica, el gateway ganaba
+siempre. Optimizar el cruce era discutir los centavos de una cuenta que ya no cerraba.
+
+### La solución: separar el trabajo caro de la respuesta
+
+El trabajo se parte en dos flujos:
+
+| Flujo | Cuándo corre | Qué hace |
+|---|---|---|
+| **`CargaProductosDeDynamics`** | De madrugada, programado | Lee los dos catálogos de Dynamics, hace el cruce y **escribe una tabla en SQL Server** |
+| **`HTTPGetObtieneProducto`** | En cada refresco del catálogo | **Solo lee esa tabla** y la devuelve |
+
+El trabajo caro se hace cuando a nadie le importa que tarde un minuto, y la respuesta en horas de
+oficina es una lectura de tabla. **El contrato no cambia**: `/api/productos` sigue devolviendo
+`{Codigo, Descripcion, Bandeja}`, y ni la API ni el frontend se enteran de nada.
+
+> ⚠️ **Lo que este diseño cambia, y conviene tener presente:** el catálogo ahora puede tener hasta
+> un día de atraso, y **si la carga de madrugada falla, nadie se entera**. El flujo HTTP va a
+> seguir sirviendo la tabla de ayer sin dar ningún síntoma. El primer aviso va a ser un producto
+> nuevo que no aparece, y va a llegar por teléfono. Vale la pena que la carga avise cuando falla,
+> y que la tabla guarde su fecha de última actualización para poder mirarla.
+
+### API: dos defensas para que esto no deje las pantallas sin catálogo
+
+En `api/src/productos.js`. Las dos se necesitan **juntas**: sin el timeout propio la Function nunca
+alcanza a reaccionar —la mata el gateway antes— y la caché vieja no sirve de nada.
+
+- **Timeout propio de 38 s** (`PRODUCTOS_TIMEOUT_MS`), por debajo de los 45 del gateway, para que
+  el que corte sea este código y no Azure. El error pasa de `Error 500` a un mensaje que nombra el
+  flujo y manda a mirar el historial de ejecuciones.
+- **La caché buena ya no se borra al vencer.** Si el origen falla, las pantallas siguen recibiendo
+  el último catálogo obtenido. Sin él se pierden las descripciones, el autocompletado y los códigos
+  Sima en todas las pantallas.
+- **No se reintenta en cada request durante un minuto** (`PRODUCTOS_RETRY_MS`). Sin esto, con el
+  origen lento *cada* pantalla se quedaría esperando los 38 s completos, una tras otra, y la
+  aplicación se sentiría peor que con el error.
+
+El botón **«Cargar productos»** (`refresh=1`) **no** se beneficia de la caché vieja: si el origen
+falla, revienta con el error real. Es la herramienta de diagnóstico, y anunciar «Catálogo cargado:
+9.555 productos» sirviendo datos de hace horas mandaría a buscar el problema al lugar equivocado
+—que es exactamente lo que pasó el 16—. La carga automática protege al usuario; el botón dice la
+verdad.
+
+Prueba nueva: `pruebas/probar_productos_cache.js`, 10 asertos, sin navegador ni base. Reemplaza
+`fetch` por un origen de mentira al que se le dice «portate lento», «contestá 500» o «portate
+bien». Contra el código anterior **se cuelga** en el del origen lento —no aborta nunca—, y el
+guardia de tiempo lo convierte en fallo: ese cuelgue es el bug.
+
+### Contexto del catálogo que no hay que perder
+
+- **`wMSLocationId` no es la bandeja.** De 843 ubicaciones distintas solo 91 empiezan con `NUT-`;
+  el resto son posiciones de estante (`3-D-03-OT`, `8-C-01-RE`, `ANAQUEL`). Y es volátil: se filtra
+  por existencia mayor que cero, así que cambia con la rotación del inventario. Sirve para saber
+  dónde está algo hoy, **no para definir a qué caja pertenece**. La relación de verdad vive en
+  `cat.EquipoProducto`, cargada desde los Listados de Ortopedia por la migración 10.
+- **Un producto vive en varias bandejas** —690 de 909— y el contrato del catálogo tiene un solo
+  campo `Bandeja`.
+- **Publicar el catálogo filtrado es peligroso.** `catCodigoValido()` apaga Guardar para cualquier
+  código que no esté en el mapa, así que filtrarlo a los 909 que tienen bandeja dejaría ~8.600
+  códigos sin poder digitarse en una hoja de consumo. El conteo del toast lo delata: **~9.555** es
+  el catálogo completo, ~2.134 es filtrado por cualquier ubicación y ~909 solo los de bandeja
+  `NUT-*`.
+
 ## [Parte 13] — Crear la hoja desde una cirugía: prellenado y catálogos
 
 ### Prellenado (`cirEnc`)
