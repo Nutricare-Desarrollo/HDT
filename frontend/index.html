@@ -1982,7 +1982,7 @@ input.combo-invalid{border-color:var(--danger)!important;box-shadow:0 0 0 3px rg
 <script>
 /* ===== Config de campos ===== */
 const ENC = [
-  {k:'numero_hoja',l:'N° de hoja',req:true},{k:'numero_documento',l:'N° de documento'},{k:'regimen',l:'Régimen',req:true,cat:'regimen'},
+  {k:'numero_hoja',l:'N° de hoja',req:true},{k:'regimen',l:'Régimen',req:true,cat:'regimen'},
   {k:'paciente',l:'Paciente'},{k:'identificacion',l:'Identificación'},{k:'tipo',l:'Tipo'},
   {k:'fecha_accidente',l:'Fecha de accidente',t:'date'},{k:'fecha_cirugia',l:'Fecha de cirugía',t:'date'},{k:'fecha_hoja',l:'Fecha de la hoja',t:'date',req:true},
   {k:'cirujano',l:'Cirujano',req:true,cat:'cirujano'},{k:'instrumentista',l:'Instrumentista',req:true},
@@ -3695,6 +3695,13 @@ function abrirImprimible(doc){
    El 12% del CODIGO SIMA sale de DESCRIPCION (47 -> 36) y un punto de
    REPOSICION (16 -> 15): descripcion era la unica con holgura, y los codigos
    Sima del catalogo son cortos -«QX2-0103», ocho caracteres-. */
+/* N° de documento del imprimible. Es el número de procedimiento de
+   contratación (SICOP): es el MISMO para todas las hojas del contrato, así que
+   no sale del encabezado sino de acá. Por eso `numero_documento` se quitó de
+   ENC -y de ENC_FIELDS en la API-: ya nadie lo lee ni lo escribe.
+   Sale en negrita porque la celda usa la clase .doc, que ya trae font-weight:bold.
+   Si algún día cambia el contrato, se cambia esta línea y se despliega. */
+const DOC_CONTRATO='2024LY-000007-0001000001';
 const IMP_COLS=[
   {k:'cod', th:'CÓDIGO',             con:13, sin:13},
   {k:'sim', th:'CÓDIGO SIMA',        con:12, soloSima:true},
@@ -3810,7 +3817,7 @@ ${cols.map((c)=>'.det .'+c.k+'{width:'+ancho(c)+'%'
     <td style="width:80px">${esc(enc.numero_hoja||'')}</td>
     <td class="lbl" style="width:70px">Régimen</td>
     <td style="width:110px">${esc(enc.regimen||'')}</td>
-    <td class="doc">${esc(enc.numero_documento||'')}</td>
+    <td class="doc">${esc(DOC_CONTRATO)}</td>
     <td class="datewrap" style="width:150px"><table class="dt"><tr><td>DÍA</td><td>MES</td><td>AÑO</td></tr><tr><td>${esc(dia)}</td><td>${esc(mes)}</td><td>${esc(anio)}</td></tr></table></td>
   </tr></table></div>
   <div class="nameswrap"><table class="names">
@@ -5689,8 +5696,7 @@ function cirEnc(c){
     fecha_accidente:c.fecha_accidente, fecha_cirugia:c.fecha_cirugia,
     cirujano:c.cirujano,
     diagnostico: conNota(c.cirugia||'', c.observacion),
-    procedimiento: c.requerimiento,
-    numero_documento: c.numero_caso
+    procedimiento: c.requerimiento
   };
 }
 function crearHojaDeCirugia(){

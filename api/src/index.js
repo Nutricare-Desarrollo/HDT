@@ -3618,7 +3618,13 @@ app.http('solicitud-validacion-confirmar', {
    Hojas de consumo — CRUD
    ============================================================ */
 const ENC_FIELDS = [
-  ['numero_hoja', 'NumeroHoja'], ['numero_documento', 'NumeroDocumento'], ['regimen', 'Regimen'],
+  /* `numero_documento` SALIÓ de acá a propósito, por la misma razón que
+     `tipo_cirugia` nunca entró: este arreglo se recorre entero en el POST y en
+     el PUT y escribe TODAS sus columnas. El formulario ya no dibuja ese campo
+     -el imprimible usa la constante DOC_CONTRATO-, así que no viaja en el body
+     y, de seguir listado, cada guardado pisaría NumeroDocumento con NULL. La
+     columna queda en la base con lo que ya tiene y deja de tocarse. */
+  ['numero_hoja', 'NumeroHoja'], ['regimen', 'Regimen'],
   ['paciente', 'Paciente'], ['identificacion', 'Identificacion'], ['tipo', 'Tipo'],
   ['fecha_accidente', 'FechaAccidente'], ['fecha_cirugia', 'FechaCirugia'], ['fecha_hoja', 'FechaHoja'],
   ['cirujano', 'Cirujano'], ['instrumentista', 'Instrumentista'], ['diagnostico', 'Diagnostico'],
