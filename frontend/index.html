@@ -5508,7 +5508,7 @@ function renderCir(){
    del estado, y «+N» si no caben. */
 function cirDots(dia){
   if(!dia.length) return '';
-  const p=dia.slice(0,CIR_MAX_DOTS).map(c=>`<i class="${esc(c.estado)}" title="${attr((c.hora_inicio||'').slice(0,5)+' '+(c.cirugia||''))}"></i>`).join('');
+  const p=dia.slice(0,CIR_MAX_DOTS).map(c=>`<i class="${esc(c.estado)}" title="${attr(cirHora(c.hora_inicio)+' '+(c.cirugia||''))}"></i>`).join('');
   const mas=dia.length>CIR_MAX_DOTS ? `<b>+${dia.length-CIR_MAX_DOTS}</b>` : '';
   return `<div class="mes-dots">${p}${mas}</div>`;
 }
@@ -5520,14 +5520,22 @@ function cirTocarDia(ds){
   if(cirEsMovil() || (cirByDay()[ds]||[]).length) openCirDia(ds);
   else openCirForm(null, ds);
 }
-function cirPill(c){ return `<div class="cir-pill ${esc(c.estado)}" onclick="event.stopPropagation();openCirDet(${c.id})" title="${attr((c.hora_inicio||'')+' '+(c.cirugia||''))}">${esc((c.hora_inicio||'').slice(0,5))} ${esc(c.cirugia||c.paciente||'Cirugía')}</div>`; }
+/* La hora se guarda como texto ('HH:MM') y algunas entraron sin el cero de
+   adelante: '8:30'. Comparadas como texto, '8:30' cae DESPUES de '18:30', asi
+   que la cirugia de la manana salia de ultima en el dia. Se ordena por minutos,
+   no por texto, y se muestra siempre con dos digitos. Las que no tienen hora
+   siguen yendo primero, como antes. */
+function cirMin(h){ const m=String(h||'').match(/^(\d{1,2}):(\d{2})/); return m ? (+m[1])*60+(+m[2]) : -1; }
+function cirHora(h){ const m=String(h||'').match(/^(\d{1,2}):(\d{2})/); return m ? String(+m[1]).padStart(2,'0')+':'+m[2] : ''; }
+const cirPorHora = (a,b)=> cirMin(a.hora_inicio)-cirMin(b.hora_inicio) || (a.id||0)-(b.id||0);
+function cirPill(c){ return `<div class="cir-pill ${esc(c.estado)}" onclick="event.stopPropagation();openCirDet(${c.id})" title="${attr(cirHora(c.hora_inicio)+' '+(c.cirugia||''))}">${esc(cirHora(c.hora_inicio))} ${esc(c.cirugia||c.paciente||'Cirugía')}</div>`; }
 function renderMes(){
   const ref=cirParse(CIR_REF); document.getElementById('cirTitle').textContent=MESES[ref.getMonth()]+' '+ref.getFullYear();
   let cur=cirParse(cirRango().desde); const byDay=cirByDay(), hoy=cirTodayStr(), mesRef=ref.getMonth();
   let html='<div class="mes-grid">'+cirEncabezadoDow();
   for(let w=0;w<cirSemanasDelMes(ref);w++){ for(let d=0;d<7;d++){
     const ds=cirFmt(cur), otro=cur.getMonth()!==mesRef?' otro':'', esHoy=ds===hoy?' hoy':'';
-    const dia=(byDay[ds]||[]).slice().sort((a,b)=>String(a.hora_inicio||'').localeCompare(String(b.hora_inicio||'')));
+    const dia=(byDay[ds]||[]).slice().sort(cirPorHora);
     let items=dia.slice(0,CIR_MAX_DIA).map(cirPill).join('');
     if(dia.length>CIR_MAX_DIA) items+=`<div class="mes-mas" onclick="event.stopPropagation();openCirDia('${ds}')">Ver más (${dia.length-CIR_MAX_DIA})</div>`;
     /* Se dibujan las DOS cosas y el CSS decide cual se ve segun el ancho. Asi
@@ -5601,14 +5609,14 @@ function renderAgenda(){
   }
   document.getElementById('cirCal').innerHTML=html;
 }
-const cirOrden = l => (l||[]).slice().sort((a,b)=>String(a.hora_inicio||'').localeCompare(String(b.hora_inicio||'')));
+const cirOrden = l => (l||[]).slice().sort(cirPorHora);
 /* Una sola fila para Semana, Agenda y el modal del dia: antes estaba escrita
    tres veces y cualquier arreglo habia que hacerlo tres veces. */
 function cirFila(c, alCerrarModal){
   const antes = alCerrarModal ? 'closeCirDia();' : '';
   const sub=[c.paciente, c.cirujano, c.ubicacion].filter(Boolean).map(esc).join(' · ');
   return `<div class="srow" onclick="${antes}openCirDet(${c.id})">`
-    + `<span class="hora">${esc((c.hora_inicio||'').slice(0,5)||'—')}</span>`
+    + `<span class="hora">${esc(cirHora(c.hora_inicio)||'—')}</span>`
     + `<span class="cir-pill ${esc(c.estado)}">${esc(c.estado)}</span>`
     + `<span class="srow-txt"><b>${esc(c.cirugia||'Cirugía')}</b>${sub?'<br><span class="srow-sub">'+sub+'</span>':''}</span>`
     + `</div>`;
@@ -5674,7 +5682,7 @@ async function openCirDet(id){
 }
 function closeCirDet(){ document.getElementById('cirDetModal').classList.add('hidden'); }
 function renderCirDet(c){
-  const kv=[['Fecha',(c.fecha_cirugia||'—')+' '+((c.hora_inicio||'').slice(0,5))],['Tiempo',c.tiempo],['Ubicación',c.ubicacion],['Paciente',c.paciente],['Identificación',c.identificacion],['Régimen',c.regimen],['F. accidente',c.fecha_accidente],['N° de caso',c.numero_caso],['Cirujano',c.cirujano],['Cirugía',c.cirugia],['Observación',c.observacion],['Requerimiento',c.requerimiento],['Estado',c.estado]];
+  const kv=[['Fecha',(c.fecha_cirugia||'—')+' '+(cirHora(c.hora_inicio))],['Tiempo',c.tiempo],['Ubicación',c.ubicacion],['Paciente',c.paciente],['Identificación',c.identificacion],['Régimen',c.regimen],['F. accidente',c.fecha_accidente],['N° de caso',c.numero_caso],['Cirujano',c.cirujano],['Cirugía',c.cirugia],['Observación',c.observacion],['Requerimiento',c.requerimiento],['Estado',c.estado]];
   let html='<div class="kv">'+kv.map(([k,v])=>`<div class="k">${k}</div><div>${esc(v)}</div>`).join('')+'</div>';
   const principal=(c.hojas||[]).find(h=>!h.es_reemplazo);
   html+='<div class="section-title">Hoja de consumo</div>';

@@ -2,6 +2,45 @@
 
 Registro de los cambios del proyecto, por parte/tanda.
 
+## [Parte 15] — El calendario ordena las cirugías por hora de verdad
+
+### El caso: la de las 8:30 salía de última (18 de setiembre)
+
+En la vista de Mes, el viernes 18 mostraba las cirugías así: `09:30`, `17:00`, `17:00`, `18:30`
+y **`8:30` de última**. No era un problema de orden: era un problema de **cómo estaba guardada
+la hora**.
+
+`dbo.Cirugia.HoraInicio` es `VARCHAR(8)`, y tanto la API (`ORDER BY HoraInicio`) como el
+frontend (`localeCompare`) la comparaban **como texto**. Comparado como texto, `'8:30'` va
+**después** de `'18:30'`, porque el carácter `8` es mayor que el `1`. Las que sí traían el cero
+de adelante (`09:30`) ordenaban bien entre ellas, y por eso el síntoma aparecía y desaparecía
+según el día.
+
+**De dónde entraron las horas sin cero.** El import de Excel del frontend (`impHora`) y los
+scripts de Office para Power Automate (`horaHHMM`) **sí** rellenan el cero. El hueco estaba en
+la API: `POST /api/cirugias` y `POST /api/cirugias/importar` guardaban `c.hora_inicio` tal cual
+viniera, sin normalizar.
+
+### API — `api/src/index.js`
+- `cirHoraHHMM()`: normaliza a `HH:MM` cualquier hora que entre (`'8:30'`, `'8:30:00'`, `'08:30'`).
+- Se aplica en los cuatro caminos de escritura: crear (`POST /api/cirugias`), editar
+  (`PUT /api/cirugias/{id}`) y los dos bloques masivos de `POST /api/cirugias/importar`.
+  Cubre `hora_inicio` y `hora_fin` (`CIR_TIME_KEYS`).
+- `GET /api/cirugias`: el orden pasa a `ORDER BY FechaCirugia, LPAD(HoraInicio,5,'0'), Id`, para
+  que las filas viejas salgan bien aunque no se haya corrido la migración.
+
+### Frontend — `frontend/index.html`
+- `cirMin()` / `cirPorHora()`: el calendario ordena por **minutos desde medianoche**, no por
+  texto. Reemplaza los dos `localeCompare` que había (Mes, y el `cirOrden` que comparten Semana,
+  Agenda y el modal del día).
+- `cirHora()`: la hora se **muestra** siempre con dos dígitos, en la píldora del mes, la fila de
+  Semana/Agenda, el tooltip de los puntos y el detalle.
+- Las cirugías **sin hora** siguen apareciendo primero, como antes.
+
+### Base de datos — `database/40_HoraCirugiaNormalizada.sql` (idempotente)
+- Rellena el cero de adelante en `HoraInicio` y `HoraFin` de las filas ya guardadas.
+- Imprime el conteo antes y después; la segunda consulta tiene que dar **0**.
+
 ## [Parte 14] — El catálogo de productos deja de traerse en vivo de Dynamics
 
 ### El caso: «Error 500» al cargar productos (16 de setiembre)

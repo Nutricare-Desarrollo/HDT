@@ -4621,6 +4621,15 @@ const CIR_FIELDS = [
   ['observacion', 'Observacion'], ['requerimiento', 'RequerimientoQuirurgico']
 ];
 const CIR_DATE_KEYS = new Set(['fecha_cirugia', 'fecha_accidente']);
+const CIR_TIME_KEYS = new Set(['hora_inicio', 'hora_fin']);
+/* HoraInicio es VARCHAR y se ordena como texto: '8:30' cae despues de '18:30'.
+   Entraban horas sin el cero de adelante porque aqui se guardaba lo que viniera.
+   Se normaliza a 'HH:MM' al escribir, y al leer se ordena con LPAD para las que
+   ya estaban guardadas mal. */
+const cirHoraHHMM = (v) => {
+  const m = String(v == null ? '' : v).match(/^(\d{1,2}):(\d{2})/);
+  return m ? String(+m[1]).padStart(2, '0') + ':' + m[2] : null;
+};
 const CIR_ESTADOS = ['Programada', 'Realizada', 'Cancelada'];
 const CIR_SELECT = `SELECT Id AS id, to_char(FechaCirugia,'YYYY-MM-DD') AS fecha_cirugia, HoraInicio AS hora_inicio,
   HoraFin AS hora_fin, Tiempo AS tiempo, Ubicacion AS ubicacion, Identificacion AS identificacion, Paciente AS paciente,
@@ -4638,7 +4647,7 @@ app.http('cirugias-list', {
       const ok = (s) => s && /^\d{4}-\d{2}-\d{2}$/.test(s);
       let where = '', params = [];
       if (ok(desde) && ok(hasta)) { where = `WHERE FechaCirugia BETWEEN $1 AND $2`; params = [desde, hasta]; }
-      const r = await query(`${CIR_SELECT} ${where} ORDER BY FechaCirugia, HoraInicio, Id`, params);
+      const r = await query(`${CIR_SELECT} ${where} ORDER BY FechaCirugia, LPAD(HoraInicio, 5, '0'), Id`, params);
       return json(200, r.rows);
     } catch (e) { context.error(e); return json(500, { error: 'Error al listar cirugías', detail: e.message }); }
   }
@@ -4673,6 +4682,7 @@ app.http('cirugia-create', {
       i++; cols.push(col); ph.push('$' + i);
       let v = body[k]; v = (v === undefined || v === null || v === '') ? null : v;
       if (CIR_DATE_KEYS.has(k) && v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) v = null;
+      if (CIR_TIME_KEYS.has(k) && v) v = cirHoraHHMM(v);
       vals.push(v);
     }
     cols.push('Estado'); vals.push(CIR_ESTADOS.includes(body.estado) ? body.estado : 'Programada'); ph.push('$' + (++i));
@@ -4697,6 +4707,7 @@ app.http('cirugia-update', {
     for (const [k, col] of CIR_FIELDS) {
       i++; let v = body[k]; v = (v === undefined || v === null || v === '') ? null : v;
       if (CIR_DATE_KEYS.has(k) && v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) v = null;
+      if (CIR_TIME_KEYS.has(k) && v) v = cirHoraHHMM(v);
       sets.push(`${col}=$${i}`); vals.push(v);
     }
     if (CIR_ESTADOS.includes(body.estado)) { i++; sets.push(`Estado=$${i}`); vals.push(body.estado); }
@@ -4728,7 +4739,7 @@ app.http('cirugias-importar', {
         if (!fecha) { omitidas++; continue; }
         const facc = okDate(c.fecha_accidente) ? c.fecha_accidente : null;
         const caso = (c.numero_caso != null && String(c.numero_caso).trim() !== '') ? String(c.numero_caso).trim() : null;
-        const vals = [fecha, c.hora_inicio || null, c.tiempo || null, c.ubicacion || null, c.identificacion || null,
+        const vals = [fecha, cirHoraHHMM(c.hora_inicio), c.tiempo || null, c.ubicacion || null, c.identificacion || null,
           c.paciente || null, c.regimen || null, facc, caso, c.cirugia || null, c.cirujano || null,
           c.observacion || null, c.requerimiento || null];
         let upd = null;
@@ -4795,7 +4806,7 @@ app.http('cirugias-ingest', {
         const facc = okDate(c.fecha_accidente) ? c.fecha_accidente : null;
         const caso = (c.numero_caso != null && String(c.numero_caso).trim() !== '') ? String(c.numero_caso).trim() : null;
         const estado = CIR_ESTADOS.includes(c.estado) ? c.estado : 'Programada';
-        const vals = [fecha, c.hora_inicio || null, c.tiempo || null, c.ubicacion || null, c.identificacion || null,
+        const vals = [fecha, cirHoraHHMM(c.hora_inicio), c.tiempo || null, c.ubicacion || null, c.identificacion || null,
           c.paciente || null, c.regimen || null, facc, caso, c.cirugia || null, c.cirujano || null,
           c.observacion || null, c.requerimiento || null];
         let upd = null;
