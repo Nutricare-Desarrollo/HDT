@@ -451,6 +451,8 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 /* El veredicto que quedo viejo: gris, no rojo ni verde. No es un resultado
    -no dice si la bandeja esta bien o mal-, es la falta de uno. */
 .vb-ver.viejo{background:#f2f5f8;border-color:#c8d4de;border-left-color:var(--muted)}
+.vb-ver.falta{background:#fff3e9;border-color:#f5c9a3;border-left-color:#d1741f}
+.vb-ver.falta .tit{color:#9a4a10}
 .vb-ver.no{background:#fdeeec;border-color:#f0bdb6;border-left-color:var(--danger)}
 .vb-ver.no .tit{color:#96271b}
 .vb-acc{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
@@ -459,6 +461,7 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .vb-pill.ok{background:#eefaf3;color:#16704a;border:1px solid #b6e3cc}
 .vb-pill.duda{background:#fff8e6;color:#8a5a00;border:1px solid #f0d79a}
 .vb-pill.no{background:#fdeeec;color:#96271b;border:1px solid #f0bdb6}
+.vb-pill.falta{background:#fff3e9;color:#9a4a10;border:1px solid #f5c9a3}
 .vb-pill.gris{background:#eef3f7;color:var(--muted);border:1px solid var(--line)}
 /* ===== El comparador a pantalla completa ===== */
 .cmp{position:fixed;inset:0;background:#0d1720;z-index:50;display:flex;flex-direction:column}  /* 50 y no 9000: el modal de confirmar es .overlay, z-index 60, y tiene
@@ -7484,7 +7487,7 @@ function renderSolHead(){
    no tiene lugar para «2 de 4 bandejas validadas — 1 correcta, 1 incorrecta,
    2 sin fotos», y esa es justo la frase que hace falta cuando algo no cuadra.
    En un borrador no se pinta nada: todavia no hay nada que validar. */
-const SOL_VAL_CLS={'Correcta':'ok','Incorrecta':'no','Sin determinar':'duda',
+const SOL_VAL_CLS={'Correcta':'ok','Incorrecta':'no','Incompleta':'falta','Sin determinar':'duda',
                    'Falta validar':'duda','Sin validar':'gris'};
 /* Rotulo corto para la columna. El largo -el que manda la API- va en el
    title, junto al desglose. Sin emoji y con «Pendiente» en vez de «Falta
@@ -7712,12 +7715,25 @@ function renderSolDespacho(){
           + malas.map(b=>esc(b.demarcado||b.equipo_codigo)).join(', ')
           + (malas.length===1?' quedó marcada como INCORRECTA' : ' quedaron marcadas como INCORRECTAS')
           + '.</b> Se puede enviar igual; queda anotado en la bitácora y en el aviso al hospital.';
-  }else if(sinFoto.length===SOL_AV.length){
-    nota += ' Ninguna bandeja se validó con fotos: la solicitud saldrá como «Sin validar».';
-  }else if(sinFoto.length){
-    nota += ' '+(sinFoto.length===1?'La bandeja ':'Las bandejas ')
-          + sinFoto.map(b=>esc(b.demarcado||b.equipo_codigo)).join(', ')
-          + (sinFoto.length===1?' no tiene fotos' : ' no tienen fotos')+': saldrá como «Parcial».';
+  }
+  const faltas = SOL_AV.filter(b=>b.veredicto==='Incompleta');
+  if(faltas.length){
+    nota += ' <b>📷 '+(faltas.length===1?'La bandeja ':'Las bandejas ')
+          + faltas.map(b=>esc(b.demarcado||b.equipo_codigo)).join(', ')
+          + (faltas.length===1?' quedó INCOMPLETA' : ' quedaron INCOMPLETAS')
+          + ':</b> se fotografiaron menos recipientes que los que tiene el catálogo, '
+          + 'así que del resto no se validó nada.';
+  }
+  /* Lo de las bandejas sin fotos solo se dice si no hubo nada mas grave que
+     contar, igual que antes: la nota tiene que caber de un vistazo. */
+  if(!malas.length && !faltas.length){
+    if(sinFoto.length===SOL_AV.length){
+      nota += ' Ninguna bandeja se validó con fotos: la solicitud saldrá como «Sin validar».';
+    }else if(sinFoto.length){
+      nota += ' '+(sinFoto.length===1?'La bandeja ':'Las bandejas ')
+            + sinFoto.map(b=>esc(b.demarcado||b.equipo_codigo)).join(', ')
+            + (sinFoto.length===1?' no tiene fotos' : ' no tienen fotos')+': saldrá como «Parcial».';
+    }
   }
   document.getElementById('solDespachoNota').innerHTML=nota;
   const b=document.getElementById('solDespacharBtn');
@@ -7895,7 +7911,7 @@ function solPillVeredicto(d){
      «Correcta» de un veredicto que ya no habla de esas fotos. */
   if(d.veredicto_viejo)
     return ' <span class="vb-pill duda" title="'+attr('El veredicto era «'+d.veredicto+'», pero las fotos cambiaron después. Hay que validar de nuevo.')+'">🔄 Validar de nuevo</span>';
-  const cls={'Correcta':'ok','Incorrecta':'no','No puedo determinarlo':'duda'}[d.veredicto]||'gris';
+  const cls={'Correcta':'ok','Incorrecta':'no','Incompleta':'falta','No puedo determinarlo':'duda'}[d.veredicto]||'gris';
   const t=d.veredicto==='No puedo determinarlo' ? 'Sin determinar' : d.veredicto;
   return ' <span class="vb-pill '+cls+'" title="'+attr(d.veredicto+(d.veredicto_origen==='Persona'?' — lo confirmó Bodega mirando las fotos':' — lo dijo el sistema'))+'">'
        + (d.veredicto_origen==='Persona'?'👤 ':'') + esc(t) + '</span>';
@@ -7952,8 +7968,8 @@ async function valRecargar(){
   }catch(e){ toast('No se pudo recargar: '+e.message); }
 }
 
-const VAL_ICO={'Correcta':'✅','Incorrecta':'❌','No puedo determinarlo':'🤔'};
-const VAL_CLS={'Correcta':'ok','Incorrecta':'no','No puedo determinarlo':'duda'};
+const VAL_ICO={'Correcta':'✅','Incorrecta':'❌','Incompleta':'📷','No puedo determinarlo':'🤔'};
+const VAL_CLS={'Correcta':'ok','Incorrecta':'no','Incompleta':'falta','No puedo determinarlo':'duda'};
 
 function renderValidacion(){
   if(!VAL) return;
@@ -8097,6 +8113,20 @@ function valFranjaVeredicto(){
     </div></div>`;
 }
 
+/* Cuantas fotos espera el catalogo, dicho ANTES de tocar «Validar bandeja».
+   En la demo del 18 el veredicto fue la PRIMERA noticia de que faltaban tres
+   recipientes; con esto la persona lo sabe mientras todavia esta frente a la
+   bandeja. El numero sale de contar las fotos de referencia, que es la misma
+   cuenta que hace la API. */
+function valFaltanHint(n){
+  const esperadas=(VAL.referencia||[]).length;
+  if(!esperadas) return '';
+  const faltan=esperadas-n;
+  if(faltan>0) return `<p class="hint" style="color:#9a4a10"><b>📷 Faltan ${faltan} de ${esperadas}.</b> `
+    + `La bandeja se valida completa: con menos fotos el resultado va a ser «Incompleta».</p>`;
+  return `<p class="hint" style="color:#16704a">✅ Están las ${esperadas} que tiene el catálogo.</p>`;
+}
+
 function valZonaSubida(){
   if(valSoloLectura()){
     return `<div class="chk-ayuda">La solicitud ya no está en alisto: las fotos quedan como registro de la entrega.</div>`;
@@ -8125,6 +8155,7 @@ function valZonaSubida(){
       <p class="hint">Una foto por recipiente, <b>con las etiquetas visibles</b>: el sistema compara el texto
         impreso, no la forma. Se reducen automáticamente antes de subir y se leen al momento.
         ${n} de ${VAL.maximo} usadas.</p>
+      ${valFaltanHint(n)}
       <div id="valProgreso" style="font-size:13px;margin-top:8px"></div>
     </div>`;
 }
@@ -8288,6 +8319,7 @@ async function valValidar(){
   const v=VAL.veredicto;
   if(v) toast(v.resultado==='Correcta' ? '✅ Bandeja correcta'
             : v.resultado==='Incorrecta' ? '❌ Bandeja incorrecta — revise las fotos'
+            : v.resultado==='Incompleta' ? '📷 Bandeja incompleta — faltan recipientes por fotografiar'
             : '🤔 No se pudo determinar — compare las fotos usted mismo');
   const f=document.getElementById('valBody'); if(f) f.scrollIntoView({behavior:'smooth', block:'start'});
 }

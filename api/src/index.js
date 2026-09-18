@@ -1661,7 +1661,7 @@ app.http('bandeja-foto-create', {
          texto, errOcr, user.name || user.email, user.email]);
       /* El corpus cambio: el cache de referencias tiene que rehacerse o la
          validacion seguiria comparando contra lo de hace un minuto. */
-      REF_CACHE = null;
+      REF_CACHE = null; REF_N_CACHE = null;
       /* Sin filas devueltas es que el indice unico la freno: la misma foto ya
          estaba. Se responde 200 y no un error, porque desde la pantalla eso es
          «ya la tenias», no un fallo. */
@@ -1727,7 +1727,7 @@ app.http('bandeja-foto-delete', {
           WHERE Id = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))
         RETURNING Nombre AS nombre`, [fid, cod]);
       if (!r.rowCount) return json(404, { error: 'La foto no existe' });
-      REF_CACHE = null;   // el corpus cambio
+      REF_CACHE = null; REF_N_CACHE = null;   // el corpus cambio
       return json(200, { ok: true, codigo: cod, nombre: r.rows[0].nombre });
     } catch (e) {
       context.error(e);
@@ -2189,6 +2189,7 @@ const SQL_VALIDACION = `
          COUNT(*) FILTER (WHERE res IS NOT NULL AND NOT viejo)::int           AS validadas,
          COUNT(*) FILTER (WHERE res = 'Correcta' AND NOT viejo)::int          AS correctas,
          COUNT(*) FILTER (WHERE res = 'Incorrecta' AND NOT viejo)::int        AS incorrectas,
+         COUNT(*) FILTER (WHERE res = 'Incompleta' AND NOT viejo)::int        AS incompletas,
          COUNT(*) FILTER (WHERE res = 'No puedo determinarlo' AND NOT viejo)::int AS dudosas
     FROM b GROUP BY sid`;
 
@@ -2201,6 +2202,7 @@ function estadoValidacion(c) {
   const partes = [];
   if (c.correctas)   partes.push(c.correctas + (c.correctas === 1 ? ' correcta' : ' correctas'));
   if (c.incorrectas) partes.push(c.incorrectas + (c.incorrectas === 1 ? ' incorrecta' : ' incorrectas'));
+  if (c.incompletas) partes.push(c.incompletas + (c.incompletas === 1 ? ' incompleta' : ' incompletas'));
   if (c.dudosas)     partes.push(c.dudosas + ' sin determinar');
   const sinFoto = c.bandejas - c.con_fotos;
   if (sinFoto)       partes.push(sinFoto + (sinFoto === 1 ? ' sin fotos' : ' sin fotos'));
@@ -2214,6 +2216,7 @@ function estadoValidacion(c) {
 
   let estado;
   if (c.incorrectas)                 estado = 'Incorrecta';
+  else if (c.incompletas)            estado = 'Incompleta';
   else if (!c.con_fotos)             estado = 'Sin validar';
   else if (pendientes || sinFoto)    estado = 'Falta validar';
   else if (c.dudosas)                estado = 'Sin determinar';
@@ -2373,7 +2376,7 @@ app.http('bandeja-fotos-leer', {
         if (texto) leidas++;
         else sinTexto.push({ id: f.id, nombre: f.rotulo || f.nombre || ('foto ' + f.id), error: err });
       }
-      REF_CACHE = null;   // el corpus cambio
+      REF_CACHE = null; REF_N_CACHE = null;   // el corpus cambio
       return json(200, { leidas, sinTexto: sinTexto.length, detalle: sinTexto,
                          codigo: b.demarcado || b.codigo });
     } catch (e) {
@@ -3160,7 +3163,12 @@ app.http('solicitud-checklist-guardar', {
 const comparar = require('./comparar');
 const { analyzeRead, textoDe } = require('./layout');
 
-const FOTO_ENTREGA_MAX = 6;
+/* Igual que FOTO_BANDEJA_MAX a proposito. Desde que la validacion exige que la
+   entrega traiga tantas fotos como el catalogo, un tope mas bajo que el del
+   catalogo hace IMPOSIBLE validar las bandejas grandes: con 6, la NUT-0001337
+   -10 fotos de referencia-, la NUT-0001330 -8- y la NUT-0001346 -7- se quedaban
+   sin poder completarse nunca. */
+const FOTO_ENTREGA_MAX = 12;
 const COLOR_ILEGIBLE = 'No se distingue';
 const COLORES_DEMARCACION = ['Amarillo', 'Azul', 'Blanco', 'Café', 'Gris', 'Morado', 'Naranja', 'Negro', 'Rojo', 'Verde'];
 const FECHA_VALID = `to_char((FechaHora AT TIME ZONE 'UTC') AT TIME ZONE 'America/Costa_Rica', 'YYYY-MM-DD HH24:MI')`;
@@ -3249,6 +3257,22 @@ async function referencias(context) {
   REF_CACHE = refs; REF_CACHE_T = Date.now();
   if (context) context.log('Referencias de bandeja en cache: ' + Object.keys(refs).length);
   return refs;
+}
+
+/* Cuantas fotos tiene cada bandeja en el catalogo. Es OTRA consulta que la de
+   arriba y no un COUNT sobre ella: referencias() se queda solo con las fotos
+   que tienen texto leido, y una foto sin texto sigue siendo un recipiente que
+   hay que fotografiar. Cache propia, del mismo largo. */
+let REF_N_CACHE = null, REF_N_CACHE_T = 0;
+async function conteoReferencias() {
+  if (REF_N_CACHE && (Date.now() - REF_N_CACHE_T) < REF_CACHE_MS) return REF_N_CACHE;
+  const r = await query(
+    `SELECT UPPER(TRIM(EquipoCodigo)) AS codigo, COUNT(*)::int AS n
+       FROM cat.EquipoFoto GROUP BY UPPER(TRIM(EquipoCodigo))`);
+  const m = {};
+  for (const f of r.rows) m[f.codigo] = f.n;
+  REF_N_CACHE = m; REF_N_CACHE_T = Date.now();
+  return m;
 }
 
 /* GET /api/solicitudes/{id}/bandejas/{codigo}/validacion */
@@ -3492,11 +3516,18 @@ app.http('solicitud-validacion-run', {
           WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))`, [id, cod]);
       if (!nf.rows[0].n) return json(400, { error: 'Adjunte al menos una foto de la bandeja antes de validar' });
 
-      const [g, refs] = await Promise.all([query(SQL_GEMELAS, [cod]), referencias(context)]);
+      const [g, refs, nRef] = await Promise.all([
+        query(SQL_GEMELAS, [cod]), referencias(context), conteoReferencias()]);
+      const pedida = String(b.equipo_codigo).toUpperCase().trim();
       const v = comparar.veredicto({
         textosEntrega: f.rows.map((x) => x.texto),
-        pedida: String(b.equipo_codigo).toUpperCase().trim(),
+        pedida,
         refs,
+        /* Completitud: la bandeja va entera o no va. `subidas` es el total de
+           fotos de la entrega y NO f.rows.length, que solo cuenta las que
+           tienen texto leido: una foto ilegible ya ocupo su recipiente. */
+        esperadas: nRef[pedida] || 0,
+        subidas: nf.rows[0].n,
         gemelas: g.rows,
         color: colorObs ? { observado: colorObs, catalogo: b.color_catalogo } : { observado: null, catalogo: b.color_catalogo }
       });

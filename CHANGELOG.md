@@ -2,6 +2,68 @@
 
 Registro de los cambios del proyecto, por parte/tanda.
 
+## [Parte 16] — La validación de bandejas mide completitud, no solo contenido
+
+### El caso: dos fotos contra un catálogo de cinco, y dijo «Correcta» (18 de setiembre)
+
+En la demo se validó la **NUT-0001338** con **dos** fotos. El catálogo tiene **cinco** de
+referencia. El sistema contestó **«Correcta»**, puntaje 0.595.
+
+Y no estaba mintiendo sobre lo que miró: el texto de esas dos fotos sí corresponde a esa
+bandeja. El problema es que **de los otros tres recipientes no se sabía nada**, y nadie lo dijo.
+La validación medía **contenido** y nunca medía **completitud**. Una bandeja va completa o no va.
+
+### Lo que apareció al ir a implementarlo
+
+**El tope de la entrega era más bajo que el del catálogo.** `FOTO_ENTREGA_MAX` era **6** y
+`FOTO_BANDEJA_MAX` es **12**. Con la regla nueva, tres de las doce bandejas medidas no se
+podrían validar nunca: la **NUT-0001337** tiene 10 fotos de referencia, la **0001330** tiene 8 y
+la **0001346** tiene 7 — el usuario llegaba al tope y le seguían faltando recipientes. El tope
+de la entrega sube a **12**.
+
+**El catálogo no registra cuántos recipientes tiene una bandeja**, solo cuántas fotos se le
+tomaron, y no es lo mismo. La migración 32 dice que una bandeja tiene «de 2 a 9 recipientes»,
+pero la **NUT-0001337 tiene 10 fotos**: ahí al menos una es una tapa o un segundo ángulo, y el
+sistema va a pedir una foto de más. El rótulo no ayuda a separarlas: de las 51 fotos de la carga
+inicial, **una** dice «Recipiente 1» y **una** dice «Tapa»; el resto está en `NULL`.
+
+> Se decidió contar fotos igual, para que saliera ya. El día que exista un campo declarado
+> (`cat.Equipo.Recipientes`) se cambia de dónde sale `esperadas` en `conCompletitud()` y **nada
+> más de esto se mueve**.
+
+### API — `api/src/comparar.js`
+- `conCompletitud()`: envuelve el veredicto de contenido y compara las fotos **útiles** de la
+  entrega contra las de referencia del catálogo. Las apartadas por `clasificarAjena()` no cuentan
+  como recipiente.
+- **«Incorrecta» le gana a «Incompleta»**: traer la bandeja equivocada es más grave y se arregla
+  distinto. En ese caso el faltante se agrega al final del motivo, no lo reemplaza.
+- Dos casos quedan afuera a propósito, marcados con `causa`: cuando **ninguna** foto es de la
+  bandeja y cuando la bandeja **no tiene referencia leída**. En los dos, contar recipientes es
+  ruido encima de un problema más básico.
+
+### API — `api/src/index.js`
+- `conteoReferencias()`: cuántas fotos tiene cada bandeja en el catálogo. Es **otra** consulta que
+  `referencias()` y no un `COUNT` sobre ella, porque esa se queda solo con las fotos que tienen
+  texto leído — y una foto sin texto sigue siendo un recipiente que hay que fotografiar. Cache
+  propia, invalidada en los mismos tres puntos.
+- `esperadas` sale de ahí y `subidas` del total de fotos de la entrega, **no** de las que tienen
+  texto: una foto ilegible ya ocupó su recipiente.
+- `FOTO_ENTREGA_MAX` de 6 a **12**.
+- El listado cuenta `incompletas`, y `estadoValidacion()` las ubica **después** de «Incorrecta» y
+  **antes** de «Falta validar».
+
+### Frontend — `frontend/index.html`
+- Estado nuevo en las tres pastillas y en el cartel del veredicto, con color propio —naranja, ni
+  el ámbar de la duda ni el rojo del error— e ícono 📷.
+- **`valFaltanHint()`: la cuenta se dice ANTES de validar.** En la demo el veredicto fue la
+  primera noticia de que faltaban tres recipientes; ahora la persona lo ve mientras todavía está
+  frente a la bandeja.
+- El aviso al despachar nombra las bandejas incompletas. **Avisa, no bloquea**, igual que
+  «Incorrecta»: sigue siendo la regla de la sección 8.5.
+
+### Base de datos — `database/41_ValidacionIncompleta.sql` (idempotente)
+- El `CHECK` de `Resultado` admite **«Incompleta»**. Ningún registro existente cambia.
+
 ## [Parte 15] — El calendario ordena las cirugías por hora de verdad
 
 ### El caso: la de las 8:30 salía de última (18 de setiembre)

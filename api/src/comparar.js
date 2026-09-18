@@ -234,7 +234,7 @@ function veredicto({ textosEntrega, pedida, refs, gemelas = [], color = null }) 
      Sin puntaje: no se comparo nada, y un 0 se leeria como un puntaje medido. */
   if (ajenas.length && !propias.length) {
     return { resultado: 'Incorrecta', puntaje: null, candidato: null, candidato_puntaje: null,
-      ranking: [], ajenas,
+      ranking: [], ajenas, causa: 'ajenas',
       motivo: (ajenas.length === 1
           ? 'La foto subida no es de la bandeja: parece ' + ajenas[0].etiqueta + '. '
           : 'Ninguna de las ' + ajenas.length + ' fotos es de la bandeja (' + listaAjenas() + '). ')
@@ -256,7 +256,7 @@ function veredicto({ textosEntrega, pedida, refs, gemelas = [], color = null }) 
         + 'o compare a ojo con la referencia y confirme usted.' };
   }
   if (!nombresRef.includes(pedida)) {
-    return { resultado: 'No puedo determinarlo', puntaje: null, candidato: null, candidato_puntaje: null, ranking: [], ajenas,
+    return { resultado: 'No puedo determinarlo', puntaje: null, candidato: null, candidato_puntaje: null, ranking: [], ajenas, causa: 'sin_referencia',
       motivo: 'Esta bandeja no tiene fotos de referencia leídas en el catálogo, así que no hay contra qué '
         + 'compararla. Súbalas en Mantenimiento → Bandejas.' };
   }
@@ -359,12 +359,59 @@ function veredicto({ textosEntrega, pedida, refs, gemelas = [], color = null }) 
       + '. Ninguna otra bandeja del catálogo tiene este contenido.' };
 }
 
+/* ---------------------------------------------------------------------------
+   Completitud. La bandeja va COMPLETA o no va: si el catálogo tiene cinco
+   recipientes fotografiados y la entrega trae dos, que el texto de esos dos
+   corresponda NO alcanza para decir «Correcta» —del resto no se sabe nada—.
+
+   El número esperado sale de CONTAR las fotos de referencia del catálogo. Es
+   una aproximación, y conviene tenerla presente: el catálogo no registra
+   cuántos recipientes tiene una bandeja, solo cuántas fotos se le tomaron. La
+   NUT-0001337 tiene diez, y la migración 32 dice que una bandeja tiene «de 2 a
+   9 recipientes», así que ahí al menos una foto es una tapa o un segundo
+   ángulo y el sistema va a pedir una foto de más. El día que exista un campo
+   declarado —cat.Equipo.Recipientes— se cambia de dónde sale `esperadas` y
+   nada más de esto se mueve.
+
+   Dos casos quedan afuera a propósito, por `causa`: cuando NINGUNA foto es de
+   la bandeja y cuando la bandeja no tiene referencia leída. En los dos, contar
+   recipientes es ruido encima de un problema más básico.
+
+   Y «Incorrecta» le gana a «Incompleta»: traer la bandeja equivocada y que
+   falten fotos se arreglan distinto, y lo primero es más grave.
+   --------------------------------------------------------------------------- */
+function conCompletitud(v, { esperadas = 0, subidas = 0 } = {}) {
+  if (!esperadas || v.causa === 'ajenas' || v.causa === 'sin_referencia') return v;
+
+  /* Las apartadas no cuentan como recipiente: son fotos de un documento. */
+  const utiles = Math.max(0, (subidas || 0) - (v.ajenas || []).length);
+  const faltan = esperadas - utiles;
+  if (faltan <= 0) return v;
+
+  const cuenta = 'El catálogo tiene ' + esperadas + ' fotos de referencia para esta bandeja y se '
+    + (utiles === 1 ? 'usó 1' : 'usaron ' + utiles) + ': falta' + (faltan === 1 ? '' : 'n') + ' '
+    + faltan + (faltan === 1 ? ' recipiente' : ' recipientes') + ' por fotografiar.';
+
+  if (v.resultado === 'Incorrecta') {
+    return { ...v, motivo: v.motivo + ' Además, la entrega está incompleta: ' + cuenta.charAt(0).toLowerCase()
+      + cuenta.slice(1) };
+  }
+
+  const cierre = v.resultado === 'Correcta'
+    ? ' El texto de las que sí se subieron corresponde a esta bandeja (' + (v.puntaje || 0).toFixed(3)
+      + '), pero eso no alcanza: de los recipientes que faltan no se sabe nada.'
+    : ' Con las que hay tampoco se pudo determinar si es la bandeja correcta.';
+
+  return { ...v, resultado: 'Incompleta', faltan, esperadas, usadas: utiles,
+    motivo: cuenta + cierre + ' Fotografíe los que faltan y vuelva a validar.' };
+}
+
 /* El veredicto de arriba, con la nota de las fotos apartadas pegada al final
    del motivo. Se hace aca y no en cada rama para no repetirla nueve veces, y
    porque el motivo es lo que se graba y lo que sale en el correo: si el
    puntaje se calculo ignorando dos fotos, eso tiene que quedar escrito. */
 function veredictoConNota(args) {
-  const v = veredicto(args);
+  const v = conCompletitud(veredicto(args), args);
   const a = v.ajenas || [];
   if (!a.length) return v;
   const lista = a.map((x) => 'la ' + x.indice + ' parece ' + x.etiqueta).join(', ');
