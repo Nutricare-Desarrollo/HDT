@@ -8085,7 +8085,7 @@ function valErrTexto(msg){
 
 function valFranjaError(){
   if(!VAL_ERR) return '';
-  const e=valErrTexto(VAL_ERR);
+  const e=VAL_ERR;
   return `<div class="vb-ver error" style="margin-bottom:12px"><span class="ico">⚠️</span>
       <div style="flex:1 1 auto">
         <div class="tit">${esc(e.t)}</div>
@@ -8285,6 +8285,7 @@ async function valImagen(lado, id){
    en la API al recibirla, asi que esto tarda unos segundos por foto. */
 async function valSubir(input){
   const files=Array.from(input.files||[]); if(!files.length) return;
+  VAL_ERR=null;
   const prog=document.getElementById('valProgreso');
   const libres=VAL.maximo-(VAL.fotos||[]).length;
   const lote=files.slice(0, Math.max(0, libres));
@@ -8313,7 +8314,9 @@ async function valSubir(input){
   if(sinTexto) toast(sinTexto===1
     ? 'Una foto quedó sin texto leído: no va a contar para la comparación.'
     : sinTexto+' fotos quedaron sin texto leído: no van a contar para la comparación.');
-  if(errores.length) toast('No se pudo subir — '+errores.join(' · '));
+  if(errores.length) VAL_ERR={
+    t: errores.length===1 ? 'Una foto no se subió' : errores.length+' fotos no se subieron',
+    d: '<ul style="margin:6px 0 0 18px;padding:0">'+errores.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>' };
   await valRecargar();
 }
 
@@ -8353,7 +8356,7 @@ async function valValidar(){
   try{
     await api('POST','/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion', {});
   }catch(e){
-    VAL_ERR=e.message;
+    VAL_ERR=valErrTexto(e.message);
     renderValidacion();
     const f=document.getElementById('valBody'); if(f) f.scrollIntoView({behavior:'smooth', block:'start'});
     return;

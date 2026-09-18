@@ -3416,6 +3416,18 @@ app.http('solicitud-validacion-foto-create', {
       if (c.rows[0].n >= FOTO_ENTREGA_MAX)
         return json(400, { error: 'Ya hay ' + FOTO_ENTREGA_MAX + ' fotos en esta bandeja, el máximo permitido' });
 
+      /* La MISMA imagen otra vez. Se ataja aca y no al validar porque una foto
+         repetida no es un hallazgo sobre la bandeja: es un resbalon al subir, y
+         se arregla en el momento. La comparacion es por bytes -md5 del base64-,
+         que no tiene falsos positivos. */
+      const iguales = await query(
+        `SELECT Id AS id FROM dbo.SolicitudFoto
+          WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))
+            AND md5(Contenido) = md5($3) ORDER BY Id LIMIT 1`, [id, cod, b64]);
+      if (iguales.rowCount)
+        return json(409, { error: 'Esa foto ya está subida en esta bandeja. Cada foto tiene que ser de un '
+          + 'recipiente distinto: la bandeja se valida completa, y la misma imagen dos veces cuenta una sola vez.' });
+
       /* La lectura NO puede tumbar la subida: si Azure no contesta, la foto se
          guarda con el error y la validacion dira que no pudo determinarlo. */
       let texto = null, errOcr = null;
@@ -3425,6 +3437,22 @@ app.http('solicitud-validacion-foto-create', {
       } catch (e) {
         errOcr = String(e.message || e).slice(0, 300);
         context.warn('No se pudo leer la foto de la entrega: ' + errOcr);
+      }
+
+      /* Segunda red, ya con el texto leido: otra toma del MISMO recipiente cuyo
+         OCR salio exactamente igual. Pide un minimo de texto -MIN_TEXTO_DUP-
+         porque dos fotos ilegibles leen lo mismo, que es nada, y no por eso son
+         el mismo recipiente. */
+      if (texto && comparar.normalizar(texto).length >= comparar.MIN_TEXTO_DUP) {
+        const mismoTexto = await query(
+          `SELECT Id AS id, TextoOcr AS texto FROM dbo.SolicitudFoto
+            WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))
+              AND TextoOcr IS NOT NULL ORDER BY Id`, [id, cod]);
+        const t = comparar.normalizar(texto);
+        const ya = mismoTexto.rows.find((x) => comparar.normalizar(x.texto) === t);
+        if (ya)
+          return json(409, { error: 'Esta foto lee exactamente el mismo texto que una que ya está subida, '
+            + 'así que es el mismo recipiente. Fotografíe los recipientes que faltan.' });
       }
 
       const r = await query(
@@ -3510,11 +3538,16 @@ app.http('solicitud-validacion-run', {
       const f = await query(
         `SELECT TextoOcr AS texto FROM dbo.SolicitudFoto
           WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))
-            AND TextoOcr IS NOT NULL`, [id, cod]);
+            AND TextoOcr IS NOT NULL ORDER BY Id`, [id, cod]);
+      /* Se traen TODAS -tambien las ilegibles- con su hash, porque lo que hay
+         que contar son recipientes y no fotos: cinco veces la misma imagen son
+         un recipiente. El hash se calcula en la base y no aca para no traer el
+         base64 entero de vuelta. */
       const nf = await query(
-        `SELECT COUNT(*)::int AS n FROM dbo.SolicitudFoto
-          WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2))`, [id, cod]);
-      if (!nf.rows[0].n) return json(400, { error: 'Adjunte al menos una foto de la bandeja antes de validar' });
+        `SELECT Id AS id, md5(Contenido) AS hash, TextoOcr AS texto FROM dbo.SolicitudFoto
+          WHERE SolicitudId = $1 AND UPPER(TRIM(EquipoCodigo)) = UPPER(TRIM($2)) ORDER BY Id`, [id, cod]);
+      if (!nf.rowCount) return json(400, { error: 'Adjunte al menos una foto de la bandeja antes de validar' });
+      const dist = comparar.recipientesDistintos(nf.rows);
 
       const [g, refs, nRef] = await Promise.all([
         query(SQL_GEMELAS, [cod]), referencias(context), conteoReferencias()]);
@@ -3523,11 +3556,12 @@ app.http('solicitud-validacion-run', {
         textosEntrega: f.rows.map((x) => x.texto),
         pedida,
         refs,
-        /* Completitud: la bandeja va entera o no va. `subidas` es el total de
-           fotos de la entrega y NO f.rows.length, que solo cuenta las que
-           tienen texto leido: una foto ilegible ya ocupo su recipiente. */
+        /* Completitud: la bandeja va entera o no va. `subidas` son RECIPIENTES
+           distintos, no fotos: las repetidas ya se descontaron. Incluye las
+           ilegibles, que ocupan su recipiente igual. */
         esperadas: nRef[pedida] || 0,
-        subidas: nf.rows[0].n,
+        subidas: dist.distintas,
+        repetidas: dist.repetidas.length,
         gemelas: g.rows,
         color: colorObs ? { observado: colorObs, catalogo: b.color_catalogo } : { observado: null, catalogo: b.color_catalogo }
       });

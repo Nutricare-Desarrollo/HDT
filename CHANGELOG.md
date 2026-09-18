@@ -31,7 +31,38 @@ inicial, **una** dice «Recipiente 1» y **una** dice «Tapa»; el resto está e
 > (`cat.Equipo.Recipientes`) se cambia de dónde sale `esperadas` en `conCompletitud()` y **nada
 > más de esto se mueve**.
 
+### Contar fotos no era contar recipientes
+
+Con la completitud puesta, se probó subir **cinco veces la misma imagen**: 5 = 5, y el veredicto
+dio **«Correcta»**. La cuenta se satisfacía sin haber fotografiado más que un recipiente.
+
+**Se midió antes de elegir cómo atajarlo**, porque el camino obvio —«si dos fotos se parecen
+mucho, es la misma»— resultó estar mal. Sobre las 14 carpetas de `paso0/ocr`, los 136 pares
+posibles entre fotos de una misma bandeja, con el mismo coseno de producción:
+
+| | |
+|---|---|
+| Pares de fotos **distintas** con parecido >= 0.85 | **12** |
+| De esos, los que dan exactamente **1.000** | **6** |
+| Pares con el texto **literalmente idéntico** | **1** |
+
+Los seis de 1.000 son las cajas plásticas de tornillos de la **NUT-0001330** (fotos 1, 2, 4 y 5):
+casi no traen texto impreso, así que los términos que sobreviven al filtro son los mismos en las
+cuatro. **Cualquier umbral que atrape la foto repetida colapsa esas cuatro a una** y contesta
+«Incompleta» sobre una bandeja completa. La igualdad exacta separa; el parecido no.
+
+Así que dos redes, las dos de igualdad exacta:
+
+1. **Imagen idéntica** (`md5` del contenido). Cero falsos positivos posibles.
+2. **Texto leído idéntico**, ya normalizado, con un mínimo de 40 caracteres — sin ese piso, dos
+   fotos ilegibles leen ambas vacío y se declararían el mismo recipiente.
+
+Verificado contra las 14 bandejas reales: **ninguna pierde recipientes**, y el único par
+genuinamente repetido que existe en los datos (1822, fotos 6 y 7) se detecta.
+
 ### API — `api/src/comparar.js`
+- `recipientesDistintos()`: de un conjunto de fotos, cuántos recipientes distintos hay. Es la
+  regla en un solo lugar, y la usan tanto la subida como la validación.
 - `conCompletitud()`: envuelve el veredicto de contenido y compara las fotos **útiles** de la
   entrega contra las de referencia del catálogo. Las apartadas por `clasificarAjena()` no cuentan
   como recipiente.
@@ -46,8 +77,11 @@ inicial, **una** dice «Recipiente 1» y **una** dice «Tapa»; el resto está e
   `referencias()` y no un `COUNT` sobre ella, porque esa se queda solo con las fotos que tienen
   texto leído — y una foto sin texto sigue siendo un recipiente que hay que fotografiar. Cache
   propia, invalidada en los mismos tres puntos.
-- `esperadas` sale de ahí y `subidas` del total de fotos de la entrega, **no** de las que tienen
-  texto: una foto ilegible ya ocupó su recipiente.
+- `esperadas` sale de ahí y `subidas` son **recipientes distintos**, no fotos: las repetidas ya se
+  descontaron. Incluye las ilegibles, que ocupan su recipiente igual.
+- **La subida rechaza la foto repetida** (`409`), antes de guardarla. Se ataja ahí y no al validar
+  porque una foto repetida no es un hallazgo sobre la bandeja: es un resbalón al subir, y se
+  arregla en el momento. El veredicto igual descuenta las que ya estuvieran guardadas de antes.
 - `FOTO_ENTREGA_MAX` de 6 a **12**.
 - El listado cuenta `incompletas`, y `estadoValidacion()` las ubica **después** de «Incorrecta» y
   **antes** de «Falta validar».
@@ -55,6 +89,7 @@ inicial, **una** dice «Recipiente 1» y **una** dice «Tapa»; el resto está e
 ### Frontend — `frontend/index.html`
 - Estado nuevo en las tres pastillas y en el cartel del veredicto, con color propio —naranja, ni
   el ámbar de la duda ni el rojo del error— e ícono 📷.
+- Los rechazos al subir también van al panel, con la lista de qué foto no entró y por qué.
 - **`valFaltanHint()`: la cuenta se dice ANTES de validar.** En la demo el veredicto fue la
   primera noticia de que faltaban tres recipientes; ahora la persona lo ve mientras todavía está
   frente a la bandeja.

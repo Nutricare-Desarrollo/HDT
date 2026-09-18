@@ -360,6 +360,63 @@ function veredicto({ textosEntrega, pedida, refs, gemelas = [], color = null }) 
 }
 
 /* ---------------------------------------------------------------------------
+   Recipientes DISTINTOS dentro de un conjunto de fotos.
+
+   Contar fotos no alcanza: cinco veces la misma foto son cinco fotos y un solo
+   recipiente. Hacen falta dos redes, y las dos son de IGUALDAD EXACTA a
+   proposito. Ninguna es de parecido.
+
+   POR QUE NO UN UMBRAL DE PARECIDO. Se midieron los 136 pares posibles entre
+   fotos de una misma bandeja sobre las 14 carpetas de paso0/ocr, con este
+   mismo coseno: DOCE pares de fotos DISTINTAS puntean 0.85 o mas, y SEIS dan
+   exactamente 1.000. Son las cajas plasticas de tornillos de la NUT-0001330
+   -fotos 1, 2, 4 y 5-, que casi no traen texto impreso, asi que los terminos
+   que sobreviven al filtro son los mismos en las cuatro. Cualquier umbral que
+   atrape la foto repetida colapsa esas cuatro a una y contesta «Incompleta»
+   sobre una bandeja COMPLETA. Del otro lado, en esos mismos 136 pares hay UNO
+   solo con el texto literalmente igual. La igualdad exacta separa; el parecido
+   no.
+
+     1. Imagen identica -mismo hash del contenido-. Cero falsos posibles: los
+        bytes iguales son iguales. Atrapa volver a subir el mismo archivo.
+     2. Texto leido identico, ya normalizado. Atrapa dos tomas del mismo
+        recipiente cuando el OCR salio igual.
+
+   La red 2 exige un minimo de texto: dos fotos ilegibles leen '' las dos, y
+   sin ese piso se declararian la misma cosa. Una foto sin texto suficiente
+   nunca se marca como repetida —se prefiere contarla de mas que de menos—.
+
+   `fotos` es [{ id, hash, texto }]. Devuelve el numero de recipientes
+   distintos y cuales se consideraron repetidas, con su motivo y de cual.
+   --------------------------------------------------------------------------- */
+const MIN_TEXTO_DUP = 40;
+
+function recipientesDistintos(fotos) {
+  const lista = fotos || [];
+  const porImagen = new Map(), porTexto = new Map();
+  const repetidas = [];
+  let distintas = 0;
+
+  for (const f of lista) {
+    const hash = String(f.hash || '');
+    const txt = normalizar(f.texto);
+    const conTexto = txt.length >= MIN_TEXTO_DUP;
+
+    const yaImagen = hash && porImagen.has(hash) ? porImagen.get(hash) : null;
+    const yaTexto = conTexto && porTexto.has(txt) ? porTexto.get(txt) : null;
+
+    if (yaImagen || yaTexto) {
+      repetidas.push({ id: f.id, de: yaImagen || yaTexto, por: yaImagen ? 'imagen' : 'texto' });
+      continue;
+    }
+    if (hash) porImagen.set(hash, f.id);
+    if (conTexto) porTexto.set(txt, f.id);
+    distintas++;
+  }
+  return { distintas, repetidas };
+}
+
+/* ---------------------------------------------------------------------------
    Completitud. La bandeja va COMPLETA o no va: si el catálogo tiene cinco
    recipientes fotografiados y la entrega trae dos, que el texto de esos dos
    corresponda NO alcanza para decir «Correcta» —del resto no se sabe nada—.
@@ -380,7 +437,7 @@ function veredicto({ textosEntrega, pedida, refs, gemelas = [], color = null }) 
    Y «Incorrecta» le gana a «Incompleta»: traer la bandeja equivocada y que
    falten fotos se arreglan distinto, y lo primero es más grave.
    --------------------------------------------------------------------------- */
-function conCompletitud(v, { esperadas = 0, subidas = 0 } = {}) {
+function conCompletitud(v, { esperadas = 0, subidas = 0, repetidas = 0 } = {}) {
   if (!esperadas || v.causa === 'ajenas' || v.causa === 'sin_referencia') return v;
 
   /* Las apartadas no cuentan como recipiente: son fotos de un documento. */
@@ -390,7 +447,9 @@ function conCompletitud(v, { esperadas = 0, subidas = 0 } = {}) {
 
   const cuenta = 'El catálogo tiene ' + esperadas + ' fotos de referencia para esta bandeja y se '
     + (utiles === 1 ? 'usó 1' : 'usaron ' + utiles) + ': falta' + (faltan === 1 ? '' : 'n') + ' '
-    + faltan + (faltan === 1 ? ' recipiente' : ' recipientes') + ' por fotografiar.';
+    + faltan + (faltan === 1 ? ' recipiente' : ' recipientes') + ' por fotografiar.'
+    + (repetidas ? ' ' + (repetidas === 1 ? 'Una foto repetida no se contó' : repetidas + ' fotos repetidas no se contaron')
+        + ': la misma imagen, o el mismo texto leído, es un solo recipiente.' : '');
 
   if (v.resultado === 'Incorrecta') {
     return { ...v, motivo: v.motivo + ' Además, la entrega está incompleta: ' + cuenta.charAt(0).toLowerCase()
@@ -402,7 +461,7 @@ function conCompletitud(v, { esperadas = 0, subidas = 0 } = {}) {
       + '), pero eso no alcanza: de los recipientes que faltan no se sabe nada.'
     : ' Con las que hay tampoco se pudo determinar si es la bandeja correcta.';
 
-  return { ...v, resultado: 'Incompleta', faltan, esperadas, usadas: utiles,
+  return { ...v, resultado: 'Incompleta', faltan, esperadas, usadas: utiles, repetidas,
     motivo: cuenta + cierre + ' Fotografíe los que faltan y vuelva a validar.' };
 }
 
@@ -494,6 +553,7 @@ function parear(refs, entrega) {
 }
 
 module.exports = { veredicto: veredictoConNota, veredictoCrudo: veredicto,
+                   recipientesDistintos, MIN_TEXTO_DUP,
                    clasificarAjena, parear, terminos, terminosDeVarias, normalizar,
                    construirIdf, vector, coseno, HUELLAS,
                    PESO_DISC, MIN_TERMINOS, MIN_PUNTAJE, MIN_MARGEN, MARGEN_CONTRA,
