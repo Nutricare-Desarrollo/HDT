@@ -60,6 +60,14 @@ inicial, **una** dice «Recipiente 1» y **una** dice «Tapa»; el resto está e
   frente a la bandeja.
 - El aviso al despachar nombra las bandejas incompletas. **Avisa, no bloquea**, igual que
   «Incorrecta»: sigue siendo la regla de la sección 8.5.
+- **Los errores de «Validar bandeja» pasan del toast al panel.** Un toast se va solo a los pocos
+  segundos y deja la pantalla mostrando el veredicto anterior, que ya no es cierto — que fue
+  exactamente lo que se vio al desplegar sin correr la migración. El cartel se pinta arriba del
+  veredicto, en gris pizarra y **no** en el rojo de «Incorrecta»: ocupan el mismo lugar, y un
+  fallo del sistema no puede leerse como un dictamen sobre la bandeja.
+- `valErrTexto()` traduce el único error conocido: si el `CHECK` rechaza «Incompleta», el cartel
+  dice que falta correr la migración 41 y qué hacer mientras tanto, en vez de mostrar el mensaje
+  crudo de Postgres.
 
 ### Base de datos — `database/41_ValidacionIncompleta.sql` (idempotente)
 - El `CHECK` de `Resultado` admite **«Incompleta»**. Ningún registro existente cambia.

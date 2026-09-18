@@ -453,6 +453,10 @@ input:disabled,select:disabled,textarea:disabled{background:#f4f7f9;color:#5c6e7
 .vb-ver.viejo{background:#f2f5f8;border-color:#c8d4de;border-left-color:var(--muted)}
 .vb-ver.falta{background:#fff3e9;border-color:#f5c9a3;border-left-color:#d1741f}
 .vb-ver.falta .tit{color:#9a4a10}
+.vb-ver.error{background:#f4f6f8;border-color:#cbd5dd;border-left-color:#5b6b7a}
+.vb-ver.error .tit{color:#33414e}
+.vb-ver.error .cerrar{margin-left:auto;flex:0 0 auto;background:none;border:0;cursor:pointer;
+  font-size:18px;line-height:1;color:var(--muted);padding:0 2px}
 .vb-ver.no{background:#fdeeec;border-color:#f0bdb6;border-left-color:var(--danger)}
 .vb-ver.no .tit{color:#96271b}
 .vb-acc{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
@@ -7982,6 +7986,11 @@ function renderValidacion(){
   const sinRef=!(VAL.referencia_leidas>0);
   let h='';
 
+  /* 0. Si el ultimo intento de validar fallo, se dice ACA y no en un toast: el
+        toast se va solo a los pocos segundos y deja el panel mostrando el
+        veredicto anterior, que ya no es cierto. */
+  h+=valFranjaError();
+
   /* 1. El veredicto, arriba del todo: despues de tocar «Validar» es lo que la
         persona vino a leer, y no puede quedar debajo de la galeria. */
   h+=valFranjaVeredicto();
@@ -8054,6 +8063,38 @@ function renderValidacion(){
 /* La franja del veredicto. Dice quién lo dijo, con qué puntaje, y —cuando el
    sistema encontró otra bandeja que se parece más— cuál es esa otra: sin ese
    dato «Incorrecta» deja a Bodega sin nada que hacer. */
+/* El ultimo error de «Validar bandeja». Vive aparte de VAL porque valRecargar()
+   reemplaza VAL entero. */
+let VAL_ERR=null;
+function valCerrarError(){ VAL_ERR=null; renderValidacion(); }
+
+/* Traduce lo que contesta el servidor a algo que se pueda accionar. Hoy hay un
+   solo caso conocido y vale la pena: el CHECK de Resultado rechaza «Incompleta»
+   mientras no se corra la migracion 41, y el mensaje crudo de Postgres no le
+   dice nada a Bodega. */
+function valErrTexto(msg){
+  const m=String(msg||'');
+  if(/ck_solicitudverificacion_resultado/i.test(m))
+    return { t:'Falta correr una migración en la base',
+      d:'La comparación llegó a un resultado que la base todavía no acepta —«Incompleta»—, así que '
+       +'no se pudo guardar. Hay que correr <b>database/41_ValidacionIncompleta.sql</b>. '
+       +'Mientras tanto esta bandeja no se valida sola: compare las fotos con «Comparar y decidir» '
+       +'y confirme usted.' };
+  return { t:'No se pudo validar', d:esc(m) };
+}
+
+function valFranjaError(){
+  if(!VAL_ERR) return '';
+  const e=valErrTexto(VAL_ERR);
+  return `<div class="vb-ver error" style="margin-bottom:12px"><span class="ico">⚠️</span>
+      <div style="flex:1 1 auto">
+        <div class="tit">${esc(e.t)}</div>
+        <div class="txt">${e.d}</div>
+      </div>
+      <button class="cerrar" onclick="valCerrarError()" title="Cerrar este aviso">✕</button>
+    </div>`;
+}
+
 function valFranjaVeredicto(){
   const v=VAL.veredicto;
   if(!v){
@@ -8307,12 +8348,14 @@ function valEliminarMarcadas(){
 
 async function valValidar(){
   if(!VAL || valSoloLectura()) return;
+  VAL_ERR=null;
   const btn=document.getElementById('valBtn'); if(btn){ btn.disabled=true; btn.textContent='Comparando…'; }
   try{
     await api('POST','/solicitudes/'+VAL.solicitud.id+'/bandejas/'+encodeURIComponent(VAL.bandeja.equipo_codigo)+'/validacion', {});
   }catch(e){
-    toast('No se pudo validar: '+e.message);
-    if(btn){ btn.disabled=false; btn.textContent='🔎 Validar bandeja'; }
+    VAL_ERR=e.message;
+    renderValidacion();
+    const f=document.getElementById('valBody'); if(f) f.scrollIntoView({behavior:'smooth', block:'start'});
     return;
   }
   await valRecargar();
